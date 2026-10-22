@@ -71,8 +71,8 @@ implement every checkbox in numeric order.
 - **Sync:** the schema is sync-ready from v1 (UUIDs, modified timestamps, tombstones) so M4 can add it without a
   migration of meaning. No sync ships before M4 and nothing in M1–M3 may depend on one.
 - **Security:** scripts run in a sandboxed runtime with no filesystem, network or process access except through
-  the host API, which asks for confirmation the first time an action uses the shell or writes outside the Petrel
-  folder. Secrets (API keys an action needs) live in the OS keyring via `Credential`, never in action JSON or SQLite.
+  the host API. Actions not written in Petrel's own editor (imported, or changed on disk) confirm their shell
+  commands and out-of-scope paths once, then are trusted until they change. Secrets (API keys an action needs) live in the OS keyring via `Credential`, never in action JSON or SQLite.
   Rendered Markdown preview is sandboxed like Tern's mail HTML (no scripts, no remote content by default).
 - **Reliability:** text loss, a migration that cannot open an older database, an action that modifies a draft after
   failing, or an import that silently drops steps are release blockers, never "cut first".
