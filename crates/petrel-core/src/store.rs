@@ -893,6 +893,7 @@ mod tests {
         let n: i64 =
             copy.query_row("SELECT COUNT(*) FROM drafts WHERE title = 'Keep me'", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 1);
+        drop(copy); // or Windows keeps this backup alive and the prune can't remove it
         for _ in 0..BACKUPS_KEPT + 2 {
             std::thread::sleep(std::time::Duration::from_millis(1050));
             s.backup_before_migrate(1).unwrap();
