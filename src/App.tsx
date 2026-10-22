@@ -75,7 +75,7 @@ export default function App() {
     const a = await api;
     await a.showWindow();
     setInfo(await a.appInfo());
-    const page = await a.listDrafts("inbox", null, 1);
+    const page = await a.listDrafts({ limit: 1 });
     setCount(page.rows.length ? null : 0);
     window.addEventListener("blur", flushNow);
     window.addEventListener("beforeunload", flushNow);
