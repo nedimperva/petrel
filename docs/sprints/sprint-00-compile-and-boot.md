@@ -1,6 +1,6 @@
 # Sprint 0 — Compile and boot
 
-**Status:** in progress · started 2026-10-22
+**Status:** review · PR #1 · started 2026-10-22
 
 ## Delivery scope
 
