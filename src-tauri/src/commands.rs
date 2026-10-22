@@ -87,6 +87,11 @@ pub fn flag_drafts(state: State<AppState>, ids: Vec<i64>, flagged: bool) -> R<Un
 }
 
 #[tauri::command]
+pub fn add_tags(state: State<AppState>, ids: Vec<i64>, tags: Vec<String>) -> R<UndoToken> {
+    with(&state, |s| s.add_tags(&ids, &tags))
+}
+
+#[tauri::command]
 pub fn undo(state: State<AppState>, token: String) -> R<usize> {
     with(&state, |s| s.undo(&token))
 }

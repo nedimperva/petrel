@@ -119,6 +119,7 @@ fn main() {
             commands::merge_tags,
             commands::move_drafts,
             commands::flag_drafts,
+            commands::add_tags,
             commands::undo,
             commands::empty_trash,
             commands::sweep,

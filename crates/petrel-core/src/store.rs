@@ -354,13 +354,18 @@ pub struct UndoToken {
 /// What a batch changed, so undo can put it back.
 struct UndoBatch {
     token: String,
-    /// `"folder"` or `"flagged"`; a compile-time name, never user input.
-    column: &'static str,
     /// The `modified_at` the batch wrote. Undo restores the old `modified_at` only where this is still the
     /// value, so a draft edited after the batch keeps its newer time.
     at: i64,
+    change: Change,
+}
+
+enum Change {
+    /// `column` is `"folder"` or `"flagged"`, a compile-time name, never user input. Rows are
     /// `(id, old value, old modified_at)`.
-    rows: Vec<(i64, i64, i64)>,
+    Column { column: &'static str, rows: Vec<(i64, i64, i64)> },
+    /// `(id, old tag ids, old modified_at)`.
+    Tags { rows: Vec<(i64, Vec<i64>, i64)> },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -647,12 +652,65 @@ impl Store {
             params![id_array(ids), value, now],
         )?;
         tx.commit()?;
-        let token = UndoToken { token: uuid::Uuid::new_v4().to_string(), count: rows.len() };
-        self.undo.push_back(UndoBatch { token: token.token.clone(), column, at: now, rows });
+        let count = rows.len();
+        Ok(self.remember(now, count, Change::Column { column, rows }))
+    }
+
+    /// Adds tags to drafts, keeping the tags they have. Drafts that already carry all of them are left alone.
+    pub fn add_tags(&mut self, ids: &[i64], names: &[String]) -> Result<UndoToken> {
+        let mut clean: Vec<String> = names.iter().map(|n| tag_name(n)).filter(|n| !n.is_empty()).collect();
+        clean.sort();
+        clean.dedup();
+        let now = self.now();
+        let tx = self.conn.transaction()?;
+        let mut rows = Vec::new();
+        {
+            let mut make =
+                tx.prepare("INSERT INTO tags (uuid, name) VALUES (?1, ?2) ON CONFLICT(name) DO NOTHING")?;
+            let mut tag_ids = Vec::new();
+            for name in &clean {
+                make.execute(params![uuid::Uuid::new_v4().to_string(), name])?;
+                tag_ids.push(tx.query_row("SELECT id FROM tags WHERE name = ?1", params![name], |r| {
+                    r.get::<_, i64>(0)
+                })?);
+            }
+            let mut current = tx.prepare(
+                "SELECT d.modified_at, (SELECT group_concat(tag_id) FROM draft_tags WHERE draft_id = d.id) \
+                 FROM drafts d WHERE d.id = ?1 AND d.deleted_at IS NULL",
+            )?;
+            let mut link =
+                tx.prepare("INSERT OR IGNORE INTO draft_tags (draft_id, tag_id) VALUES (?1, ?2)")?;
+            let mut touch = tx.prepare("UPDATE drafts SET modified_at = ?2 WHERE id = ?1")?;
+            for &id in ids {
+                let Some((modified, have)): Option<(i64, Option<String>)> =
+                    current.query_row(params![id], |r| Ok((r.get(0)?, r.get(1)?))).optional()?
+                else {
+                    continue;
+                };
+                let have: Vec<i64> =
+                    have.unwrap_or_default().split(',').filter_map(|t| t.parse().ok()).collect();
+                if tag_ids.iter().all(|t| have.contains(t)) {
+                    continue;
+                }
+                for t in &tag_ids {
+                    link.execute(params![id, t])?;
+                }
+                touch.execute(params![id, now])?;
+                rows.push((id, have, modified));
+            }
+        }
+        tx.commit()?;
+        let count = rows.len();
+        Ok(self.remember(now, count, Change::Tags { rows }))
+    }
+
+    fn remember(&mut self, at: i64, count: usize, change: Change) -> UndoToken {
+        let token = UndoToken { token: uuid::Uuid::new_v4().to_string(), count };
+        self.undo.push_back(UndoBatch { token: token.token.clone(), at, change });
         while self.undo.len() > UNDO_KEPT {
             self.undo.pop_front();
         }
-        Ok(token)
+        token
     }
 
     /// Puts a batch back. Returns how many drafts changed. A token works once; an unknown one (too old, already
@@ -664,15 +722,38 @@ impl Store {
         let batch = self.undo.remove(pos).expect("position is in range");
         let tx = self.conn.transaction()?;
         let mut n = 0;
-        {
-            let mut stmt = tx.prepare(&format!(
-                "UPDATE drafts SET {} = ?2, \
-                 modified_at = CASE WHEN modified_at = ?4 THEN ?3 ELSE modified_at END \
-                 WHERE id = ?1 AND deleted_at IS NULL",
-                batch.column
-            ))?;
-            for (id, old, modified) in &batch.rows {
-                n += stmt.execute(params![id, old, modified, batch.at])?;
+        let restore_time =
+            "UPDATE drafts SET modified_at = CASE WHEN modified_at = ?3 THEN ?2 ELSE modified_at END \
+                            WHERE id = ?1 AND deleted_at IS NULL";
+        match &batch.change {
+            Change::Column { column, rows } => {
+                let mut stmt = tx.prepare(&format!(
+                    "UPDATE drafts SET {column} = ?2, \
+                     modified_at = CASE WHEN modified_at = ?4 THEN ?3 ELSE modified_at END \
+                     WHERE id = ?1 AND deleted_at IS NULL"
+                ))?;
+                for (id, old, modified) in rows {
+                    n += stmt.execute(params![id, old, modified, batch.at])?;
+                }
+            }
+            Change::Tags { rows } => {
+                let mut clear = tx.prepare("DELETE FROM draft_tags WHERE draft_id = ?1")?;
+                // A tag removed by `sweep()` since the batch stays gone; the rest come back.
+                let mut link = tx.prepare(
+                    "INSERT OR IGNORE INTO draft_tags (draft_id, tag_id) SELECT ?1, id FROM tags WHERE id = ?2",
+                )?;
+                let mut time = tx.prepare(restore_time)?;
+                for (id, old, modified) in rows {
+                    let changed = time.execute(params![id, modified, batch.at])?;
+                    if changed == 0 {
+                        continue; // tombstoned since
+                    }
+                    clear.execute(params![id])?;
+                    for t in old {
+                        link.execute(params![id, t])?;
+                    }
+                    n += 1;
+                }
             }
         }
         tx.commit()?;
@@ -1676,6 +1757,23 @@ mod tests {
         assert!(!after.flagged);
         assert_eq!(after.modified_at, edited, "an edit after the batch keeps its time");
         assert!(s.undo("not-a-token").is_err());
+    }
+
+    #[test]
+    fn add_tags_keeps_existing_tags_and_undoes() {
+        let (mut s, _) = ticking_store();
+        let a = s.new_draft("a").unwrap();
+        let b = s.new_draft("b").unwrap();
+        s.set_tags(a.id, &["work".into()]).unwrap();
+        s.set_tags(b.id, &["home".into(), "idea".into()]).unwrap();
+        let b_time = s.draft(b.id).unwrap().modified_at;
+        let tok = s.add_tags(&[a.id, b.id, 9999], &["Idea".into(), " ".into()]).unwrap();
+        assert_eq!(tok.count, 1, "b already had it; 9999 does not exist");
+        assert_eq!(s.draft(a.id).unwrap().tags, vec!["idea", "work"]);
+        assert_eq!(s.draft(b.id).unwrap().modified_at, b_time, "untouched");
+        assert_eq!(s.undo(&tok.token).unwrap(), 1);
+        assert_eq!(s.draft(a.id).unwrap().tags, vec!["work"]);
+        assert_eq!(s.draft(b.id).unwrap().tags, vec!["home", "idea"]);
     }
 
     #[test]
