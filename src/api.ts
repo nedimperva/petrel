@@ -105,6 +105,8 @@ export interface Api {
   mergeTags(from: string[], into: string): Promise<number>;
   moveDrafts(ids: number[], folder: Folder): Promise<UndoToken>;
   flagDrafts(ids: number[], flagged: boolean): Promise<UndoToken>;
+  /** Adds tags, keeping the ones each draft has. */
+  addTags(ids: number[], tags: string[]): Promise<UndoToken>;
   /** Rejects when the token is unknown (too old, used, or from before a restart). */
   undo(token: string): Promise<number>;
   /** No undo. */
@@ -131,6 +133,7 @@ async function tauriApi(): Promise<Api> {
     mergeTags: (from, into) => invoke("merge_tags", { from, into }),
     moveDrafts: (ids, folder) => invoke("move_drafts", { ids, folder }),
     flagDrafts: (ids, flagged) => invoke("flag_drafts", { ids, flagged }),
+    addTags: (ids, tags) => invoke("add_tags", { ids, tags }),
     undo: (token) => invoke("undo", { token }),
     emptyTrash: () => invoke("empty_trash"),
     sweep: () => invoke("sweep"),
@@ -175,6 +178,16 @@ function fakeApi(): Api {
     return d;
   };
   seed.forEach(make);
+  // Enough drafts to scroll, page, filter and tag in the list.
+  const topics = ["meeting", "garden", "travel", "recipe", "release", "journal"];
+  for (let i = 1; i <= 40; i++) {
+    const topic = topics[i % topics.length];
+    const d = make(`${topic[0].toUpperCase()}${topic.slice(1)} note ${i}\n\nSome words about ${topic} and milk ${i}.`);
+    d.tags = i % 3 === 0 ? ["work"] : i % 5 === 0 ? ["home", "idea"] : [];
+    d.flagged = i % 7 === 0;
+    d.folder = i % 9 === 0 ? "archive" : "inbox";
+    d.createdAt = d.modifiedAt = d.accessedAt = Date.now() - i * 3_600_000;
+  }
   const summary = (d: Draft): DraftSummary => ({
     id: d.id,
     uuid: d.uuid,
@@ -270,6 +283,21 @@ function fakeApi(): Api {
     mergeTags: async (from, into) => mergeTags(from, into),
     moveDrafts: async (ids, folder) => batch(ids, "folder", folder),
     flagDrafts: async (ids, flagged) => batch(ids, "flagged", flagged),
+    addTags: async (ids, tags) => {
+      const clean = tags.map((t) => t.trim().toLowerCase()).filter(Boolean);
+      const changed = ids
+        .map((id) => drafts.get(id))
+        .filter((d): d is Draft => !!d && clean.some((t) => !d.tags.includes(t)));
+      const before = changed.map((d) => [d, d.tags, d.modifiedAt] as const);
+      const t = now();
+      changed.forEach((d) => Object.assign(d, { tags: [...new Set([...d.tags, ...clean])].sort(), modifiedAt: t }));
+      const token = crypto.randomUUID();
+      undos.set(token, () => {
+        before.forEach(([d, tags, modified]) => Object.assign(d, { tags, modifiedAt: modified }));
+        return before.length;
+      });
+      return { token, count: changed.length };
+    },
     undo: async (token) => {
       const restore = undos.get(token);
       if (!restore) throw new Error("nothing to undo: that change is too old or was already undone");
