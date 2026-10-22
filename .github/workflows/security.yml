@@ -36,7 +36,9 @@ jobs:
       - name: npm audit
         run: npm audit --omit=dev --audit-level=moderate
 
+  # Code scanning needs GitHub Advanced Security while the repository is private; it runs once Petrel is public.
   codeql:
+    if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-24.04
     permissions:
       contents: read

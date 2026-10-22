@@ -102,6 +102,11 @@ Measured 2026-10-22 in the agent's sandbox (4 vCPU, Ubuntu 24.04, release build,
   the shell pass locally; the Tauri build and the kill test run in CI and on the owner's machines respectively.
 - 2026-10-22 — Tauri's `tauri icon` also emits Android/iOS sets; they are deleted (mobile is not a target).
 
+- 2026-10-22 — **Windows CI found two things Linux hides.** `remove_dir_all` fails while a `Store` is alive
+  (Windows will not delete an open file), and deleting a just-written backup can hit a sharing violation (the
+  indexer or Defender has it) — the prune now retries five times with backoff. CodeQL needs Advanced Security on a
+  private repository; the job is skipped until Petrel is public.
+
 ## Log
 
 - 2026-10-22 — Skeleton built: workspace, core with schema v1 + migrations + backup, 21 tests, `gen_store`,
@@ -109,3 +114,5 @@ Measured 2026-10-22 in the agent's sandbox (4 vCPU, Ubuntu 24.04, release build,
   commands, single instance, logging; CI workflows; runtime spike measured (QuickJS vs Boa). Search needed a
   redesign to meet its target (Decisions). Clippy `-D warnings` and fmt clean on the whole workspace. Open: owner's
   Hyprland boot, Windows smoke, kill test, runtime decision.
+- 2026-10-22 — First CI run: Linux green; Windows failed two tests (file handles, Decisions); CodeQL cannot run on a
+  private repo. All three fixed; pushed for a second run.

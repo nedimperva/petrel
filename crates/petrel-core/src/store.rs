@@ -368,7 +368,7 @@ impl Store {
             .collect();
         backups.sort();
         for old in backups.iter().rev().skip(BACKUPS_KEPT) {
-            let _ = std::fs::remove_file(old);
+            remove_with_retry(old);
         }
         Ok(Some(target))
     }
@@ -735,6 +735,19 @@ pub struct SweepReport {
     pub tags_removed: usize,
 }
 
+/// Deletes a file, retrying briefly: on Windows a file just written can be held for a moment by the indexer
+/// or the antivirus, and a backup that cannot be pruned today is only clutter, not an error.
+fn remove_with_retry(path: &Path) {
+    for attempt in 0..5 {
+        match std::fs::remove_file(path) {
+            Ok(()) => return,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
+            Err(_) if attempt < 4 => std::thread::sleep(std::time::Duration::from_millis(50 << attempt)),
+            Err(_) => {}
+        }
+    }
+}
+
 fn summary(r: &Row) -> rusqlite::Result<DraftSummary> {
     Ok(DraftSummary {
         id: r.get(0)?,
@@ -852,6 +865,7 @@ mod tests {
         let s = Store::open(&path).unwrap();
         assert_eq!(s.draft(id).unwrap().title, "Hello");
         assert!(!dir.join("backups").exists(), "no migration ran, so no backup");
+        drop(s); // Windows will not delete an open database
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -887,6 +901,7 @@ mod tests {
             std::fs::read_dir(dir.join("backups")).unwrap().map(|e| e.unwrap().file_name()).collect();
         assert_eq!(files.len(), BACKUPS_KEPT, "{files:?}");
         assert!(files.iter().all(|f| f.to_string_lossy().ends_with(".db")), "one file per backup: {files:?}");
+        drop(s);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
