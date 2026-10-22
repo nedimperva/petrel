@@ -1,6 +1,6 @@
 # Sprint 2 — Editor and capture
 
-**Status:** not started
+**Status:** in progress · started 2026-10-22 (editor keys on PR #2)
 
 ## Delivery scope
 
@@ -20,8 +20,10 @@ type is kept, and the first line is the title. Everything else stays out of the 
 ### Editor (M1)
 - [ ] CodeMirror 6 setup in `src/editor/`: Markdown (GFM tables, task lists, strikethrough), soft wrap, bracket
       matching off, history, search (`Ctrl F`), spell check through the webview's native checker (setting).
-- [ ] Editing commands: move line up/down (`Alt ↑/↓`), duplicate line, toggle `- [ ]` (`Ctrl Shift X`), toggle
+- [x] Editing commands: move line up/down (`Alt ↑/↓`), duplicate line, toggle `- [ ]` (`Ctrl Shift X`), toggle
       list, continue lists on Enter, indent/outdent lists with `Tab`, insert link (`Ctrl Shift K`), bold/italic.
+      `src/editor/commands.ts`; toggle list is `Ctrl Shift 8`, duplicate line is CodeMirror's `Shift Alt ↓`; `Ctrl F`
+      search came with it (`@codemirror/search`). Tried headless in `npm run dev`.
 - [ ] Cursor and selection persistence per draft (`cursor` column; selection in UI state only).
 - [ ] Font family/size settings; monospace option; measure `--editor-max`.
 - [ ] Focus mode (`Ctrl Shift D`) and typewriter scrolling (setting).
@@ -29,6 +31,7 @@ type is kept, and the first line is the title. Everything else stays out of the 
 
 ### Open-to-new-draft (M1)
 - [ ] Setting: always / after N minutes away (default 10) / never. "Away" = window hidden or unfocused.
+      The 10-minute behaviour is in (`NEW_AFTER_AWAY_MS` in `App.tsx`); the setting and its UI are not.
 - [ ] An empty untouched new draft is **not** saved as a row; the row is created on the first keystroke. Closing
       with an empty new draft leaves nothing behind. Test in the store (no empty rows after N open/close cycles).
 - [ ] `Ctrl N` saves the current draft (flushes autosave) then creates the new one; the previous draft stays in Inbox.
@@ -40,8 +43,10 @@ type is kept, and the first line is the title. Everything else stays out of the 
 - [ ] Hyprland float rule and Windows behaviour documented in the README.
 
 ### Tags, flag, folder from the editor (M1)
-- [ ] `Ctrl T` chip input with autocomplete from `tags`; `Ctrl Shift F` flag; `Ctrl E` archive (opens the next draft
+- [x] `Ctrl T` chip input with autocomplete from `tags`; `Ctrl Shift F` flag; `Ctrl E` archive (opens the next draft
       in the current list or a new draft, setting); `Ctrl #` trash with a 5 s undo toast.
+      A comma-separated input with a datalist rather than chips; archive/trash open a new draft (no setting yet);
+      Undo in the toast (or `z` in the list) reopens the draft. Tried headless in `npm run dev`.
 
 ### Syntaxes (M2)
 - [ ] Plain text, Simple List (`- `/`* `/`1. ` recognition, checkbox toggling), TaskPaper (projects, tasks,
@@ -64,3 +69,6 @@ type is kept, and the first line is the title. Everything else stays out of the 
 ## Decisions
 
 ## Log
+
+- 2026-10-22 — Editor keys and open-to-new after 10 minutes away, on PR #2 with the package 05 list panel. Tried
+  headless against the fake store only.

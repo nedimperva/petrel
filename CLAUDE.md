@@ -21,6 +21,10 @@ and keys; this file covers state and decisions that aren't visible from the code
   filter in `list` is the newest 2,000 matches; filters on ≤ 2,000 drafts become `rarray` id sets. Open owner
   questions in package 01 Decisions: two broad tags (1.5 ms), tag counts (31 ms at 50k), move/flag bumping
   `modified_at`.
+- **The list panel and editor keys are on the same PR** (packages 05 and 02, partial): `src/list/DraftList.tsx`
+  (`Ctrl L`; tabs, chips, `/` search, `j k Enter x e # f t z`, `Del` empties Trash), `src/editor/commands.ts`,
+  `Ctrl E`/`Ctrl #`/`Ctrl Shift F`/`Ctrl T` on the open draft, a new draft after 10 minutes away. Tried only
+  headless against the fake store.
 - **rquickjs is the scripting runtime** (owner decision 2026-10-22, package 03 Decisions); `bindgen` feature off.
   Newest-first search is accepted for M1; relevance ranking is a package 05 (M2) task.
   The spike is a standalone crate under `crates/petrel-core/examples/runtime_spike/`, not a workspace member.

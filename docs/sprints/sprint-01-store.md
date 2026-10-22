@@ -107,7 +107,8 @@ adds.
 - 2026-10-22 — **Two broad tags together are the one list shape over 1 ms** (1.5 ms at 50k when both tags are on
   12 % of drafts: ~3,000 rows walked for a page). Intersecting the two index ranges first measured worse end to end
   (2.2 ms). The bench allows 2 ms for this row. At the owner's library size (a few thousand drafts) it is far under
-  1 ms. **Owner:** accept, or ask for a per-tag count table (see the next item) to choose a cheaper plan.
+  1 ms. Accepted as the default while the owner is away (2026-10-22); a per-tag count table (next item) is the fix
+  if it ever matters.
 - 2026-10-22 — **`tag_counts` is a GROUP BY, 31 ms at 50k** (1–2 ms at 2,000 drafts). Five query shapes were
   measured (24–63 ms); the cheapest drives from the folder index. It is called once per list change, off the typing
   path, as data-model.md planned. A trigger-maintained `tag_counts (tag_id, folder, n)` table would make it
@@ -116,8 +117,8 @@ adds.
   column the batch changed, and puts `modified_at` back only where it is still the batch's own time, so an edit
   made after the batch keeps its time. Drafts already in the target state are not touched and not counted.
 - 2026-10-22 — **Moving and flagging change `modified_at`**, as data-model.md says ("content or metadata"). In the
-  default modified sort an archived or flagged draft therefore jumps to the top of its new list. **Owner:** keep, or
-  make folder/flag changes leave `modified_at` alone (trash age would then need its own `trashed_at`, a v3 column).
+  default modified sort an archived or flagged draft therefore jumps to the top of its new list. Kept for now (owner
+  away; coordinator relayed "take the defaults", 2026-10-22); the alternative needs a v3 `trashed_at` column.
 - 2026-10-22 — **Renaming or merging a tag leaves `modified_at` alone**, so a rename does not reshuffle the list.
   Rename keeps the tag's UUID; a merge keeps the target's.
 - 2026-10-22 — **Retention settings** (`settings` keys, whole numbers; defaults → floors):
@@ -128,6 +129,8 @@ adds.
 
 ## Log
 
+- 2026-10-22 — `add_tags(ids, names)` with undo for the list's `t` (46 tests). The list panel and editor keys
+  (packages 05 and 02) went onto the same PR, since the session can push only one branch.
 - 2026-10-22 — M1 slice on `claude/project-thread-1p0dru` (the session's branch; PR to `main`): `ListQuery` with
   folder/all, flags, tags all/none, text, four sorts both directions, flagged-top, keyset cursors; search filters
   parsed in Rust; tag counts, rename, merge; batch move/flag with undo tokens; version thinning and retention
