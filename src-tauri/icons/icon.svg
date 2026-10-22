@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- A storm petrel skimming low over water, in Tern's faceted style: warm (dusk) where Tern is cool. -->
+  <defs>
+    <linearGradient id="p-main" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFD166" />
+      <stop offset="50%" stop-color="#F77F00" />
+      <stop offset="100%" stop-color="#9D0208" />
+    </linearGradient>
+    <linearGradient id="p-dark" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#370617" />
+      <stop offset="60%" stop-color="#6A040F" />
+      <stop offset="100%" stop-color="#D00000" />
+    </linearGradient>
+    <linearGradient id="p-light" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFF3B0" />
+      <stop offset="100%" stop-color="#FAA307" />
+    </linearGradient>
+  </defs>
+  <g>
+    <!-- left wing, raised -->
+    <polygon points="60,120 232,222 214,252 118,190" fill="url(#p-main)" />
+    <polygon points="92,164 224,246 212,270 150,228" fill="url(#p-light)" opacity="0.85" />
+    <polygon points="150,236 216,268 206,292 178,268" fill="url(#p-dark)" />
+    <!-- right wing, swept back -->
+    <polygon points="292,228 452,96 404,236 340,266" fill="url(#p-dark)" />
+    <polygon points="292,228 452,96 384,212" fill="url(#p-light)" opacity="0.6" />
+    <!-- body -->
+    <polygon points="206,214 282,236 332,300 300,296 236,262" fill="url(#p-light)" />
+    <polygon points="300,296 332,300 220,352 240,328" fill="url(#p-main)" />
+    <polygon points="332,300 290,344 220,352" fill="url(#p-dark)" />
+    <!-- head and beak -->
+    <polygon points="318,262 366,252 384,268 342,282" fill="url(#p-light)" />
+    <polygon points="318,262 342,282 384,268 346,300" fill="url(#p-main)" />
+    <polygon points="366,252 418,276 384,268" fill="#FFBA08" />
+    <!-- tail -->
+    <polygon points="226,318 136,392 212,350" fill="url(#p-main)" />
+    <polygon points="216,340 172,404 244,358" fill="url(#p-dark)" />
+    <!-- the water it pats with its feet -->
+    <polygon points="120,432 232,420 300,436 392,424 400,444 300,452 232,440 112,452" fill="url(#p-dark)" opacity="0.55" />
+  </g>
+</svg>

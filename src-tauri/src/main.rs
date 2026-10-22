@@ -1,0 +1,103 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod commands;
+
+use std::path::PathBuf;
+use std::sync::Mutex;
+
+use petrel_core::Store;
+use tauri::Manager;
+
+pub struct AppState {
+    pub store: Mutex<Store>,
+    pub db_path: PathBuf,
+}
+
+/// Where the database lives: `PETREL_DB` if set; otherwise `<app data>/petrel.db`, or `<app data>/dev/petrel.db`
+/// for a debug build so a development schema can never touch the installed Petrel's text (migrations only go
+/// forward).
+fn db_path(app: &tauri::App) -> anyhow::Result<PathBuf> {
+    if let Some(p) = std::env::var_os("PETREL_DB") {
+        return Ok(PathBuf::from(p));
+    }
+    let dir = app.path().app_data_dir()?;
+    Ok(if cfg!(debug_assertions) { dir.join("dev").join("petrel.db") } else { dir.join("petrel.db") })
+}
+
+/// Log to stderr and to `<app data>/petrel.log` (truncated when it passes 5 MB; rotation comes later).
+fn init_logging(app: &tauri::App) {
+    let mut builder = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"));
+    if let Ok(dir) = app.path().app_data_dir() {
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("petrel.log");
+        let too_big = std::fs::metadata(&path).map(|m| m.len() > 5 * 1024 * 1024).unwrap_or(false);
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(!too_big)
+            .write(true)
+            .truncate(too_big)
+            .open(&path);
+        if let Ok(file) = file {
+            builder.target(env_logger::Target::Pipe(Box::new(Tee(file))));
+        }
+    }
+    let _ = builder.try_init();
+}
+
+/// Writes to a file and to stderr.
+struct Tee(std::fs::File);
+
+impl std::io::Write for Tee {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let _ = std::io::stderr().write_all(buf);
+        self.0.write(buf)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.flush()
+    }
+}
+
+fn main() {
+    // WebKitGTK's DMA-BUF renderer leaves the window blank or crashes on some Wayland setups (NVIDIA among
+    // them). Off unless the user says otherwise. Same as Tern.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+
+    tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            // A second launch focuses the running one. Arguments (`--new`, `--capture`) arrive with package 07.
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+        }))
+        .plugin(tauri_plugin_opener::init())
+        .setup(|app| {
+            init_logging(app);
+            let path = db_path(app)?;
+            let mut store = Store::open(&path).map_err(|e| {
+                log::error!("cannot open {}: {e:#}", path.display());
+                e
+            })?;
+            match store.sweep() {
+                Ok(r) if r.tombstoned + r.purged + r.tags_removed > 0 => log::info!("sweep: {r:?}"),
+                Ok(_) => {}
+                Err(e) => log::warn!("sweep failed: {e:#}"),
+            }
+            log::info!("Petrel {} · {}", env!("CARGO_PKG_VERSION"), path.display());
+            app.manage(AppState { store: Mutex::new(store), db_path: path });
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            commands::app_info,
+            commands::new_draft,
+            commands::open_draft,
+            commands::save_draft,
+            commands::list_drafts,
+            commands::show_window,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running Petrel");
+}

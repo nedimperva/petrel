@@ -1,0 +1,21 @@
+[package]
+name = "petrel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Petrel: capture text first, act on it later"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+anyhow = "1"
+petrel-core = { path = "../crates/petrel-core" }
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-opener = "2"
+env_logger = { version = "0.11", default-features = false, features = ["humantime"] }

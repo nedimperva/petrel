@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Name={{name}}
+GenericName=Text capture
+Comment=Capture text first, act on it later
+Exec={{exec}} %u
+StartupWMClass={{exec}}
+Icon={{icon}}
+Terminal=false
+Categories=Utility;TextEditor;Office;
+Keywords=notes;drafts;capture;text;markdown;actions;
+Actions=new;
+
+[Desktop Action new]
+Name=New draft
+Exec={{exec}} --new
