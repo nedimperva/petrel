@@ -1,6 +1,6 @@
 # Sprint 0 — Compile and boot
 
-**Status:** review · PR #1 · started 2026-10-22
+**Status:** done · merged 2026-10-22 · PR #1 · acceptance checks open for the owner
 
 ## Delivery scope
 

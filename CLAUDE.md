@@ -5,7 +5,7 @@ Drafts (capture first, act later) and built like Tern (`github.com/nedimperva/te
 (`crates/petrel-core`), a Tauri 2 shell (`src-tauri`) and a SolidJS UI (`src`). The README covers layout, setup
 and keys; this file covers state and decisions that aren't visible from the code.
 
-## Where things stand (2026-10-22, package 00 skeleton on `sprint/00-skeleton`)
+## Where things stand (2026-10-22, package 00 merged)
 
 - The workspace compiles: `petrel-core` (schema v1, migrations with backup-before-migrate, drafts, tags, versions,
   FTS search, sweep; 21 tests; `gen_store` and `store_bench` examples), `src-tauri` (five commands, single instance,
@@ -14,7 +14,8 @@ and keys; this file covers state and decisions that aren't visible from the code
   `-D warnings` and fmt are clean. The speed table passes at 50k (package 00 Results).
 - **Search is newest-first** (400 newest matches by rowid, then `modified_at`), not bm25-ranked; see package 00
   Decisions for the numbers. Snippets are made in Rust (`store::snippet`).
-- The scripting-runtime spike recommends **rquickjs** (package 03 Decisions); the owner has not answered yet.
+- **rquickjs is the scripting runtime** (owner decision 2026-10-22, package 03 Decisions); `bindgen` feature off.
+  Newest-first search is accepted for M1; relevance ranking is a package 05 (M2) task.
   The spike is a standalone crate under `crates/petrel-core/examples/runtime_spike/`, not a workspace member.
 - Not yet done by anyone: a boot on Hyprland, the Windows smoke test, the kill test, a packaged cold-start number.
   The agent's sandbox has no display and 3.9 GB of disk; it can run `cargo check`/clippy/tests but not the window.
@@ -35,10 +36,9 @@ compatibility is the documented subset in `docs/design/actions.md`, nothing more
 ## First steps for the next session
 
 1. Read `docs/PLAN.md`, `docs/sprints/README.md`, then `docs/sprints/sprint-00-compile-and-boot.md` (Log first).
-2. Check the CI result of the `sprint/00-skeleton` PR on both OSes; fix anything Windows-only.
-3. Owner: `npm run tauri dev` on Omarchy, `scripts/kill-test.sh`, the Windows smoke list, and the runtime decision.
-4. Then package 01's M1 slice (list filters, tags, trash policy, undo tokens) and package 02 (editor commands,
-   open-to-new-draft, capture window) on their own branches.
+2. Package 01's M1 slice (list filters, tags, undo tokens, version tiers) on `sprint/01-list-and-tags`, then
+   package 02 (editor commands, open-to-new-draft, capture window) and package 05's list UI.
+3. Owner, when convenient: `scripts/kill-test.sh`, the Windows smoke list, laptop `store_bench` numbers.
 
 ## Design decisions to keep
 
