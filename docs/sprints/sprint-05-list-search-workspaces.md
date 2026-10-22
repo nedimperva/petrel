@@ -24,8 +24,9 @@ Find any draft in two keystrokes and a word. Triage a week of captures in a minu
 - [ ] Sidebar (`Ctrl 1`): folders with counts, tags, workspaces.
 
 ### Search (M1)
-- [ ] Query parser: free words → FTS, `tag:x`, `-tag:x`, `is:flagged`, `in:archive`, `"exact phrase"`; the rest
-      quoted token by token so FTS syntax errors cannot happen. Tests.
+- [x] Query parser: free words → FTS, `tag:x`, `-tag:x`, `is:flagged`, `in:archive`, `"exact phrase"`; the rest
+      quoted token by token so FTS syntax errors cannot happen. Tests. Done in package 01
+      (`crates/petrel-core/src/query.rs`, `Store::search`).
 - [ ] Results ranked by `bm25` then `modified_at`; snippet highlight; `Enter` opens and places the cursor at
       the first match.
 - [ ] Search is live (debounced 80 ms) and measured in the status strip in debug builds.

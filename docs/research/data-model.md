@@ -143,17 +143,32 @@ CREATE TABLE workspaces (
 CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);   -- JSON values; UI prefs, hotkey, paths
 ```
 
+## v2
+
+```sql
+CREATE INDEX drafts_title ON drafts (folder, title COLLATE NOCASE, id) WHERE deleted_at IS NULL;
+```
+
+Title sort walks this index instead of sorting a folder. Test: `a_v1_database_migrates_to_v2_with_a_backup`.
+
+## Settings the engine reads
+
+`retention.trashDays` (30, floor 1), `retention.tombstoneDays` (90, floor 30), `retention.versionsAllHours` (1),
+`retention.versionsHourlyDays` (1), `retention.versionsDailyDays` (30, floor 7), `retention.versionsProtectedDays`
+(90, floor 30). Whole numbers; a missing or non-numeric value means the default. See `retention.rs`.
+
 ## Queries the store must answer fast (all in `store_bench`)
 
 | Name | Shape |
 |---|---|
-| `list(folder, filter, sort, cursor, limit)` | Index scan on `drafts_list` (or created/accessed/title); tag filters join `draft_tags`; FTS filter joins `drafts_fts`; flagged-top is two ordered scans concatenated, not `ORDER BY flagged DESC` |
+| `list(ListQuery)` | Index scan on `drafts_list` (or created/accessed/title) with a row-value keyset bound; "All" merges the Inbox and Archive scans; flagged-top is two ordered scans concatenated, not `ORDER BY flagged DESC`. Filters on at most 2,000 drafts become an id set (`rarray`), fetched by rowid when tiny, else tested while walking; broader tags are `EXISTS` on `draft_tags` per row; text is the newest 2,000 FTS matches (package 01 Decisions) |
 | `search(query, scope)` | `SELECT rowid FROM drafts_fts WHERE MATCH ? ORDER BY rowid DESC LIMIT 400` (FTS5 stops early: microseconds for any term), then the drafts rows by `modified_at DESC`; snippets made in Rust. Exact under 400 matches; newest-first above. `bm25` was 21 ms for a stopword at 50k and is not used (package 00 Decisions) |
 | `open(id)` | Row + tags + `COUNT(versions)` in one statement with subqueries |
 | `save(id, content, cursor)` | One UPDATE; title/preview computed in Rust; FTS by trigger |
 | `version_if_due(id)` | Insert a version when the newest `edit` one is older than 5 min; no trimming here |
-| `tag_counts(folder)` | Group by on `draft_tags` joined to visible drafts; cached by the UI per list change |
-| `sweep()` | Trash > 30 days → tombstone; tombstones > 90 days → delete; versions thinned by the age tiers; orphan tags removed |
+| `tag_counts(folder)` | Group by on `draft_tags`, driven from the folder's index; cached by the UI per list change (31 ms at 50k, 1–2 ms at 2k) |
+| `move_drafts`/`flag_drafts`/`undo` | One UPDATE over an id set; the old values are kept in memory for the undo token |
+| `sweep()` | Trash > `trashDays` → tombstone; tombstones > `tombstoneDays` → delete; versions thinned by the age tiers (newest per UTC hour/day/week bucket); orphan tags removed. At start and every 24 h |
 
 ## Candidate later versions (allocate numbers when a slice is implemented)
 
