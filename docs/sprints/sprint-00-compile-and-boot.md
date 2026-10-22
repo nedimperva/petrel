@@ -115,4 +115,6 @@ Measured 2026-10-22 in the agent's sandbox (4 vCPU, Ubuntu 24.04, release build,
   redesign to meet its target (Decisions). Clippy `-D warnings` and fmt clean on the whole workspace. Open: owner's
   Hyprland boot, Windows smoke, kill test, runtime decision.
 - 2026-10-22 — First CI run: Linux green; Windows failed two tests (file handles, Decisions); CodeQL cannot run on a
-  private repo. All three fixed; pushed for a second run.
+  private repo. All three fixed. Third run: **both OSes green** (Linux and Windows: frontend build, fmt, clippy
+  `-D warnings`, 21 tests, `store_bench` within slack on the shared runner). The second Windows failure was the test
+  itself holding a backup open.
