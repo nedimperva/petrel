@@ -5,17 +5,24 @@
 //! Everything here is synchronous behind one connection; callers hold the `Store` in a `Mutex`. Writes are
 //! tiny (autosave is one UPDATE), so this has not needed a pool. See `docs/research/data-model.md`.
 
+use std::cmp::Ordering;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, bail, Context, Result};
-use rusqlite::{params, Connection, OptionalExtension, Row};
+use rusqlite::types::{ToSql, Value};
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Row, Transaction};
 use serde::{Deserialize, Serialize};
 
+pub use crate::query::{fts_query, snippet};
+use crate::query::{parse_query, search_terms};
+use crate::retention::{self, Retention, VersionAge, DAY_MS, HOUR_MS};
 use crate::title;
 
 /// The schema version this build writes. A database with a higher `meta.schema_version` is refused.
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 /// How many backups `backup_before_migrate` keeps.
 const BACKUPS_KEPT: usize = 5;
@@ -26,10 +33,17 @@ pub const VERSION_INTERVAL_MS: i64 = 5 * 60 * 1000;
 /// How many of the newest matches a search considers; see `Store::search`.
 pub const SEARCH_WINDOW: usize = 400;
 
-/// Drafts in Trash longer than this become tombstones in `sweep()`.
-pub const TRASH_DAYS: i64 = 30;
-/// Tombstones older than this are deleted in `sweep()`.
-pub const TOMBSTONE_DAYS: i64 = 90;
+/// The most rows one list page may ask for.
+pub const LIST_MAX: usize = 500;
+
+/// A tag filter matching at most this many drafts is resolved to a set of ids first and the list sorts that
+/// set; a broader tag is checked row by row while walking the sort index, where matches are dense enough that a
+/// page fills quickly. Free text is always a set: the newest this-many matches, like `search` (package 01
+/// Decisions).
+pub const CANDIDATES_MAX: usize = 2_000;
+
+/// How many batch changes can be undone.
+const UNDO_KEPT: usize = 50;
 
 const SCHEMA: &str = r#"
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -155,6 +169,11 @@ CREATE TABLE workspaces (
 CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 "#;
 
+/// v2: the list can be sorted by title without sorting a whole folder.
+const SCHEMA_V2: &str = r#"
+CREATE INDEX drafts_title ON drafts (folder, title COLLATE NOCASE, id) WHERE deleted_at IS NULL;
+"#;
+
 /// Where a draft lives. Stored as an integer; the names are the wire format.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -215,12 +234,133 @@ pub struct ListPage {
     pub next: Option<Cursor>,
 }
 
-/// Keyset cursor: the sort key and id of the last row seen.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+/// Keyset cursor: the sort key and id of the last row seen, and whether that row was in the flagged-first
+/// part of a `flagged_top` list.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Cursor {
-    pub key: i64,
+    pub key: SortKey,
     pub id: i64,
+    #[serde(default)]
+    pub flagged: bool,
+}
+
+/// A row's value in the sort column: a timestamp, or a title.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum SortKey {
+    Int(i64),
+    Text(String),
+}
+
+impl SortKey {
+    /// The order SQLite gives `title COLLATE NOCASE`: bytes, with ASCII letters folded.
+    fn cmp_nocase(&self, other: &SortKey) -> Ordering {
+        match (self, other) {
+            (SortKey::Int(a), SortKey::Int(b)) => a.cmp(b),
+            (SortKey::Text(a), SortKey::Text(b)) => {
+                a.bytes().map(|c| c.to_ascii_lowercase()).cmp(b.bytes().map(|c| c.to_ascii_lowercase()))
+            }
+            (SortKey::Int(_), SortKey::Text(_)) => Ordering::Less,
+            (SortKey::Text(_), SortKey::Int(_)) => Ordering::Greater,
+        }
+    }
+}
+
+/// What a list is ordered by. The names are the wire format and the `workspaces.sort` values.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Sort {
+    #[default]
+    Modified,
+    Created,
+    Accessed,
+    Title,
+}
+
+impl Sort {
+    /// The column, as it appears in the matching index.
+    fn column(self) -> &'static str {
+        match self {
+            Sort::Modified => "modified_at",
+            Sort::Created => "created_at",
+            Sort::Accessed => "accessed_at",
+            Sort::Title => "title COLLATE NOCASE",
+        }
+    }
+}
+
+/// One page of the draft list. Every field has a default, so the UI sends only what it sets.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ListQuery {
+    /// `None` is Inbox and Archive together ("All").
+    pub folder: Option<Folder>,
+    pub flagged_only: bool,
+    /// The draft has every one of these tags.
+    pub tags_all: Vec<String>,
+    /// The draft has none of these tags.
+    pub tags_none: Vec<String>,
+    /// Free text, as the user typed it; quoted for FTS5 by `fts_query`.
+    pub fts: String,
+    pub sort: Sort,
+    pub desc: bool,
+    /// Flagged drafts first, each part in the sort order.
+    pub flagged_top: bool,
+    pub cursor: Option<Cursor>,
+    pub limit: usize,
+}
+
+impl Default for ListQuery {
+    fn default() -> ListQuery {
+        ListQuery {
+            folder: Some(Folder::Inbox),
+            flagged_only: false,
+            tags_all: Vec::new(),
+            tags_none: Vec::new(),
+            fts: String::new(),
+            sort: Sort::Modified,
+            desc: true,
+            flagged_top: false,
+            cursor: None,
+            limit: 50,
+        }
+    }
+}
+
+impl ListQuery {
+    pub fn folder(folder: Folder) -> ListQuery {
+        ListQuery { folder: Some(folder), ..ListQuery::default() }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagCount {
+    pub name: String,
+    pub count: i64,
+}
+
+/// Returned by a batch change; `Store::undo(token)` puts the batch back. Tokens live in memory, for the newest
+/// `UNDO_KEPT` batches, and are used once.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UndoToken {
+    pub token: String,
+    /// Drafts the batch changed; drafts already in the target state are not counted and not touched.
+    pub count: usize,
+}
+
+/// What a batch changed, so undo can put it back.
+struct UndoBatch {
+    token: String,
+    /// `"folder"` or `"flagged"`; a compile-time name, never user input.
+    column: &'static str,
+    /// The `modified_at` the batch wrote. Undo restores the old `modified_at` only where this is still the
+    /// value, so a draft edited after the batch keeps its newer time.
+    at: i64,
+    /// `(id, old value, old modified_at)`.
+    rows: Vec<(i64, i64, i64)>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -248,6 +388,8 @@ pub struct Store {
     path: Option<PathBuf>,
     /// Milliseconds since the epoch; swapped out by tests.
     clock: Box<dyn Fn() -> i64 + Send>,
+    /// Newest last.
+    undo: VecDeque<UndoBatch>,
 }
 
 fn system_now() -> i64 {
@@ -261,7 +403,12 @@ impl Store {
             std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
         }
         let conn = Connection::open(path).with_context(|| format!("opening {}", path.display()))?;
-        let mut store = Store { conn, path: Some(path.to_path_buf()), clock: Box::new(system_now) };
+        let mut store = Store {
+            conn,
+            path: Some(path.to_path_buf()),
+            clock: Box::new(system_now),
+            undo: VecDeque::new(),
+        };
         store.init()?;
         Ok(store)
     }
@@ -269,7 +416,7 @@ impl Store {
     /// An in-memory store for tests and the UI's fake mode.
     pub fn open_in_memory() -> Result<Store> {
         let conn = Connection::open_in_memory()?;
-        let mut store = Store { conn, path: None, clock: Box::new(system_now) };
+        let mut store = Store { conn, path: None, clock: Box::new(system_now), undo: VecDeque::new() };
         store.init()?;
         Ok(store)
     }
@@ -284,6 +431,8 @@ impl Store {
     }
 
     fn init(&mut self) -> Result<()> {
+        // `rarray(?)` binds a list of ids as one parameter, so id sets never become SQL text.
+        rusqlite::vtab::array::load_module(&self.conn)?;
         self.conn.pragma_update(None, "journal_mode", "WAL")?;
         self.conn.pragma_update(None, "synchronous", "NORMAL")?;
         self.conn.pragma_update(None, "foreign_keys", "ON")?;
@@ -334,6 +483,7 @@ impl Store {
                         params![uuid::Uuid::new_v4().to_string(), now.to_string()],
                     )?;
                 }
+                2 => tx.execute_batch(SCHEMA_V2)?,
                 _ => unreachable!("no migration step for v{next}"),
             }
             tx.execute(
@@ -467,87 +617,334 @@ impl Store {
             .optional()?)
     }
 
-    pub fn set_folder(&self, id: i64, folder: Folder) -> Result<()> {
-        let now = self.now();
-        self.conn.execute(
-            "UPDATE drafts SET folder = ?2, modified_at = ?3 WHERE id = ?1 AND deleted_at IS NULL",
-            params![id, folder as i64, now],
-        )?;
-        Ok(())
+    // ---- batches with undo -------------------------------------------------------------------------------
+
+    /// Moves drafts to a folder. Drafts already there are left alone.
+    pub fn move_drafts(&mut self, ids: &[i64], folder: Folder) -> Result<UndoToken> {
+        self.batch(ids, "folder", folder as i64)
     }
 
-    pub fn set_flagged(&self, id: i64, flagged: bool) -> Result<()> {
-        let now = self.now();
-        self.conn.execute(
-            "UPDATE drafts SET flagged = ?2, modified_at = ?3 WHERE id = ?1 AND deleted_at IS NULL",
-            params![id, flagged as i64, now],
-        )?;
-        Ok(())
+    /// Flags or unflags drafts. Drafts already in that state are left alone.
+    pub fn flag_drafts(&mut self, ids: &[i64], flagged: bool) -> Result<UndoToken> {
+        self.batch(ids, "flagged", flagged as i64)
     }
 
-    /// One page of a folder, newest modified first. Tag and search filters arrive with package 05.
-    pub fn list(&self, folder: Folder, cursor: Option<Cursor>, limit: usize) -> Result<ListPage> {
-        let (key, id) = cursor.map(|c| (c.key, c.id)).unwrap_or((i64::MAX, i64::MAX));
-        let mut stmt = self.conn.prepare_cached(
-            "SELECT id, uuid, title, preview, folder, flagged, modified_at FROM drafts \
-             WHERE folder = ?1 AND deleted_at IS NULL AND (modified_at < ?2 OR (modified_at = ?2 AND id < ?3)) \
-             ORDER BY modified_at DESC, id DESC LIMIT ?4",
-        )?;
-        let mut rows: Vec<DraftSummary> = stmt
-            .query_map(params![folder as i64, key, id, limit as i64 + 1], summary)?
+    fn batch(&mut self, ids: &[i64], column: &'static str, value: i64) -> Result<UndoToken> {
+        let now = self.now();
+        let tx = self.conn.transaction()?;
+        let rows: Vec<(i64, i64, i64)> = tx
+            .prepare(&format!(
+                "SELECT id, {column}, modified_at FROM drafts \
+                 WHERE id IN rarray(?1) AND deleted_at IS NULL AND {column} != ?2"
+            ))?
+            .query_map(params![id_array(ids), value], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
             .collect::<rusqlite::Result<_>>()?;
+        tx.execute(
+            &format!(
+                "UPDATE drafts SET {column} = ?2, modified_at = ?3 \
+                 WHERE id IN rarray(?1) AND deleted_at IS NULL AND {column} != ?2"
+            ),
+            params![id_array(ids), value, now],
+        )?;
+        tx.commit()?;
+        let token = UndoToken { token: uuid::Uuid::new_v4().to_string(), count: rows.len() };
+        self.undo.push_back(UndoBatch { token: token.token.clone(), column, at: now, rows });
+        while self.undo.len() > UNDO_KEPT {
+            self.undo.pop_front();
+        }
+        Ok(token)
+    }
+
+    /// Puts a batch back. Returns how many drafts changed. A token works once; an unknown one (too old, already
+    /// used, or from before a restart) is an error the UI can show as "nothing to undo".
+    pub fn undo(&mut self, token: &str) -> Result<usize> {
+        let Some(pos) = self.undo.iter().position(|b| b.token == token) else {
+            bail!("nothing to undo: that change is too old or was already undone");
+        };
+        let batch = self.undo.remove(pos).expect("position is in range");
+        let tx = self.conn.transaction()?;
+        let mut n = 0;
+        {
+            let mut stmt = tx.prepare(&format!(
+                "UPDATE drafts SET {} = ?2, \
+                 modified_at = CASE WHEN modified_at = ?4 THEN ?3 ELSE modified_at END \
+                 WHERE id = ?1 AND deleted_at IS NULL",
+                batch.column
+            ))?;
+            for (id, old, modified) in &batch.rows {
+                n += stmt.execute(params![id, old, modified, batch.at])?;
+            }
+        }
+        tx.commit()?;
+        Ok(n)
+    }
+
+    // ---- lists and search --------------------------------------------------------------------------------
+
+    /// One page of the draft list, by keyset on `(sort key, id)`; never OFFSET, so page 200 costs what page 1
+    /// does. "All" (no folder) merges the Inbox and Archive scans; `flagged_top` is the flagged scan followed by
+    /// the unflagged one, not `ORDER BY flagged`, so each part still walks an index.
+    pub fn list(&self, q: &ListQuery) -> Result<ListPage> {
+        let limit = q.limit.clamp(1, LIST_MAX);
+        let empty = ListPage { rows: Vec::new(), next: None };
+        let Some(filter) = self.filter(q)? else { return Ok(empty) };
+        if filter.candidates.as_ref().is_some_and(|c| c.is_empty()) {
+            return Ok(empty);
+        }
+        if let Some(c) = &q.cursor {
+            let text = matches!(c.key, SortKey::Text(_));
+            if text != (q.sort == Sort::Title) {
+                bail!("the cursor is from a list with another sort");
+            }
+        }
+        let folders: &[Folder] = match &q.folder {
+            Some(f) => std::slice::from_ref(f),
+            None => &[Folder::Inbox, Folder::Archive],
+        };
+        let split = q.flagged_top && !q.flagged_only;
+        let segments: &[Option<bool>] = if q.flagged_only {
+            &[Some(true)]
+        } else if split {
+            &[Some(true), Some(false)]
+        } else {
+            &[None]
+        };
+        // A flagged-top cursor says which part it stopped in.
+        let first = usize::from(split && q.cursor.as_ref().is_some_and(|c| !c.flagged));
+        let mut rows: Vec<(DraftSummary, SortKey, bool)> = Vec::new();
+        for (i, &flagged) in segments.iter().enumerate().skip(first) {
+            let after = if i == first { q.cursor.as_ref() } else { None };
+            let want = limit + 1 - rows.len();
+            for (row, key) in self.scan(&filter, folders, flagged, q.sort, q.desc, after, want)? {
+                rows.push((row, key, split && flagged == Some(true)));
+            }
+            if rows.len() > limit {
+                break;
+            }
+        }
         let next = if rows.len() > limit {
             rows.truncate(limit);
-            rows.last().map(|r| Cursor { key: r.modified_at, id: r.id })
+            rows.last().map(|(r, key, flagged)| Cursor { key: key.clone(), id: r.id, flagged: *flagged })
         } else {
             None
         };
-        Ok(ListPage { rows, next })
+        Ok(ListPage { rows: rows.into_iter().map(|(r, _, _)| r).collect(), next })
     }
 
-    /// Full-text search over Inbox and Archive, newest modified first.
+    /// Resolves names and text to ids once per list call. `None` means nothing can match (an unknown tag).
+    fn filter(&self, q: &ListQuery) -> Result<Option<Filter>> {
+        let mut f = Filter::default();
+        let mut sets: Vec<Vec<i64>> = Vec::new();
+        let mut tagged = self.conn.prepare_cached(
+            "SELECT draft_id FROM draft_tags WHERE tag_id = ?1 ORDER BY draft_id DESC LIMIT ?2",
+        )?;
+        for name in &q.tags_all {
+            let name = tag_name(name);
+            if name.is_empty() {
+                continue;
+            }
+            let Some(tag) = self.tag_id(&name)? else { return Ok(None) };
+            let ids: Vec<i64> = tagged
+                .query_map(params![tag, CANDIDATES_MAX as i64 + 1], |r| r.get(0))?
+                .collect::<rusqlite::Result<_>>()?;
+            if ids.len() <= CANDIDATES_MAX {
+                sets.push(ids);
+            } else {
+                f.walk_tags.push(tag);
+            }
+        }
+        for name in &q.tags_none {
+            if let Some(tag) = self.tag_id(&tag_name(name))? {
+                f.none_tags.push(tag);
+            }
+        }
+        let fts = fts_query(&q.fts);
+        if !fts.is_empty() {
+            let ids: Vec<i64> = self
+                .conn
+                .prepare_cached(
+                    "SELECT rowid FROM drafts_fts WHERE drafts_fts MATCH ?1 ORDER BY rowid DESC LIMIT ?2",
+                )?
+                .query_map(params![fts, CANDIDATES_MAX as i64 + 1], |r| r.get(0))?
+                .collect::<rusqlite::Result<_>>()?;
+            // Checking FTS5 row by row costs a query parse per row (12 ms for a common word at 5k drafts),
+            // so a broad text filter keeps the newest `CANDIDATES_MAX` matches instead, as `search` does.
+            let mut ids = ids;
+            ids.truncate(CANDIDATES_MAX);
+            sets.push(ids);
+        }
+        sets.sort_by_key(Vec::len);
+        let mut sets = sets.into_iter();
+        if let Some(first) = sets.next() {
+            let mut keep: HashSet<i64> = first.into_iter().collect();
+            for other in sets {
+                let other: HashSet<i64> = other.into_iter().collect();
+                keep.retain(|id| other.contains(id));
+            }
+            let ids: Vec<i64> = keep.into_iter().collect();
+            // Looking each id up and sorting costs ~2 µs an id; walking the sort index and testing each row
+            // against the set costs ~0.08 µs a row and stops after a page, about `limit × drafts / ids` rows. So
+            // only a small set is fetched by id (measured at 50k: a 50-draft tag 0.02 ms by id against 2.7 ms
+            // walked; a 660-draft set 1.4 ms by id against 0.25 ms walked).
+            let drafts: i64 =
+                self.conn.query_row("SELECT IFNULL(MAX(id), 0) FROM drafts", [], |r| r.get(0))?;
+            let n = ids.len() as i64;
+            f.by_id = n * n * 25 < (q.limit.clamp(1, LIST_MAX) as i64 + 1) * drafts;
+            f.candidates = Some(ids);
+        }
+        Ok(Some(f))
+    }
+
+    /// Up to `want` rows after `after`, in order, from each folder's index scan, merged.
+    #[allow(clippy::too_many_arguments)]
+    fn scan(
+        &self,
+        f: &Filter,
+        folders: &[Folder],
+        flagged: Option<bool>,
+        sort: Sort,
+        desc: bool,
+        after: Option<&Cursor>,
+        want: usize,
+    ) -> Result<Vec<(DraftSummary, SortKey)>> {
+        let col = sort.column();
+        let (cmp, dir) = if desc { ("<", "DESC") } else { (">", "ASC") };
+        let mut args: Vec<Box<dyn ToSql>> = vec![Box::new(0i64)]; // ?1 is the folder, set per scan
+        let mut arg = |v: Box<dyn ToSql>| {
+            args.push(v);
+            format!("?{}", args.len())
+        };
+        // Flagged drafts newest-modified first can walk `drafts_flagged` and check the folder per row; anything
+        // else walks the sort index and checks the flag per row (`+` keeps the planner off the flagged index).
+        let by_flag = flagged == Some(true) && sort == Sort::Modified && f.candidates.is_none();
+        // `+` on the folder and the order key makes SQLite look a small id set up and sort it, instead of walking
+        // a folder's index and testing each row against the set.
+        let by_id = f.by_id;
+        let mut sql = format!(
+            "SELECT id, uuid, title, preview, folder, flagged, modified_at, {col} FROM drafts \
+             WHERE {}folder = ?1 AND deleted_at IS NULL",
+            if by_flag || by_id { "+" } else { "" }
+        );
+        match flagged {
+            Some(true) if by_flag => sql += " AND flagged = 1",
+            Some(flagged) => sql += &format!(" AND +flagged = {}", flagged as i64),
+            None => {}
+        }
+        if let Some(ids) = &f.candidates {
+            sql += &format!(" AND id IN rarray({})", arg(Box::new(id_array(ids))));
+        }
+        for tag in &f.walk_tags {
+            sql += &format!(
+                " AND EXISTS (SELECT 1 FROM draft_tags WHERE draft_id = drafts.id AND tag_id = {})",
+                arg(Box::new(*tag))
+            );
+        }
+        if !f.none_tags.is_empty() {
+            sql += &format!(
+                " AND NOT EXISTS (SELECT 1 FROM draft_tags WHERE draft_id = drafts.id AND tag_id IN rarray({}))",
+                arg(Box::new(id_array(&f.none_tags)))
+            );
+        }
+        if let Some(c) = after {
+            let key: Box<dyn ToSql> = match &c.key {
+                SortKey::Int(n) => Box::new(*n),
+                SortKey::Text(s) => Box::new(s.clone()),
+            };
+            let key = arg(key);
+            // The plain bound lets SQLite seek the index; the row value alone does not under a collation.
+            sql += &format!(" AND {col} {cmp}= {key} AND ({col}, id) {cmp} ({key}, {})", arg(Box::new(c.id)));
+        }
+        let order = if by_id { format!("+{col}") } else { col.to_string() };
+        sql += &format!(" ORDER BY {order} {dir}, id {dir} LIMIT {}", arg(Box::new(want as i64)));
+
+        let mut stmt = self.conn.prepare_cached(&sql)?;
+        let mut out: Vec<(DraftSummary, SortKey)> = Vec::new();
+        for folder in folders {
+            args[0] = Box::new(*folder as i64);
+            let rows = stmt.query_map(params_from_iter(args.iter()), |r| {
+                let key =
+                    if sort == Sort::Title { SortKey::Text(r.get(7)?) } else { SortKey::Int(r.get(7)?) };
+                Ok((summary(r)?, key))
+            })?;
+            for row in rows {
+                out.push(row?);
+            }
+        }
+        if folders.len() > 1 {
+            out.sort_by(|(a, ka), (b, kb)| {
+                let o = ka.cmp_nocase(kb).then(a.id.cmp(&b.id));
+                if desc {
+                    o.reverse()
+                } else {
+                    o
+                }
+            });
+            out.truncate(want);
+        }
+        Ok(out)
+    }
+
+    /// The search box. Filters (`tag:`, `-tag:`, `is:flagged`, `in:`) are parsed in Rust; the rest is free text.
     ///
-    /// FTS5 can walk a term's matches in descending rowid order and stop early, which costs microseconds
-    /// however common the word is; ranking by bm25 costs ~0.5 µs per match and reaches 20 ms for a word in
-    /// most drafts. So Petrel takes the `SEARCH_WINDOW` most recently created matches and orders those by
-    /// `modified_at`. For a term in fewer than `SEARCH_WINDOW` drafts this is exact; for a more common term it
-    /// is "the newest drafts with that word", which is what a person typing a common word gets anyway and can
-    /// narrow with a second word. Snippets are made in Rust from the content, which is cheaper than FTS5's
-    /// `snippet()` by rowid. User input is quoted token by token so FTS syntax can never produce an error; the
-    /// last token matches as a prefix so results appear while typing.
-    pub fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchHit>> {
-        let fts = fts_query(query);
-        if fts.is_empty() {
+    /// Free text alone takes the fast path: FTS5 walks a term's matches in descending rowid order and stops
+    /// early, which costs microseconds however common the word is, while ranking by bm25 costs ~0.5 µs per
+    /// match and reaches 20 ms for a word in most drafts. So Petrel takes the `SEARCH_WINDOW` most recently
+    /// created matches and orders those by `modified_at`. For a term in fewer than `SEARCH_WINDOW` drafts this
+    /// is exact; for a more common term it is "the newest drafts with that word", which is what a person typing
+    /// a common word gets anyway and can narrow with a second word. With filters, search is a `list` query
+    /// (exact, newest modified first). Snippets are made in Rust from the content, which is cheaper than
+    /// FTS5's `snippet()` by rowid.
+    pub fn search(&self, input: &str, limit: usize) -> Result<Vec<SearchHit>> {
+        let p = parse_query(input);
+        if p.is_empty() {
             return Ok(Vec::new());
         }
-        let mut newest = self.conn.prepare_cached(
-            "SELECT rowid FROM drafts_fts WHERE drafts_fts MATCH ?1 ORDER BY rowid DESC LIMIT ?2",
-        )?;
-        let ids: Vec<i64> = newest
-            .query_map(params![fts, SEARCH_WINDOW as i64], |r| r.get(0))?
-            .collect::<rusqlite::Result<_>>()?;
+        let ids: Vec<i64> = if p.text_only() {
+            let mut newest = self.conn.prepare_cached(
+                "SELECT rowid FROM drafts_fts WHERE drafts_fts MATCH ?1 ORDER BY rowid DESC LIMIT ?2",
+            )?;
+            let window: Vec<i64> = newest
+                .query_map(params![fts_query(&p.text), SEARCH_WINDOW as i64], |r| r.get(0))?
+                .collect::<rusqlite::Result<_>>()?;
+            let mut stmt = self.conn.prepare_cached(
+                "SELECT id FROM drafts WHERE id IN rarray(?1) AND deleted_at IS NULL AND folder != 2 \
+                 ORDER BY modified_at DESC, id DESC LIMIT ?2",
+            )?;
+            let ids = stmt
+                .query_map(params![id_array(&window), limit as i64], |r| r.get(0))?
+                .collect::<rusqlite::Result<_>>()?;
+            ids
+        } else {
+            let q = ListQuery {
+                folder: p.folder,
+                flagged_only: p.flagged,
+                tags_all: p.tags_all.clone(),
+                tags_none: p.tags_none.clone(),
+                fts: p.text.clone(),
+                limit,
+                ..ListQuery::default()
+            };
+            self.list(&q)?.rows.into_iter().map(|r| r.id).collect()
+        };
         if ids.is_empty() {
             return Ok(Vec::new());
         }
-        // Integers only, so building the IN list is safe; a 400-value IN prepares in well under 0.1 ms.
-        let list = ids.iter().map(i64::to_string).collect::<Vec<_>>().join(",");
-        let mut rows = self.conn.prepare(&format!(
-            "SELECT id, title, content, modified_at FROM drafts \
-             WHERE id IN ({list}) AND deleted_at IS NULL AND folder != 2 ORDER BY modified_at DESC LIMIT ?1"
-        ))?;
-        let terms: Vec<String> = search_terms(query);
-        let hits = rows
-            .query_map(params![limit as i64], |r| {
+        let terms = search_terms(&p.text);
+        let mut stmt = self
+            .conn
+            .prepare_cached("SELECT id, title, content, modified_at FROM drafts WHERE id IN rarray(?1)")?;
+        let mut by_id: HashMap<i64, SearchHit> = stmt
+            .query_map(params![id_array(&ids)], |r| {
                 let content: String = r.get(2)?;
-                Ok(SearchHit {
-                    id: r.get(0)?,
-                    title: r.get(1)?,
-                    snippet: snippet(&content, &terms),
-                    modified_at: r.get(3)?,
-                })
+                let snippet =
+                    if terms.is_empty() { title::preview(&content) } else { snippet(&content, &terms) };
+                Ok((
+                    r.get(0)?,
+                    SearchHit { id: r.get(0)?, title: r.get(1)?, snippet, modified_at: r.get(3)? },
+                ))
             })?
             .collect::<rusqlite::Result<_>>()?;
-        Ok(hits)
+        Ok(ids.iter().filter_map(|id| by_id.remove(id)).collect())
     }
 
     pub fn count(&self, folder: Folder) -> Result<i64> {
@@ -568,10 +965,10 @@ impl Store {
         Ok(tags)
     }
 
-    /// Replaces a draft's tags. Names are trimmed and lower-cased; empty and duplicate names are dropped.
+    /// Replaces a draft's tags. Names are trimmed and lower-cased; empty and duplicate names are dropped. Tags
+    /// nobody uses any more stay until `sweep()`, so an undo or a quick re-tag keeps the tag's identity.
     pub fn set_tags(&mut self, id: i64, names: &[String]) -> Result<Vec<String>> {
-        let mut clean: Vec<String> =
-            names.iter().map(|n| n.trim().to_lowercase()).filter(|n| !n.is_empty()).collect();
+        let mut clean: Vec<String> = names.iter().map(|n| tag_name(n)).filter(|n| !n.is_empty()).collect();
         clean.sort();
         clean.dedup();
         let now = self.now();
@@ -590,6 +987,58 @@ impl Store {
         tx.execute("UPDATE drafts SET modified_at = ?2 WHERE id = ?1", params![id, now])?;
         tx.commit()?;
         Ok(clean)
+    }
+
+    fn tag_id(&self, name: &str) -> Result<Option<i64>> {
+        Ok(self
+            .conn
+            .prepare_cached("SELECT id FROM tags WHERE name = ?1")?
+            .query_row(params![name], |r| r.get(0))
+            .optional()?)
+    }
+
+    /// Every tag in use in a folder (`None`: Inbox and Archive) with how many drafts carry it, by name.
+    pub fn tag_counts(&self, folder: Option<Folder>) -> Result<Vec<TagCount>> {
+        let folders: Vec<i64> = match folder {
+            Some(f) => vec![f as i64],
+            None => vec![Folder::Inbox as i64, Folder::Archive as i64],
+        };
+        // Driving from the folder's index and probing `draft_tags` by draft is the cheapest shape measured
+        // (package 01 Decisions); the names join the dozen or so result rows, not every tag link.
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT t.name, c.n FROM \
+               (SELECT dt.tag_id, COUNT(*) AS n FROM drafts d JOIN draft_tags dt ON dt.draft_id = d.id \
+                WHERE d.folder IN rarray(?1) AND d.deleted_at IS NULL GROUP BY dt.tag_id) c \
+             JOIN tags t ON t.id = c.tag_id ORDER BY t.name",
+        )?;
+        let counts = stmt
+            .query_map(params![id_array(&folders)], |r| Ok(TagCount { name: r.get(0)?, count: r.get(1)? }))?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(counts)
+    }
+
+    /// Renames a tag on every draft. If a tag with the new name exists, the two are merged into it. Returns how
+    /// many drafts carried the old tag. `modified_at` is left alone: a rename should not reshuffle the list.
+    pub fn rename_tag(&mut self, from: &str, to: &str) -> Result<usize> {
+        let tx = self.conn.transaction()?;
+        let n = rename_tag_in(&tx, &tag_name(from), &tag_name(to))?;
+        tx.commit()?;
+        Ok(n)
+    }
+
+    /// Merges several tags into one (created if needed), in one transaction.
+    pub fn merge_tags(&mut self, from: &[String], into: &str) -> Result<usize> {
+        let into = tag_name(into);
+        let tx = self.conn.transaction()?;
+        let mut n = 0;
+        for name in from {
+            let name = tag_name(name);
+            if name != into {
+                n += rename_tag_in(&tx, &name, &into)?;
+            }
+        }
+        tx.commit()?;
+        Ok(n)
     }
 
     // ---- versions ----------------------------------------------------------------------------------------
@@ -667,17 +1116,22 @@ impl Store {
 
     // ---- housekeeping -------------------------------------------------------------------------------------
 
-    /// Trash older than `TRASH_DAYS` becomes tombstones (content cleared, versions gone); tombstones older
-    /// than `TOMBSTONE_DAYS` are deleted; tags nobody uses are removed. Runs at start and daily.
-    /// Version thinning by age tier arrives with package 01.
+    /// The retention settings, with defaults and floors applied.
+    pub fn retention(&self) -> Result<Retention> {
+        Ok(Retention::from_settings(|k| self.setting(k).ok().flatten()))
+    }
+
+    /// Housekeeping, at start and daily. Trash older than `trash_days` becomes tombstones (content cleared,
+    /// versions gone); tombstones older than `tombstone_days` are deleted; tags nobody uses are removed; versions
+    /// are thinned by age tier (`retention`). The save path never deletes anything; this is the only place.
     pub fn sweep(&mut self) -> Result<SweepReport> {
         let now = self.now();
-        let day = 24 * 60 * 60 * 1000;
+        let r = self.retention()?;
         let tx = self.conn.transaction()?;
         let tombstoned = tx.execute(
             "UPDATE drafts SET deleted_at = ?1, content = '', title = '', preview = '' \
              WHERE folder = 2 AND deleted_at IS NULL AND modified_at < ?2",
-            params![now, now - TRASH_DAYS * day],
+            params![now, now - r.trash_days * DAY_MS],
         )?;
         tx.execute(
             "DELETE FROM versions WHERE draft_id IN (SELECT id FROM drafts WHERE deleted_at IS NOT NULL)",
@@ -685,11 +1139,34 @@ impl Store {
         )?;
         let purged = tx.execute(
             "DELETE FROM drafts WHERE deleted_at IS NOT NULL AND deleted_at < ?1",
-            params![now - TOMBSTONE_DAYS * day],
+            params![now - r.tombstone_days * DAY_MS],
         )?;
         let tags = tx.execute("DELETE FROM tags WHERE id NOT IN (SELECT tag_id FROM draft_tags)", [])?;
+        let doomed = {
+            let mut stmt = tx.prepare(
+                "SELECT id, draft_id, reason, created_at FROM versions WHERE created_at < ?1 \
+                 ORDER BY draft_id, created_at DESC, id DESC",
+            )?;
+            let rows: Vec<(i64, i64, String, i64)> = stmt
+                .query_map(params![now - r.versions_all_hours * HOUR_MS], |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+                })?
+                .collect::<rusqlite::Result<_>>()?;
+            let ages: Vec<VersionAge> = rows
+                .iter()
+                .map(|(id, draft_id, reason, created_at)| VersionAge {
+                    id: *id,
+                    draft_id: *draft_id,
+                    reason,
+                    created_at: *created_at,
+                })
+                .collect();
+            retention::versions_to_thin(&ages, now, &r)
+        };
+        let thinned =
+            tx.execute("DELETE FROM versions WHERE id IN rarray(?1)", params![id_array(&doomed)])?;
         tx.commit()?;
-        Ok(SweepReport { tombstoned, purged, tags_removed: tags })
+        Ok(SweepReport { tombstoned, purged, tags_removed: tags, versions_thinned: thinned })
     }
 
     /// Empties the Trash now: tombstones, no undo.
@@ -729,10 +1206,64 @@ impl Store {
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SweepReport {
     pub tombstoned: usize,
     pub purged: usize,
     pub tags_removed: usize,
+    pub versions_thinned: usize,
+}
+
+/// A list's filters, resolved to ids.
+#[derive(Default)]
+struct Filter {
+    /// Small filters intersected into one id set; `None` when there is none.
+    candidates: Option<Vec<i64>>,
+    /// The set is small enough to fetch by id rather than walk the sort index (`Store::filter`).
+    by_id: bool,
+    /// Broad tags, checked per row.
+    walk_tags: Vec<i64>,
+    none_tags: Vec<i64>,
+}
+
+fn id_array(ids: &[i64]) -> rusqlite::vtab::array::Array {
+    Rc::new(ids.iter().copied().map(Value::from).collect())
+}
+
+/// How a tag name is stored: trimmed, lower-case.
+fn tag_name(name: &str) -> String {
+    name.trim().to_lowercase()
+}
+
+fn rename_tag_in(tx: &Transaction, from: &str, to: &str) -> Result<usize> {
+    if to.is_empty() {
+        bail!("a tag needs a name");
+    }
+    let Some(from_id): Option<i64> =
+        tx.query_row("SELECT id FROM tags WHERE name = ?1", params![from], |r| r.get(0)).optional()?
+    else {
+        bail!("there is no tag named {from}");
+    };
+    let n: i64 =
+        tx.query_row("SELECT COUNT(*) FROM draft_tags WHERE tag_id = ?1", params![from_id], |r| r.get(0))?;
+    if from == to {
+        return Ok(n as usize);
+    }
+    let to_id: Option<i64> =
+        tx.query_row("SELECT id FROM tags WHERE name = ?1", params![to], |r| r.get(0)).optional()?;
+    match to_id {
+        None => {
+            tx.execute("UPDATE tags SET name = ?2 WHERE id = ?1", params![from_id, to])?;
+        }
+        Some(to_id) => {
+            tx.execute(
+                "INSERT OR IGNORE INTO draft_tags (draft_id, tag_id) SELECT draft_id, ?2 FROM draft_tags WHERE tag_id = ?1",
+                params![from_id, to_id],
+            )?;
+            tx.execute("DELETE FROM tags WHERE id = ?1", params![from_id])?;
+        }
+    }
+    Ok(n as usize)
 }
 
 /// Deletes a file, retrying briefly: on Windows a file just written can be held for a moment by the indexer
@@ -760,69 +1291,6 @@ fn summary(r: &Row) -> rusqlite::Result<DraftSummary> {
         flagged: r.get::<_, i64>(5)? != 0,
         modified_at: r.get(6)?,
     })
-}
-
-/// Turns what the user typed into an FTS5 query that cannot fail to parse: every token is a quoted string
-/// (embedded quotes doubled), the last one is a prefix match, tokens are ANDed.
-pub fn fts_query(input: &str) -> String {
-    let tokens: Vec<&str> = input.split_whitespace().collect();
-    let mut out = Vec::with_capacity(tokens.len());
-    for (i, tok) in tokens.iter().enumerate() {
-        let tok = tok.trim_matches(|c: char| !c.is_alphanumeric());
-        if tok.is_empty() {
-            continue;
-        }
-        let quoted = format!("\"{}\"", tok.replace('"', "\"\""));
-        if i == tokens.len() - 1 {
-            out.push(format!("{quoted}*"));
-        } else {
-            out.push(quoted);
-        }
-    }
-    out.join(" ")
-}
-
-/// The cleaned tokens of a query, lower-cased, for highlighting.
-fn search_terms(input: &str) -> Vec<String> {
-    input
-        .split_whitespace()
-        .map(|t| t.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase())
-        .filter(|t| !t.is_empty())
-        .collect()
-}
-
-/// About `SNIPPET_WORDS` words around the first term found, with every term occurrence in that window wrapped
-/// in `\u{1}`…`\u{2}`. Falls back to the start of the body when no term is found (a diacritic-folded match).
-pub fn snippet(content: &str, terms: &[String]) -> String {
-    const SNIPPET_WORDS: usize = 14;
-    let words: Vec<&str> = content.split_whitespace().collect();
-    let matches = |w: &str| {
-        let lw = w.to_lowercase();
-        terms.iter().any(|t| lw.contains(t.as_str()))
-    };
-    let first = words.iter().position(|w| matches(w));
-    let start = first.map(|i| i.saturating_sub(SNIPPET_WORDS / 3)).unwrap_or(0);
-    let end = (start + SNIPPET_WORDS).min(words.len());
-    let mut out = String::new();
-    if start > 0 {
-        out.push('…');
-    }
-    for (i, w) in words[start..end].iter().enumerate() {
-        if i > 0 {
-            out.push(' ');
-        }
-        if matches(w) {
-            out.push('\u{1}');
-            out.push_str(w);
-            out.push('\u{2}');
-        } else {
-            out.push_str(w);
-        }
-    }
-    if end < words.len() {
-        out.push('…');
-    }
-    out
 }
 
 #[cfg(test)]
@@ -922,46 +1390,372 @@ mod tests {
         assert!(!s.save(9999, "x", 0).unwrap());
     }
 
-    #[test]
-    fn list_pages_by_keyset() {
+    /// A store whose clock moves one millisecond per call, so every timestamp differs.
+    fn ticking_store() -> (Store, Arc<AtomicI64>) {
         let mut s = store();
         let t = Arc::new(AtomicI64::new(1_000_000));
         let c = t.clone();
         s.set_clock(move || c.fetch_add(1, Ordering::SeqCst));
+        (s, t)
+    }
+
+    fn titles(page: &ListPage) -> Vec<&str> {
+        page.rows.iter().map(|r| r.title.as_str()).collect()
+    }
+
+    /// Every row of a list, page by page.
+    fn all_pages(s: &Store, q: &ListQuery) -> Vec<String> {
+        let mut q = q.clone();
+        let mut out = Vec::new();
+        loop {
+            let page = s.list(&q).unwrap();
+            assert!(page.rows.len() <= q.limit);
+            out.extend(page.rows.iter().map(|r| r.title.clone()));
+            match page.next {
+                Some(c) => q.cursor = Some(c),
+                None => return out,
+            }
+        }
+    }
+
+    #[test]
+    fn list_pages_by_keyset() {
+        let (s, _) = ticking_store();
         for i in 0..25 {
             s.new_draft(&format!("Draft {i}")).unwrap();
         }
-        let p1 = s.list(Folder::Inbox, None, 10).unwrap();
+        let mut q = ListQuery { limit: 10, ..ListQuery::folder(Folder::Inbox) };
+        let p1 = s.list(&q).unwrap();
         assert_eq!(p1.rows.len(), 10);
         assert_eq!(p1.rows[0].title, "Draft 24");
-        let p2 = s.list(Folder::Inbox, p1.next, 10).unwrap();
+        q.cursor = p1.next;
+        let p2 = s.list(&q).unwrap();
         assert_eq!(p2.rows[0].title, "Draft 14");
-        let p3 = s.list(Folder::Inbox, p2.next, 10).unwrap();
+        q.cursor = p2.next;
+        let p3 = s.list(&q).unwrap();
         assert_eq!(p3.rows.len(), 5);
         assert!(p3.next.is_none());
     }
 
     #[test]
+    fn every_sort_pages_the_same_rows_in_both_directions() {
+        let (mut s, t) = ticking_store();
+        // Titles out of creation order, two equal but for case (the id breaks the tie).
+        let names = ["delta", "Alpha", "charlie", "bravo", "alpha", "Echo", "foxtrot"];
+        let ids: Vec<i64> = names.iter().map(|n| s.new_draft(n).unwrap().id).collect();
+        // Touch some so modified and accessed orders differ from created.
+        s.save(ids[0], "delta", 0).unwrap();
+        t.fetch_add(120_000, Ordering::SeqCst);
+        s.draft(ids[3]).unwrap();
+        s.move_drafts(&[ids[6]], Folder::Archive).unwrap();
+        let expect_asc = |sort: Sort| -> Vec<String> {
+            let mut rows: Vec<(SortKey, i64, String)> = s
+                .raw()
+                .prepare(
+                    "SELECT id, title, created_at, modified_at, accessed_at FROM drafts WHERE folder = 0",
+                )
+                .unwrap()
+                .query_map([], |r| {
+                    let key = match sort {
+                        Sort::Title => SortKey::Text(r.get(1)?),
+                        Sort::Created => SortKey::Int(r.get(2)?),
+                        Sort::Modified => SortKey::Int(r.get(3)?),
+                        Sort::Accessed => SortKey::Int(r.get(4)?),
+                    };
+                    Ok((key, r.get(0)?, r.get(1)?))
+                })
+                .unwrap()
+                .map(Result::unwrap)
+                .collect();
+            rows.sort_by(|a, b| a.0.cmp_nocase(&b.0).then(a.1.cmp(&b.1)));
+            rows.into_iter().map(|r| r.2).collect()
+        };
+        for sort in [Sort::Modified, Sort::Created, Sort::Accessed, Sort::Title] {
+            for limit in [1, 2, 4, 50] {
+                let q = ListQuery { sort, desc: false, limit, ..ListQuery::folder(Folder::Inbox) };
+                assert_eq!(all_pages(&s, &q), expect_asc(sort), "{sort:?} asc, pages of {limit}");
+                let mut desc = expect_asc(sort);
+                desc.reverse();
+                let q = ListQuery { desc: true, ..q };
+                assert_eq!(all_pages(&s, &q), desc, "{sort:?} desc, pages of {limit}");
+            }
+        }
+        let q = ListQuery { sort: Sort::Title, desc: false, ..ListQuery::folder(Folder::Inbox) };
+        assert_eq!(all_pages(&s, &q), vec!["Alpha", "alpha", "bravo", "charlie", "delta", "Echo"]);
+    }
+
+    #[test]
+    fn a_cursor_from_another_sort_is_refused() {
+        let (s, _) = ticking_store();
+        s.new_draft("a").unwrap();
+        s.new_draft("b").unwrap();
+        let page = s.list(&ListQuery { limit: 1, ..ListQuery::default() }).unwrap();
+        let q = ListQuery { sort: Sort::Title, cursor: page.next, ..ListQuery::default() };
+        assert!(s.list(&q).is_err());
+    }
+
+    #[test]
+    fn all_merges_inbox_and_archive() {
+        let (mut s, _) = ticking_store();
+        let ids: Vec<i64> = (0..9).map(|i| s.new_draft(&format!("d{i}")).unwrap().id).collect();
+        s.move_drafts(&[ids[1], ids[4], ids[7]], Folder::Archive).unwrap();
+        s.move_drafts(&[ids[8]], Folder::Trash).unwrap();
+        // A move is a modification: the archived three share the newest time, then go by id.
+        let q = ListQuery { folder: None, limit: 2, ..ListQuery::default() };
+        assert_eq!(all_pages(&s, &q), vec!["d7", "d4", "d1", "d6", "d5", "d3", "d2", "d0"]);
+    }
+
+    #[test]
+    fn flagged_top_lists_flagged_first_across_pages() {
+        let (mut s, _) = ticking_store();
+        let ids: Vec<i64> = (0..8).map(|i| s.new_draft(&format!("d{i}")).unwrap().id).collect();
+        s.flag_drafts(&[ids[2], ids[5]], true).unwrap();
+        // Sorted by created, so flagging (a modification) does not move them on its own.
+        for limit in [1, 2, 3, 10] {
+            let q = ListQuery { flagged_top: true, sort: Sort::Created, limit, ..ListQuery::default() };
+            assert_eq!(
+                all_pages(&s, &q),
+                vec!["d5", "d2", "d7", "d6", "d4", "d3", "d1", "d0"],
+                "pages of {limit}"
+            );
+        }
+        let q =
+            ListQuery { flagged_only: true, flagged_top: true, sort: Sort::Created, ..ListQuery::default() };
+        assert_eq!(all_pages(&s, &q), vec!["d5", "d2"]);
+        // By modified the flagged part walks the flagged index; flagging made both newest, in id order.
+        s.move_drafts(&[ids[5]], Folder::Archive).unwrap();
+        for limit in [1, 2, 10] {
+            let q = ListQuery { flagged_top: true, folder: None, limit, ..ListQuery::default() };
+            assert_eq!(
+                all_pages(&s, &q),
+                vec!["d5", "d2", "d7", "d6", "d4", "d3", "d1", "d0"],
+                "pages of {limit}"
+            );
+            let q = ListQuery { flagged_top: true, limit, ..ListQuery::default() };
+            assert_eq!(all_pages(&s, &q), vec!["d2", "d7", "d6", "d4", "d3", "d1", "d0"], "pages of {limit}");
+        }
+    }
+
+    #[test]
+    fn tag_filters_all_and_none() {
+        let (mut s, _) = ticking_store();
+        let a = s.new_draft("a").unwrap().id;
+        let b = s.new_draft("b").unwrap().id;
+        let c = s.new_draft("c").unwrap().id;
+        s.set_tags(a, &["work".into(), "urgent".into()]).unwrap();
+        s.set_tags(b, &["work".into()]).unwrap();
+        s.set_tags(c, &["home".into()]).unwrap();
+        let list = |tags_all: &[&str], tags_none: &[&str]| {
+            let q = ListQuery {
+                tags_all: tags_all.iter().map(|t| t.to_string()).collect(),
+                tags_none: tags_none.iter().map(|t| t.to_string()).collect(),
+                ..ListQuery::default()
+            };
+            titles(&s.list(&q).unwrap()).into_iter().map(String::from).collect::<Vec<_>>()
+        };
+        assert_eq!(list(&["Work"], &[]), vec!["b", "a"]);
+        assert_eq!(list(&["work", "urgent"], &[]), vec!["a"]);
+        assert_eq!(list(&["work"], &["urgent"]), vec!["b"]);
+        assert_eq!(list(&[], &["work"]), vec!["c"]);
+        assert_eq!(list(&["nosuchtag"], &[]), Vec::<String>::new());
+        assert_eq!(list(&[], &["nosuchtag"]), vec!["c", "b", "a"]);
+        // A tiny set is fetched by id and sorted; every sort still applies.
+        let q = ListQuery {
+            tags_all: vec!["work".into()],
+            sort: Sort::Title,
+            desc: false,
+            limit: 1,
+            ..ListQuery::default()
+        };
+        assert_eq!(all_pages(&s, &q), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn broad_filters_walk_the_index_and_agree_with_narrow_ones() {
+        // More than CANDIDATES_MAX matches forces the per-row path for the tag and the text.
+        let (s, _) = ticking_store();
+        let n = 2 * CANDIDATES_MAX + 100;
+        s.raw().execute_batch("BEGIN; INSERT INTO tags (uuid, name) VALUES ('t', 'all');").unwrap();
+        for i in 0..n {
+            let d =
+                s.new_draft(&format!("note {i}\ncommon {}", if i % 3 == 0 { "rare" } else { "" })).unwrap();
+            s.raw()
+                .execute(
+                    "INSERT INTO draft_tags (draft_id, tag_id) SELECT ?1, id FROM tags WHERE name = 'all'",
+                    [d.id],
+                )
+                .unwrap();
+        }
+        // Two more broad tags (two thirds each), walked together.
+        s.raw()
+            .execute_batch(
+                "INSERT INTO tags (uuid, name) VALUES ('t2', 'not0'), ('t3', 'not1');
+                 INSERT INTO draft_tags (draft_id, tag_id) SELECT d.id, t.id FROM drafts d, tags t
+                   WHERE (t.name = 'not0' AND d.id % 3 != 0) OR (t.name = 'not1' AND d.id % 3 != 1);
+                 COMMIT;",
+            )
+            .unwrap();
+        let q =
+            ListQuery { tags_all: vec!["not0".into(), "not1".into()], limit: 500, ..ListQuery::default() };
+        let both = all_pages(&s, &q);
+        assert_eq!(both.len(), (1..=n).filter(|id| id % 3 == 2).count());
+        let q = ListQuery { tags_all: vec!["not0".into(), "not1".into(), "all".into()], ..q };
+        assert_eq!(all_pages(&s, &q), both, "a broad tag beside the intersection");
+        let q = ListQuery { tags_all: vec!["all".into(), "not0".into()], limit: 500, ..ListQuery::default() };
+        assert_eq!(
+            all_pages(&s, &q).len(),
+            (1..=n).filter(|id| id % 3 != 0).count(),
+            "too broad together: walked"
+        );
+        let q = ListQuery {
+            tags_all: vec!["all".into()],
+            fts: "common".into(),
+            limit: 7,
+            ..ListQuery::default()
+        };
+        let page = s.list(&q).unwrap();
+        assert_eq!(page.rows.len(), 7);
+        assert_eq!(titles(&page)[0], format!("note {}", n - 1));
+        let q = ListQuery {
+            tags_all: vec!["all".into()],
+            fts: "rare".into(),
+            limit: 500,
+            ..ListQuery::default()
+        };
+        assert_eq!(all_pages(&s, &q).len(), n.div_ceil(3), "a narrow filter with a broad one");
+        let q = ListQuery { fts: "common".into(), tags_none: vec!["all".into()], ..ListQuery::default() };
+        assert!(s.list(&q).unwrap().rows.is_empty());
+        let q = ListQuery { fts: "common".into(), limit: 500, ..ListQuery::default() };
+        let rows = all_pages(&s, &q);
+        assert_eq!(rows.len(), CANDIDATES_MAX, "broad text keeps the newest matches");
+        assert_eq!(rows.last().unwrap(), &format!("note {}", n - CANDIDATES_MAX));
+    }
+
+    #[test]
+    fn list_text_filter_is_safe() {
+        let (s, _) = ticking_store();
+        s.new_draft("milk and eggs").unwrap();
+        for odd in ["\"", "*", "-", "OR", "milk\" OR *", "NOT", "(", "a:b", "\"open phrase"] {
+            assert!(s.list(&ListQuery { fts: odd.into(), ..ListQuery::default() }).is_ok(), "{odd}");
+        }
+        assert_eq!(s.list(&ListQuery { fts: "egg".into(), ..ListQuery::default() }).unwrap().rows.len(), 1);
+    }
+
+    #[test]
     fn folders_and_flags() {
-        let s = store();
+        let mut s = store();
         let d = s.new_draft("one").unwrap();
-        s.set_folder(d.id, Folder::Archive).unwrap();
+        s.move_drafts(&[d.id], Folder::Archive).unwrap();
         assert_eq!(s.count(Folder::Inbox).unwrap(), 0);
         assert_eq!(s.count(Folder::Archive).unwrap(), 1);
-        s.set_flagged(d.id, true).unwrap();
+        s.flag_drafts(&[d.id], true).unwrap();
         assert!(s.draft(d.id).unwrap().flagged);
     }
 
     #[test]
+    fn batches_undo_once_and_keep_later_edits() {
+        let (mut s, t) = ticking_store();
+        let a = s.new_draft("a").unwrap();
+        let b = s.new_draft("b").unwrap();
+        s.move_drafts(&[b.id], Folder::Archive).unwrap();
+        let tok = s.move_drafts(&[a.id, b.id], Folder::Archive).unwrap();
+        assert_eq!(tok.count, 1, "b was already archived");
+        assert_eq!(s.count(Folder::Archive).unwrap(), 2);
+        assert_eq!(s.undo(&tok.token).unwrap(), 1);
+        assert_eq!(s.count(Folder::Inbox).unwrap(), 1);
+        assert_eq!(s.count(Folder::Archive).unwrap(), 1, "b stays where it was before the batch");
+        assert_eq!(s.draft(a.id).unwrap().modified_at, a.modified_at, "the list order comes back too");
+        assert!(s.undo(&tok.token).is_err(), "a token works once");
+
+        let flag = s.flag_drafts(&[a.id], true).unwrap();
+        t.fetch_add(1000, Ordering::SeqCst);
+        s.save(a.id, "a edited", 0).unwrap();
+        let edited = s.draft(a.id).unwrap().modified_at;
+        s.undo(&flag.token).unwrap();
+        let after = s.draft(a.id).unwrap();
+        assert!(!after.flagged);
+        assert_eq!(after.modified_at, edited, "an edit after the batch keeps its time");
+        assert!(s.undo("not-a-token").is_err());
+    }
+
+    #[test]
+    fn undo_restores_only_the_column_the_batch_changed() {
+        let (mut s, _) = ticking_store();
+        let a = s.new_draft("a").unwrap();
+        let tok = s.move_drafts(&[a.id], Folder::Trash).unwrap();
+        s.flag_drafts(&[a.id], true).unwrap();
+        s.undo(&tok.token).unwrap();
+        let d = s.draft(a.id).unwrap();
+        assert_eq!(d.folder, Folder::Inbox);
+        assert!(d.flagged);
+    }
+
+    #[test]
+    fn only_the_newest_undo_tokens_are_kept() {
+        let (mut s, _) = ticking_store();
+        let a = s.new_draft("a").unwrap();
+        let first = s.flag_drafts(&[a.id], true).unwrap();
+        for i in 0..UNDO_KEPT {
+            s.flag_drafts(&[a.id], i % 2 == 0).unwrap();
+        }
+        assert!(s.undo(&first.token).is_err());
+    }
+
+    #[test]
+    fn opening_marks_accessed_at_most_once_a_minute() {
+        let (s, now) = store_with_clock(10_000_000);
+        let d = s.new_draft("x").unwrap();
+        now.fetch_add(30_000, Ordering::SeqCst);
+        assert_eq!(s.draft(d.id).unwrap().accessed_at, 10_000_000, "within a minute: no write");
+        now.fetch_add(40_000, Ordering::SeqCst);
+        assert_eq!(s.draft(d.id).unwrap().accessed_at, 10_070_000);
+        assert_eq!(s.draft(d.id).unwrap().modified_at, 10_000_000, "opening is not a modification");
+    }
+
+    #[test]
+    fn tag_counts_rename_and_merge() {
+        let (mut s, _) = ticking_store();
+        let a = s.new_draft("a").unwrap().id;
+        let b = s.new_draft("b").unwrap().id;
+        let c = s.new_draft("c").unwrap().id;
+        s.set_tags(a, &["work".into(), "todo".into()]).unwrap();
+        s.set_tags(b, &["work".into(), "to-do".into()]).unwrap();
+        s.set_tags(c, &["work".into()]).unwrap();
+        s.move_drafts(&[c], Folder::Archive).unwrap();
+        let counts = |s: &Store, f| {
+            s.tag_counts(f).unwrap().into_iter().map(|t| (t.name, t.count)).collect::<Vec<(String, i64)>>()
+        };
+        assert_eq!(
+            counts(&s, Some(Folder::Inbox)),
+            vec![("to-do".into(), 1), ("todo".into(), 1), ("work".into(), 2)]
+        );
+        assert_eq!(counts(&s, None)[2], ("work".into(), 3));
+        let before = s.draft(a).unwrap().modified_at;
+        assert_eq!(s.rename_tag("Work", "Job").unwrap(), 3);
+        assert_eq!(s.draft(a).unwrap().tags, vec!["job", "todo"]);
+        assert_eq!(s.draft(a).unwrap().modified_at, before, "a rename does not reorder the list");
+        assert_eq!(s.merge_tags(&["to-do".into(), "todo".into()], "todo").unwrap(), 1);
+        assert_eq!(s.draft(b).unwrap().tags, vec!["job", "todo"]);
+        assert_eq!(counts(&s, Some(Folder::Inbox)), vec![("job".into(), 2), ("todo".into(), 2)]);
+        // Renaming onto an existing tag merges; a draft with both keeps one.
+        assert_eq!(s.rename_tag("todo", "job").unwrap(), 2);
+        assert_eq!(s.draft(a).unwrap().tags, vec!["job"]);
+        assert!(s.rename_tag("nope", "x").is_err());
+        assert!(s.rename_tag("job", "  ").is_err());
+    }
+
+    #[test]
     fn search_is_safe_and_matches_prefixes() {
-        let s = store();
+        let mut s = store();
         s.new_draft("Groceries\nmilk, eggs, bread").unwrap();
         s.new_draft("Café plans\nmeet at the café").unwrap();
         let t = s.new_draft("Trashed\nmilk").unwrap();
-        s.set_folder(t.id, Folder::Trash).unwrap();
+        s.move_drafts(&[t.id], Folder::Trash).unwrap();
         assert_eq!(s.search("mil", 10).unwrap().len(), 1, "trash is excluded, prefix matches");
         assert_eq!(s.search("cafe", 10).unwrap().len(), 1, "diacritics are folded");
-        assert!(s.search("milk\" OR *", 10).is_ok(), "FTS syntax in input cannot error");
+        for odd in ["milk\" OR *", "\"", "*", "-", "OR", "NOT x", "tag:", "is:", "-tag:\"", "\"open phrase"] {
+            assert!(s.search(odd, 10).is_ok(), "FTS syntax in input cannot error: {odd}");
+        }
         assert!(s.search("   ", 10).unwrap().is_empty());
         let hit = &s.search("eggs", 10).unwrap()[0];
         assert_eq!(hit.snippet, "Groceries milk, \u{1}eggs,\u{2} bread");
@@ -991,14 +1785,6 @@ mod tests {
         assert!(snip.ends_with('…'));
         assert_eq!(snippet("short text", &["nothing".into()]), "short text");
         assert_eq!(snippet("", &terms), "");
-    }
-
-    #[test]
-    fn fts_query_quotes_everything() {
-        assert_eq!(fts_query("hello world"), "\"hello\" \"world\"*");
-        assert_eq!(fts_query("a\"b"), "\"a\"\"b\"*");
-        assert_eq!(fts_query("(x) -y"), "\"x\" \"y\"*");
-        assert_eq!(fts_query("***"), "");
     }
 
     #[test]
@@ -1039,7 +1825,7 @@ mod tests {
         let (mut s, now) = store_with_clock(1_700_000_000_000);
         let day = 24 * 60 * 60 * 1000;
         let d = s.new_draft("bin me").unwrap();
-        s.set_folder(d.id, Folder::Trash).unwrap();
+        s.move_drafts(&[d.id], Folder::Trash).unwrap();
         now.fetch_add(29 * day, Ordering::SeqCst);
         assert_eq!(s.sweep().unwrap().tombstoned, 0);
         now.fetch_add(2 * day, Ordering::SeqCst);
@@ -1061,9 +1847,117 @@ mod tests {
     fn empty_trash_is_immediate() {
         let mut s = store();
         let d = s.new_draft("gone").unwrap();
-        s.set_folder(d.id, Folder::Trash).unwrap();
+        s.move_drafts(&[d.id], Folder::Trash).unwrap();
         assert_eq!(s.empty_trash().unwrap(), 1);
         assert_eq!(s.count(Folder::Trash).unwrap(), 0);
+    }
+
+    #[test]
+    fn search_filters_by_tag_flag_and_folder() {
+        let (mut s, _) = ticking_store();
+        let a = s.new_draft("Shopping\nmilk").unwrap().id;
+        let b = s.new_draft("Work notes\nmilk the budget").unwrap().id;
+        let c = s.new_draft("Old\nmilk").unwrap().id;
+        s.set_tags(a, &["home".into()]).unwrap();
+        s.set_tags(b, &["work".into()]).unwrap();
+        s.flag_drafts(&[b], true).unwrap();
+        s.move_drafts(&[c], Folder::Trash).unwrap();
+        let ids = |q: &str| s.search(q, 10).unwrap().into_iter().map(|h| h.id).collect::<Vec<_>>();
+        assert_eq!(ids("milk"), vec![b, a]);
+        assert_eq!(ids("milk tag:home"), vec![a]);
+        assert_eq!(ids("milk -tag:home"), vec![b]);
+        assert_eq!(ids("is:flagged"), vec![b], "a filter alone lists");
+        assert_eq!(ids("milk in:trash"), vec![c]);
+        assert_eq!(ids("tag:nosuch milk"), Vec::<i64>::new());
+        assert_eq!(ids("\"the budget\""), vec![b]);
+        assert_eq!(ids("\"budget the\""), Vec::<i64>::new(), "a phrase is in order");
+        let hit = &s.search("tag:work budget", 10).unwrap()[0];
+        assert!(hit.snippet.contains("\u{1}budget\u{2}"), "{}", hit.snippet);
+        assert_eq!(s.search("tag:home", 10).unwrap()[0].snippet, "milk", "no words: the preview");
+    }
+
+    #[test]
+    fn sweep_thins_versions_and_save_never_deletes() {
+        let (mut s, now) = store_with_clock(1_700_000_000_000);
+        let d = s.new_draft("v0").unwrap();
+        // A save every 6 minutes for three days: each one takes a version.
+        let saves = 3 * 24 * 10;
+        for i in 1..=saves {
+            now.fetch_add(6 * 60 * 1000, Ordering::SeqCst);
+            s.save(d.id, &format!("v{i}"), 0).unwrap();
+        }
+        assert_eq!(s.versions(d.id).unwrap().len(), saves, "save takes versions and never deletes one");
+        s.snapshot(d.id, "before_action:x", now.load(Ordering::SeqCst) - 2 * DAY_MS).unwrap();
+        let report = s.sweep().unwrap();
+        let left = s.versions(d.id).unwrap();
+        assert_eq!(report.versions_thinned, saves + 1 - left.len());
+        // About 10 from the last hour, 23 more hourly, two or three daily, and the protected one.
+        assert!((34..=40).contains(&left.len()), "{} left", left.len());
+        assert!(left.iter().any(|v| v.reason == "before_action:x"));
+        assert_eq!(s.sweep().unwrap().versions_thinned, 0, "a second sweep has nothing to do");
+        s.set_setting("retention.versionsDailyDays", "1").unwrap();
+        assert_eq!(s.retention().unwrap().versions_daily_days, 7, "settings cannot go below their floor");
+    }
+
+    #[test]
+    fn trash_period_is_a_setting() {
+        let (mut s, now) = store_with_clock(1_700_000_000_000);
+        let d = s.new_draft("bin me").unwrap();
+        s.move_drafts(&[d.id], Folder::Trash).unwrap();
+        s.set_setting("retention.trashDays", "3").unwrap();
+        now.fetch_add(4 * DAY_MS, Ordering::SeqCst);
+        assert_eq!(s.sweep().unwrap().tombstoned, 1);
+        let d = s.new_draft("again").unwrap();
+        s.move_drafts(&[d.id], Folder::Trash).unwrap();
+        s.set_setting("retention.trashDays", "0").unwrap();
+        now.fetch_add(DAY_MS / 2, Ordering::SeqCst);
+        assert_eq!(s.sweep().unwrap().tombstoned, 0, "the floor is one day");
+    }
+
+    /// Writes a v1 database the way a v1 build did, for the migration tests.
+    fn v1_fixture(path: &Path) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let conn = Connection::open(path).unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        conn.execute_batch(
+            "INSERT INTO meta (key, value) VALUES ('schema_version', '1'), ('device_id', 'fixture'), ('created', '0');
+             INSERT INTO drafts (uuid, content, title, preview, created_at, modified_at, accessed_at)
+               VALUES ('u1', 'Zebra\nstripes', 'Zebra', 'stripes', 1, 1, 1),
+                      ('u2', 'apple\npie', 'apple', 'pie', 2, 2, 2);",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_v1_database_migrates_to_v2_with_a_backup() {
+        let dir = std::env::temp_dir().join(format!("petrel-test-{}", uuid::Uuid::new_v4()));
+        let path = dir.join("petrel.db");
+        v1_fixture(&path);
+        let s = Store::open(&path).unwrap();
+        assert_eq!(s.schema_version().unwrap(), 2);
+        let backups: Vec<_> =
+            std::fs::read_dir(dir.join("backups")).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(backups.len(), 1);
+        assert!(backups[0].to_string_lossy().starts_with("petrel-v1-"), "{backups:?}");
+        let device: String =
+            s.raw().query_row("SELECT value FROM meta WHERE key = 'device_id'", [], |r| r.get(0)).unwrap();
+        assert_eq!(device, "fixture", "migration keeps the device id");
+        let page = s.list(&ListQuery { sort: Sort::Title, desc: false, ..ListQuery::default() }).unwrap();
+        assert_eq!(titles(&page), vec!["apple", "Zebra"]);
+        let plan: String = s
+            .raw()
+            .query_row(
+                "EXPLAIN QUERY PLAN SELECT id FROM drafts WHERE folder = 0 AND deleted_at IS NULL \
+                 ORDER BY title COLLATE NOCASE, id LIMIT 5",
+                [],
+                |r| r.get(3),
+            )
+            .unwrap();
+        assert!(plan.contains("drafts_title"), "{plan}");
+        assert_eq!(s.search("stripes", 5).unwrap().len(), 1, "the search index came through");
+        drop(s);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
