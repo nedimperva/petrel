@@ -4,9 +4,10 @@
 
 Linux first, then Windows · Rust · Tauri 2 · SolidJS · SQLite · MIT
 
-> **Petrel is in planning (0.0).** There is no build yet. The roadmap, architecture, schema and the action
-> engine specification are in [`docs/`](docs/PLAN.md). A sibling of [Tern](https://github.com/nedimperva/tern),
-> built on the same stack and conventions.
+> **Petrel is at the skeleton stage (0.1, milestone M0).** It compiles, saves what you type, and has a speed
+> table, but there is no installer and no actions yet. The roadmap, architecture, schema and the action engine
+> specification are in [`docs/`](docs/PLAN.md). A sibling of [Tern](https://github.com/nedimperva/tern), built on
+> the same stack and conventions.
 
 ## What it will be
 
@@ -46,16 +47,58 @@ Milestones, exit criteria and scope boundaries: [docs/PLAN.md](docs/PLAN.md).
 | [docs/sprints/](docs/sprints/README.md) | Work packages and how to work them |
 | [docs/acceptance/](docs/acceptance/m1-alpha.md) | Owner checklists per milestone |
 
-## Project layout (planned)
+## Building from source
+
+Linux (Arch, including Omarchy):
+
+```
+sudo pacman -S --needed base-devel rustup nodejs npm webkit2gtk-4.1 librsvg
+rustup default stable
+```
+
+Linux (Debian/Ubuntu):
+
+```
+sudo apt install build-essential curl wget file pkg-config libwebkit2gtk-4.1-dev librsvg2-dev
+curl https://sh.rustup.rs -sSf | sh
+```
+
+Windows: Rust from [rustup.rs](https://rustup.rs) (MSVC toolchain) and the Visual Studio Build Tools with
+"Desktop development with C++". Windows 11 has the WebView2 runtime already.
+
+Then, on any system:
+
+```
+npm install
+npm run tauri dev       # the app, with hot reload for the UI
+npm run tauri build     # an installer: .msi/.exe on Windows, .deb/.rpm/.AppImage on Linux
+
+cargo test --workspace                                        # all tests
+cargo run --release -p petrel-core --example store_bench      # the speed table at 50,000 drafts
+cargo run --release -p petrel-core --example gen_store -- PATH # a 50,000-draft test library; PETREL_DB=PATH opens it
+scripts/kill-test.sh                                          # type, kill -9, see what survived
+```
+
+To work on the UI alone, `npm run dev` and open [http://localhost:1420](http://localhost:1420): without Tauri the
+UI runs against a fake in-memory store.
+
+Debug builds keep their database at `<app data>/dev/petrel.db`, apart from an installed Petrel's. On Wayland,
+Petrel sets `WEBKIT_DISABLE_DMABUF_RENDERER=1` itself (set it to `0` to opt out). On Hyprland the window class is
+`petrel`; to float it: `windowrulev2 = float, class:^(petrel)$`.
+
+## Project layout
 
 ```
 crates/petrel-core/      the engine (Rust, no UI)
-  src/store.rs           SQLite schema, migrations, list/search queries, versions, sweep
-  src/template.rs        [[tag]] engine
-  src/action.rs          actions, steps, the run algorithm
-  src/host.rs            Host trait: clipboard, URLs, files, shell, keyring, HTTP, prompts
-  src/script.rs          JavaScript runtime and API
+  src/store.rs           SQLite schema, migrations with backup, drafts, tags, versions, search, sweep
+  src/title.rs           the first line is the title
+  src/gen.rs             a generated test library (Zipf vocabulary)
+  src/template.rs        [[tag]] engine                      (package 03)
+  src/action.rs          actions, steps, the run algorithm   (package 03)
+  src/host.rs            Host trait: clipboard, URLs, files, shell, keyring, HTTP, prompts (package 03)
+  src/script.rs          JavaScript runtime and API          (package 04)
   examples/store_bench.rs  timings on a 50,000-draft store
+  examples/runtime_spike/  the QuickJS-vs-Boa measurement behind the scripting decision
 src-tauri/               the desktop shell and CLI: commands, windows, tray, deep links, updater
 src/                     the UI (SolidJS): editor, list, action column, command bar
 ```

@@ -5,9 +5,19 @@ Drafts (capture first, act later) and built like Tern (`github.com/nedimperva/te
 (`crates/petrel-core`), a Tauri 2 shell (`src-tauri`) and a SolidJS UI (`src`). The README covers layout, setup
 and keys; this file covers state and decisions that aren't visible from the code.
 
-## Where things stand (2026-10-22)
+## Where things stand (2026-10-22, package 00 skeleton on `sprint/00-skeleton`)
 
-- The repository holds the plan and specifications only. **No code exists.** Start with package 00.
+- The workspace compiles: `petrel-core` (schema v1, migrations with backup-before-migrate, drafts, tags, versions,
+  FTS search, sweep; 21 tests; `gen_store` and `store_bench` examples), `src-tauri` (five commands, single instance,
+  logging, hidden-then-shown window), and the SolidJS UI (CodeMirror 6 Markdown editor, 300 ms autosave with flush on
+  blur/hide/close, status strip, fake store for `npm run dev`). CI (`check.yml`) runs both OSes. Clippy
+  `-D warnings` and fmt are clean. The speed table passes at 50k (package 00 Results).
+- **Search is newest-first** (400 newest matches by rowid, then `modified_at`), not bm25-ranked; see package 00
+  Decisions for the numbers. Snippets are made in Rust (`store::snippet`).
+- The scripting-runtime spike recommends **rquickjs** (package 03 Decisions); the owner has not answered yet.
+  The spike is a standalone crate under `crates/petrel-core/examples/runtime_spike/`, not a workspace member.
+- Not yet done by anyone: a boot on Hyprland, the Windows smoke test, the kill test, a packaged cold-start number.
+  The agent's sandbox has no display and 3.9 GB of disk; it can run `cargo check`/clippy/tests but not the window.
 - The owner has shipped Tern through its Linux beta on this stack. Reuse Tern's `check.yml`, `release.yml`,
   `update.rs`, `packaging/aur`, `tokens.css`, the palette and virtual list components, and the Linux/Windows
   notes. Do not copy anything from Drafts (Agile Tortoise); it is closed source and its name is a trademark.
@@ -24,12 +34,11 @@ compatibility is the documented subset in `docs/design/actions.md`, nothing more
 
 ## First steps for the next session
 
-1. Read `docs/PLAN.md`, `docs/sprints/README.md`, then `docs/sprints/sprint-00-compile-and-boot.md`.
-2. Branch `sprint/00-skeleton`. Create the workspace, copy Tern's CI and tooling files, get `cargo test --workspace`
-   and `npm run build` green on both CI runners before adding features.
-3. Schema v1 from `docs/research/data-model.md` with the migration test and backup-before-migrate.
-4. CodeMirror editor + autosave + the kill test. Record the bundle size and bench numbers in the package Results.
-5. Run the scripting-runtime spike (package 03) and write the Decisions entry for the owner.
+1. Read `docs/PLAN.md`, `docs/sprints/README.md`, then `docs/sprints/sprint-00-compile-and-boot.md` (Log first).
+2. Check the CI result of the `sprint/00-skeleton` PR on both OSes; fix anything Windows-only.
+3. Owner: `npm run tauri dev` on Omarchy, `scripts/kill-test.sh`, the Windows smoke list, and the runtime decision.
+4. Then package 01's M1 slice (list filters, tags, trash policy, undo tokens) and package 02 (editor commands,
+   open-to-new-draft, capture window) on their own branches.
 
 ## Design decisions to keep
 
