@@ -167,5 +167,8 @@ implemented.
 shell's `PATH`; trust as a per-action hash earned in the editor or once at first run; age-tiered version retention
 with no hard cap, thinned only in `sweep()`.
 
+2026-10-22 — Owner chose **rquickjs** as the scripting runtime (package 03 gate; measured against Boa, deno_core
+excluded on size) and accepted **newest-first search** for M1 with relevance ranking as a package 05 (M2) task.
+
 Research: [Drafts reference](research/drafts-reference.md), [stack](research/stack.md),
 [data model](research/data-model.md). Design: [actions and scripting](design/actions.md), [UI](design/ui.md).

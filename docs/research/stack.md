@@ -11,7 +11,7 @@ Petrel reuses Tern's proven stack. Decisions here are inherited unless marked **
 | Editor | CodeMirror 6 (`@codemirror/state`, `view`, `commands`, `lang-markdown`, `search`) | Modular, keyboard-first, good IME support on WebView2 and WebKitGTK; language packages loaded lazily. Bundle budget 300 kB gz |
 | Markdown preview | `pulldown-cmark` in Rust → sandboxed `<iframe>` with CSP | Rendering in core keeps the JS bundle small and lets `petrel export` share the code. Sandbox rules from Tern |
 | Templates | Own engine in core (`template.rs`), ~300 lines, tested | `[[tag]]`, `[[tag|arg]]`, `\[[` escape, strftime dates via `chrono`, custom tags from scripts |
-| Scripting | **gate** rquickjs vs boa vs deno_core (package 03, M0) | Expected: rquickjs. Needs: interrupt handler, memory limit, async host calls, MSVC build |
+| Scripting | **rquickjs** (decided 2026-10-22, package 03 gate) | QuickJS: 1.4 MB, 0.2 ms init, interrupt handler and memory limit both work; Boa had neither; deno_core ~30 MB. `bindgen` feature off |
 | HTTP (scripts) | reqwest + rustls (platform verifier) | No OpenSSL, same as Tern |
 | Secrets | `keyring` crate (Secret Service / Credential Manager / Keychain), service `petrel` | Same gotchas as Tern: a keyring must be running and unlocked on Linux |
 | Shell step | `std::process::Command` via `Host::run_command`, `sh -c` / `cmd /C` or PowerShell per setting | Confirmation on first use per action; output captured with a size cap and a timeout |

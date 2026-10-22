@@ -1,0 +1,80 @@
+/* Layout for package 00: an editor and a status strip. Tokens come from styles/tokens.css (shared with Tern). */
+
+:root {
+  --editor-max: 72ch;
+  --font-ui: "Inter Variable", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-ui);
+  background: var(--bg-0);
+  color: var(--fg-0);
+  -webkit-font-smoothing: antialiased;
+}
+
+.app {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  height: 100%;
+}
+
+.editor {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.strip {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  height: 28px;
+  padding: 0 var(--s-3);
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--fg-2);
+  background: var(--bg-1);
+  border-top: 1px solid var(--line);
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.strip .grow {
+  flex: 1;
+}
+
+.strip .sep {
+  width: 1px;
+  height: 12px;
+  background: var(--line);
+}
+
+.strip .save {
+  min-width: 4ch;
+}
+
+.strip .save-error {
+  color: var(--warn);
+}
+
+.strip kbd {
+  display: inline-block;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  margin-right: 2px;
+  font: 500 11px/16px var(--font-ui);
+  text-align: center;
+  color: var(--fg-1);
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  box-sizing: border-box;
+}

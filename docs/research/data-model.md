@@ -148,7 +148,7 @@ CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);   -- JSON val
 | Name | Shape |
 |---|---|
 | `list(folder, filter, sort, cursor, limit)` | Index scan on `drafts_list` (or created/accessed/title); tag filters join `draft_tags`; FTS filter joins `drafts_fts`; flagged-top is two ordered scans concatenated, not `ORDER BY flagged DESC` |
-| `search(query, scope)` | `drafts_fts MATCH ?` with `bm25`, limited to 200, then page; snippets via `snippet()` on `content` |
+| `search(query, scope)` | `SELECT rowid FROM drafts_fts WHERE MATCH ? ORDER BY rowid DESC LIMIT 400` (FTS5 stops early: microseconds for any term), then the drafts rows by `modified_at DESC`; snippets made in Rust. Exact under 400 matches; newest-first above. `bm25` was 21 ms for a stopword at 50k and is not used (package 00 Decisions) |
 | `open(id)` | Row + tags + `COUNT(versions)` in one statement with subqueries |
 | `save(id, content, cursor)` | One UPDATE; title/preview computed in Rust; FTS by trigger |
 | `version_if_due(id)` | Insert a version when the newest `edit` one is older than 5 min; no trimming here |

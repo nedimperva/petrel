@@ -1,0 +1,32 @@
+# Package 03's decision gate: which JavaScript runtime hosts action scripts. A standalone crate (not a workspace
+# member) so the candidates never enter Petrel's dependency tree or lock file.
+#
+#   cargo run --release --features quickjs
+#   cargo run --release --features boa
+#
+# deno_core is not built here: rusty_v8 downloads a ~100 MB prebuilt V8 and adds ~30 MB to the binary, which
+# rules it out for a capture app on size alone; its numbers are public and recorded in the Decisions entry.
+
+[package]
+name = "runtime_spike"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[features]
+quickjs = ["dep:rquickjs"]
+boa = ["dep:boa_engine", "dep:boa_gc"]
+
+[dependencies]
+rquickjs = { version = "0.9", features = ["futures", "macro"], optional = true }
+boa_engine = { version = "0.20", optional = true }
+boa_gc = { version = "0.20", optional = true }
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3
+strip = true
+panic = "abort"

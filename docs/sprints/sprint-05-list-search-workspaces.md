@@ -33,6 +33,11 @@ Find any draft in two keystrokes and a word. Triage a week of captures in a minu
 ### Command bar (M1)
 - [ ] Tern's palette component: commands, actions, drafts (by title, FTS-backed), tags, workspaces; recents.
 
+### Relevance ranking (M2, owner request 2026-10-22)
+- [ ] A ranked mode for search that keeps the 10 ms target: `bm25` only over a bounded window (the newest N matches,
+      N tuned by measurement) or only when a term has fewer than N matches, with the newest-first order otherwise.
+      Decide the default (newest vs. ranked) with the owner after trying both on a real library.
+
 ### Workspaces (M2)
 - [ ] CRUD in the sidebar; fields per the schema; applying one sets filters, sort, flagged-top and the active action
       group; `Esc` clears; `[[w:Name]]` links apply one.
