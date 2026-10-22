@@ -51,7 +51,10 @@ modify a draft they failed on, and tell you exactly which step broke and why.
 - [ ] Action editor panel: fields from step schemas; drag to reorder steps; shortcut recorder with conflict
       detection; "Test on current draft" with a `DryRunHost` that returns what would happen.
 - [ ] Action log panel (`g l`): runs with status, step, message, "Run again".
-- [ ] Confirmation dialog for first shell/file-outside-scope use per action, showing the rendered command/path.
+- [ ] Trust: `trusted_hash` set on save from the action editor; one-time dialog for untrusted actions listing all
+      rendered commands and out-of-scope paths; cleared when `steps` change outside the editor. Tests for each path.
+- [ ] Login-shell `PATH` resolved once at startup (`$SHELL -lc`), cached in `settings`, exported to every command;
+      `sh` default on Linux, PowerShell on Windows, per-step override.
 
 ### Later (M2)
 - [ ] `htmlPreview` with user CSS and "Continue".

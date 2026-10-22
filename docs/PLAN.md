@@ -162,5 +162,10 @@ CLI `petrel`, window class `petrel`, data directory `petrel/` under the platform
 `%APPDATA%\petrel`), database `petrel.db`, keyring service `petrel`. This revision records the plan; nothing is
 implemented.
 
+2026-10-22 — Owner delegated three engine choices with the brief "speed, convenience, long term"; recorded in
+[actions.md](design/actions.md#decisions-owner-2026-10-22-speed-convenience-long-term): `sh` with the login
+shell's `PATH`; trust as a per-action hash earned in the editor or once at first run; age-tiered version retention
+with no hard cap, thinned only in `sweep()`.
+
 Research: [Drafts reference](research/drafts-reference.md), [stack](research/stack.md),
 [data model](research/data-model.md). Design: [actions and scripting](design/actions.md), [UI](design/ui.md).

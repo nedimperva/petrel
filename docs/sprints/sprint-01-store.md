@@ -26,7 +26,8 @@ no user action can lose text: versions before risk, tombstones instead of delete
 ### Versions (M0)
 - [ ] `version_if_due(draft)` on save: newest 'edit' version older than 5 min → snapshot. Always snapshot before an
       action run (`reason = before_action:<uuid>`) and before `restore`.
-- [ ] Cap 50 per draft (setting), oldest 'edit' versions trimmed first, `before_action` kept longer. Test the trim.
+- [ ] Age-tiered thinning in `sweep()` (hour: all; day: hourly; 30 days: daily; then weekly; `before_action`/`restore`
+      90 days first). Tiers are settings with floors. Test with injected clocks; test that `save` never deletes.
 - [ ] `restore(version)` → new version of the current text first, then replace content.
 
 ### Lists, filters, search (M1)

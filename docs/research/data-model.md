@@ -19,8 +19,9 @@ Design rules, fixed before any code:
 - **Writes are tiny and frequent** (autosave). One `UPDATE drafts SET content, title, preview, modified_at, cursor
   WHERE id` per debounced keystroke burst; the FTS external-content table updates by trigger. Measured in
   `store_bench`.
-- Versions are **snapshots, not diffs**, capped per draft (default 50) plus one before every action run.
-  Simplicity over space; drafts are small.
+- Versions are **snapshots, not diffs**, thinned by age in `sweep()` (all from the last hour, hourly for a day,
+  daily for 30 days, weekly after; `before_action`/`restore` kept 90 days first). No hard cap; never thinned on the
+  save path. Simplicity over space; drafts are small.
 
 ## v1
 
@@ -103,6 +104,7 @@ CREATE TABLE actions (
   confirm       INTEGER NOT NULL DEFAULT 0,  -- ask before running
   disabled      INTEGER NOT NULL DEFAULT 0,  -- imported but not runnable (unsupported steps)
   hidden        INTEGER NOT NULL DEFAULT 0,  -- not in the list, still callable by name/shortcut
+  trusted_hash  TEXT,                        -- sha256 of steps when the user saw/wrote them; NULL = untrusted
   modified_at   INTEGER NOT NULL,
   deleted_at    INTEGER
 );
@@ -149,9 +151,9 @@ CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);   -- JSON val
 | `search(query, scope)` | `drafts_fts MATCH ?` with `bm25`, limited to 200, then page; snippets via `snippet()` on `content` |
 | `open(id)` | Row + tags + `COUNT(versions)` in one statement with subqueries |
 | `save(id, content, cursor)` | One UPDATE; title/preview computed in Rust; FTS by trigger |
-| `version_if_due(id)` | Insert a version when the newest one is older than 5 min or `reason != 'edit'`; trim to cap |
+| `version_if_due(id)` | Insert a version when the newest `edit` one is older than 5 min; no trimming here |
 | `tag_counts(folder)` | Group by on `draft_tags` joined to visible drafts; cached by the UI per list change |
-| `sweep()` | Trash > 30 days → tombstone; tombstones > 90 days → delete; versions beyond cap → delete |
+| `sweep()` | Trash > 30 days → tombstone; tombstones > 90 days → delete; versions thinned by the age tiers; orphan tags removed |
 
 ## Candidate later versions (allocate numbers when a slice is implemented)
 

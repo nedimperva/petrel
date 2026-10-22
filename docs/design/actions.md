@@ -22,6 +22,7 @@ The contract for package 03 (engine, built-in steps) and package 04 (scripting).
 run(action, draft, source):
   if action.disabled → Failed("contains unsupported steps: …")
   if action.confirm and source != action → host.confirm(name) or Cancelled
+  if action.trusted_hash != hash(steps) and action has shell/out-of-scope file steps → host.confirm_scope(rendered) or Cancelled; on yes store the hash
   versions.insert(draft, reason = "before_action:" + action.uuid)
   ctx = Context::new(draft working copy, editor state, host)
   for (i, step) in steps:
@@ -91,8 +92,8 @@ the action editor to draw its form, and tests against a recording `Host`.
 | `insertText` | `text`, `position: cursor \| start \| end \| replaceSelection \| replaceAll`, `moveCursor` | Edits `ctx.draft`; updates selection like an editor would |
 | `clipboard` | `text` (default `[[draft]]`), `mode: replace \| prepend \| append` | Via `Host::clipboard_set` / `clipboard_get` |
 | `url` | `url`, `encode: true`, `openIn: browser \| default` | Rendered with URL encoding; `Host::open_url`. `petrel://` URLs are handled internally (so an action can open another draft) |
-| `file` | `path`, `text` (default `[[draft]]`), `mode: create \| append \| prepend \| overwrite`, `createDirs` | `path` rendered without encoding; `~` and `$VAR` expanded; relative paths are under `<data dir>/files/`. Writing outside the Petrel folder asks once per action (`Host::confirm_scope`) |
-| `runCommand` | `command`, `stdin` (default `[[draft]]`), `shell: sh \| bash \| cmd \| powershell \| none`, `timeoutSecs`, `output: ignore \| insert \| replace \| clipboard \| templateTag:<name>`, `cwd` | `Host::run_command`; first use per action asks for confirmation and shows the rendered command; stdout captured (1 MB cap), non-zero exit fails the step with stderr in the message |
+| `file` | `path`, `text` (default `[[draft]]`), `mode: create \| append \| prepend \| overwrite`, `createDirs` | `path` rendered without encoding; `~` and `$VAR` expanded; relative paths are under `<data dir>/files/`. Writing outside the Petrel folder is part of the one-time trust dialog for untrusted actions (`Host::confirm_scope`) |
+| `runCommand` | `command`, `stdin` (default `[[draft]]`), `shell: sh \| bash \| zsh \| fish \| $SHELL \| powershell \| cmd \| none` (default `sh` / `powershell`), `timeoutSecs`, `output: ignore \| insert \| replace \| clipboard \| templateTag:<name>`, `cwd` | `Host::run_command` with the login shell's `PATH`; an **untrusted** action confirms once (see Decisions); stdout captured (1 MB cap), non-zero exit fails the step with stderr in the message |
 | `runAction` | `action` (name or UUID), `stopOnFail: true` | Nested run sharing the same `ctx`; depth limit 8; a cycle fails |
 | `prompt` | `title`, `message`, `buttons: [..]`, `fields: [{key, kind: text \| textarea \| select \| switch \| date, label, default, options}]`, `cancelButton` | `Host::prompt`; dismiss → `Stop`; results become template tags `prompt_button` and `prompt_<key>` |
 | `htmlPreview` | `template` (Markdown by default, `html: true` for raw HTML), `css` (name of a file in `<data dir>/css/`), `continueButton` | Renders in a sandboxed preview window; "Continue" resumes, close → `Stop`. The step after it can therefore be a `file`/`url` step that depends on the user having looked |
@@ -110,6 +111,7 @@ ES2020+ JavaScript in the runtime chosen in package 03 (expected rquickjs). One 
 destroyed at the end; nothing persists between runs except through drafts, files, the keyring or template tags.
 Everything the script can reach goes through `Host` or the store, with the action's permission flags
 (`allowShell`, `allowFiles`, `allowHttp`) checked at the call, not at parse time, so the error names the call.
+The permission flags say what a script *may* do; trust (above) says whether the user has seen it.
 
 Host calls that need the user (`Prompt.show`, `app.openURL` in some sandboxes, confirmations) are asynchronous
 on the Rust side but **appear synchronous to the script**: the runtime suspends on a host request, the core awaits
@@ -134,7 +136,7 @@ the shell's reply, then resumes. Scripts written in the familiar blocking style 
 | `HTTP` | `HTTP.create()`, `request({url, method, headers, parameters, data, encoding: 'json' \| 'form' \| 'raw', timeout})` → `{success, statusCode, headers, responseText, responseData, error}`. Needs `allowHttp` |
 | `FileManager` | `FileManager.createLocal()` → the Petrel `files/` folder; `FileManager.create(path)` → any folder (needs `allowFiles` and the once-per-action scope confirm); `readString(p)`, `writeString(p, s)`, `appendString(p, s)`, `exists(p)`, `listContents(p)`, `createDirectory(p)`, `moveItem(a, b)`, `copyItem(a, b)`, `baseURL` |
 | `Credential` | `Credential.create(identifier, description)`, `addTextField(key, label)`, `addPasswordField(key, label)`, `authorize()` (prompts once, stores in the keyring under `petrel/<identifier>`), `getValue(key)`, `forget()` |
-| `Shell` | **Petrel-specific.** `Shell.run(command, {stdin, shell, timeout, cwd})` → `{status, stdout, stderr}`. Needs `allowShell` and the same first-use confirmation as the step |
+| `Shell` | **Petrel-specific.** `Shell.run(command, {stdin, shell, timeout, cwd})` → `{status, stdout, stderr}`. Needs `allowShell`; a script with `allowShell` makes the action untrusted until confirmed, like a `runCommand` step |
 | `Action` | `Action.find(name)`, `.name`, `.uuid`, `.run(draft?)` (queued) |
 | `ActionGroup` | `find(name)`, `getAll()` |
 | `Workspace` | `find(name)`, `getAll()`, `.name`, `.tagFilter`, `.queryString`, `.apply()` |
@@ -166,8 +168,32 @@ Scripts that reach Apple-only or vendor objects fail with a message naming the o
   import report lists per action: imported / imported with N disabled steps / skipped, and never silently drops.
 - Round trip: export → import yields identical rows except `id`, `modified_at`.
 
-## Open questions for the owner (answer in the package files)
+## Decisions (owner, 2026-10-22: "speed, convenience, long term")
 
-1. Should `runCommand` default to the user's `$SHELL` on Linux rather than `sh`? (Proposed: `sh`, with `$SHELL` as an option, for predictable actions.)
-2. Confirmation scope for shell/file steps: once per action (proposed), once per action *and* rendered command, or a global "trust my actions" setting with an audit log?
-3. Version snapshots: cap 50 per draft and one before each run (proposed), or time-based retention?
+### Shell: `sh`, with the login shell's `PATH`
+
+`runCommand` and `Shell.run` default to `sh -c` on Linux (`/bin/sh`) and PowerShell on Windows. Interactive shells
+load rc files (50–300 ms) and differ in syntax (fish), so an action would be slow and would break on another
+machine. What people want from `$SHELL` is their `PATH`: on startup Petrel runs `$SHELL -lc 'printf %s "$PATH"'`
+once (cached in `settings`, refreshed daily and from Settings → Actions) and exports that `PATH` to every command.
+A step may set `shell: sh | bash | zsh | fish | $SHELL | powershell | cmd | none` to opt out.
+
+### Trust: a property of the action, earned once, lost on change
+
+- An action created or edited in Petrel's action editor is **trusted when saved**: the user just wrote the command.
+- An action that arrives any other way — import, a file in `actions/` changed outside Petrel, a URI — is
+  **untrusted**. Its first run shows the rendered commands and out-of-scope paths of all its shell/file steps in one
+  dialog; "Run and trust" records `trusted_hash = sha256(steps JSON)`. Any later change to `steps` that did not come
+  through the editor clears trust, so a pulled git change re-prompts.
+- No per-run prompts for trusted actions (speed), no global "trust everything" (one click would make shared
+  actions dangerous). `action_runs` stays the audit log for both.
+- Schema: `actions.trusted_hash TEXT` (NULL = untrusted). `Host::confirm_scope` is called only for untrusted actions.
+
+### Versions: age-tiered, no hard cap
+
+Drafts are small; the cost of history is finding the right version, not disk. Keep every `edit` snapshot from the
+last hour, one per hour for 24 hours, one per day for 30 days, one per week after that. `before_action` and
+`restore` versions are kept 90 days then follow the weekly tier. Thinning happens in `sweep()` (start-up and daily),
+**never on the save path**, so autosave stays a single UPDATE plus at most one INSERT. Trashing a draft keeps its
+versions until the tombstone; "Empty trash" removes them. A setting can shorten every tier; none can disable the
+hour tier.
