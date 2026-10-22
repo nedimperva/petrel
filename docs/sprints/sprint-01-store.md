@@ -1,6 +1,6 @@
 # Sprint 1 — Store and drafts
 
-**Status:** not started
+**Status:** in progress · started 2026-10-22
 
 ## Delivery scope
 
