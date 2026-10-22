@@ -61,7 +61,7 @@ Package number is a stable ID, not a delivery week. [PLAN.md](../PLAN.md) define
 
 ### Decision gate — scripting runtime
 - [x] Spike built and measured (`crates/petrel-core/examples/runtime_spike/`); write-up under Decisions in
-      [package 03](sprint-03-action-engine.md). Owner's answer pending.
+      [package 03](sprint-03-action-engine.md). Owner chose rquickjs (2026-10-22).
 
 ## Acceptance (owner)
 - [ ] `cargo test --workspace` and `npm run build` green on both CI runners.
@@ -94,8 +94,9 @@ Measured 2026-10-22 in the agent's sandbox (4 vCPU, Ubuntu 24.04, release build,
   order and stops early (microseconds for any word), while `bm25` costs ~0.5 µs per match and reached 21 ms for a
   word in most drafts; per-row `snippet()` cost 0.9 ms each. `Store::search` takes the 400 most recently created
   matches, orders them by `modified_at`, and makes snippets in Rust. Exact for terms in fewer than 400 drafts;
-  "the newest drafts with that word" for more common ones. Relevance ranking can be an option in package 05 if
-  wanted. Recorded in `docs/research/data-model.md`.
+  "the newest drafts with that word" for more common ones. Recorded in `docs/research/data-model.md`.
+  **Owner 2026-10-22: fine for M1; relevance ranking is wanted later** — it is a package 05 task (M2), to be built
+  so that it keeps the sub-10 ms target (rank only within a bounded recent window, or a separate ranked mode).
 - 2026-10-22 — **A backup is one file.** The SQLite backup API copies the WAL header flag, so the copy was in WAL
   mode and left `-wal`/`-shm` sidecars; the copy is switched to `journal_mode=DELETE` after the backup.
 - 2026-10-22 — **The agent's sandbox cannot run the window.** 3.9 GB of disk, no display. `cargo check`/clippy of

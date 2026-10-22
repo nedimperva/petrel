@@ -29,7 +29,7 @@ modify a draft they failed on, and tell you exactly which step broke and why.
       (string work, a class, async/await over a host call, an infinite loop interrupted, a 64 MB allocation
       refused). deno_core excluded on size (see Decisions). Measured on Linux; Windows numbers when the owner builds
       the spike there (`cargo run --release --features quickjs` in the spike directory).
-- [x] Write up in **Decisions**: numbers, build pain, recommendation. **Owner's answer pending.**
+- [x] Write up in **Decisions**: numbers, build pain, recommendation. **Owner chose rquickjs (2026-10-22).**
 
 ### Engine (M1)
 - [ ] `action.rs`: `Action`, `Step` enum (serde tagged), `Context`, `run()` exactly as the spec's algorithm;
@@ -88,6 +88,7 @@ modify a draft they failed on, and tell you exactly which step broke and why.
   a script must not be able to take the machine's memory). QuickJS meets every requirement with a 1.4 MB cost.
   Risks to note: QuickJS string concatenation in loops is slow (93 ms for 20k) — fine for action scripts, and
   `Array.join` is the idiom anyway; `bindgen` off means a new target triple needs bindings generated once.
-  **Owner decides**; on yes, package 04 builds on `rquickjs` with features `futures`, `macro`.
+  **Owner decided 2026-10-22: rquickjs.** Package 04 builds on `rquickjs` with features `futures`, `macro`; the
+  `bindgen` feature stays off (pre-generated bindings cover Linux, Windows MSVC and macOS).
 
 ## Log
