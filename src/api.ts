@@ -229,6 +229,8 @@ export interface Api {
   cancelRun(): Promise<boolean>;
   hostReply(id: number, value: unknown): Promise<boolean>;
   listenHost(events: HostEvents): Promise<void>;
+  /** A folder from the system picker, or null when cancelled. */
+  pickFolder(): Promise<string | null>;
 }
 
 const inTauri = "__TAURI_INTERNALS__" in window;
@@ -260,6 +262,11 @@ async function tauriApi(): Promise<Api> {
     runAction: (key, draftId, editor, source) => invoke("run_action", { key, draftId, editor, source }),
     cancelRun: () => invoke("cancel_run"),
     hostReply: (id, value) => invoke("host_reply", { id, value }),
+    pickFolder: async () => {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const picked = await open({ directory: true, title: "Choose a folder" });
+      return typeof picked === "string" ? picked : null;
+    },
     listenHost: async (events) => {
       const { listen } = await import("@tauri-apps/api/event");
       await listen<HostRequest>("host-request", (e) => events.request(e.payload));
@@ -462,8 +469,8 @@ function fakeActions(draft: (id: number) => Draft | undefined) {
     ...more,
   });
   const actions: Action[] = [
-    make("Copy", "copy", "blue", [{ type: "clipboard", text: "[[draft]]", mode: "replace" }], { shortcut: "c" }),
-    make("Save to file", "save", "green", [{ type: "file", path: "~/Documents/Petrel/[[safe_title]].md", text: "[[draft]]", mode: "overwrite", createDirs: true }]),
+    make("Copy to clipboard", "copy", "blue", [{ type: "clipboard", text: "[[draft]]", mode: "replace" }], { shortcut: "c", description: "Copies the whole draft." }),
+    make("Save to file", "save", "green", [{ type: "file", path: "~/Documents/Petrel/[[safe_title]].md", text: "[[draft]]", mode: "overwrite", createDirs: true }], { description: "Saves the draft as a Markdown file named after its title in ~/Documents/Petrel." }),
     make("Search the web", "search", "teal", [{ type: "url", url: "https://duckduckgo.com/?q=[[selection]]", encode: true, openIn: "default" }]),
     make("Ask then append", "edit", "purple", [
       { type: "prompt", title: "Append", message: "What should go at the end?", buttons: ["Append"], fields: [{ key: "text", kind: "text", label: "Text", default: "", options: [] }], cancelButton: true },
@@ -609,6 +616,7 @@ function fakeActions(draft: (id: number) => Draft | undefined) {
     listenHost: async (e: HostEvents) => {
       events = e;
     },
+    pickFolder: async () => "/home/you/Notes",
   };
 }
 

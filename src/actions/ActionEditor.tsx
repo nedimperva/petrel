@@ -76,6 +76,88 @@ export const STEP_TYPES: Record<string, { label: string; fields: Field[] }> = {
   script: { label: "Script (arrives in 0.3)", fields: [area("script", "Script", "")] },
 };
 
+/** One line on what each step does, shown on its form and when picking a step to add. */
+export const STEP_HELP: Record<string, string> = {
+  clipboard: "Puts text on the clipboard. [[draft]] is the whole draft.",
+  insertText: "Adds text to the draft itself, at the cursor, the start or the end, or replaces it.",
+  url: "Opens a link in the browser or the app that handles it. Tag values are encoded so they are safe in a URL.",
+  file: "Writes text to a file on disk. Choose the folder, then name the file with tags like [[safe_title]] or [[date]].",
+  runCommand: "Runs a shell command. The draft goes in on stdin; what it prints can be ignored, inserted or copied.",
+  runAction: "Runs another action on the same draft, then carries on.",
+  prompt: "Asks you something before going on. Answers are tags: [[prompt_button]] and [[prompt_<key>]] for each field.",
+  htmlPreview: "Shows the draft rendered as Markdown. With Continue, the next steps run only after you look.",
+  mail: "Opens a new mail in your mail app, filled in. Nothing is sent until you send it there.",
+  setTags: "Adds or removes tags on the draft.",
+  setFlag: "Flags or unflags the draft.",
+  move: "Moves the draft to the Inbox, the Archive or the Trash.",
+  openDraft: "Opens another draft in the editor when the action is done.",
+  script: "JavaScript. Scripts arrive in version 0.3; until then this step fails.",
+};
+
+/** Tags most actions need; the full list is in docs/design/actions.md. */
+const TAGS: [string, string][] = [
+  ["[[draft]]", "the whole draft"],
+  ["[[title]]", "the first line, without #"],
+  ["[[body]]", "everything after the first line"],
+  ["[[selection]]", "the selected text, or the whole draft"],
+  ["[[safe_title]]", "the title, safe as a file name"],
+  ["[[date]]", "today, 2026-10-23; [[date|%d.%m.%Y]] for another format"],
+  ["[[time]]", "now, 14:05"],
+  ["[[date|+1 day]]", "tomorrow; also week, month, monday…"],
+  ["[[tags]]", "the draft's tags, comma separated"],
+  ["[[clipboard]]", "what is on the clipboard"],
+  ["[[line|1]]", "the first line; [[line|2..4]] for a range"],
+];
+
+/** Ready-made starting points for a new action. */
+const EXAMPLES: { name: string; icon: string; color: string; description: string; steps: Step[] }[] = [
+  {
+    name: "Save to my notes folder",
+    icon: "save",
+    color: "green",
+    description: "Saves the draft as a Markdown file named after its title.",
+    steps: [{ type: "file", path: "~/Notes/[[safe_title]].md", text: "[[draft]]", mode: "overwrite", createDirs: true }],
+  },
+  {
+    name: "Add to a todo file",
+    icon: "file",
+    color: "orange",
+    description: "Adds the draft as a task at the end of todo.md.",
+    steps: [{ type: "file", path: "~/Notes/todo.md", text: "- [ ] [[draft]]\n", mode: "append", createDirs: true }],
+  },
+  {
+    name: "Copy as a quote",
+    icon: "copy",
+    color: "blue",
+    description: "Copies the draft with the title in bold and today's date.",
+    steps: [{ type: "clipboard", text: "**[[title]]** ([[date]])\n\n[[body]]", mode: "replace" }],
+  },
+  {
+    name: "Look up on Wikipedia",
+    icon: "globe",
+    color: "teal",
+    description: "Searches Wikipedia for the selection.",
+    steps: [{ type: "url", url: "https://en.wikipedia.org/w/index.php?search=[[selection]]", encode: true, openIn: "default" }],
+  },
+  {
+    name: "Ask, then add a line",
+    icon: "edit",
+    color: "purple",
+    description: "Asks for a line of text and adds it to the end of the draft.",
+    steps: [
+      { type: "prompt", title: "Add a line", message: "", buttons: ["Add"], fields: [{ key: "text", kind: "text", label: "Line", default: "", options: [] }], cancelButton: true },
+      { type: "insertText", text: "\n[[prompt_text]]", position: "end", moveCursor: false },
+    ],
+  },
+  {
+    name: "Sort lines",
+    icon: "terminal",
+    color: "grey",
+    description: "Sorts the draft's lines with the sort command.",
+    steps: [{ type: "runCommand", command: "sort", stdin: "[[draft]]", shell: null, timeoutSecs: null, output: "replace", cwd: null }],
+  },
+];
+
 export function newStep(type: string): Step {
   const s: Step = { type };
   for (const f of STEP_TYPES[type]?.fields ?? []) s[f.key] = structuredClone(f.def ?? null);
@@ -114,6 +196,15 @@ function StepForm(props: { step: Step; index: number; count: number; set(s: Step
   const spec = () => STEP_TYPES[props.step.type];
   const [jsonError, setJsonError] = createSignal<string | null>(null);
   const set = (key: string, value: unknown) => props.set({ ...props.step, [key]: value });
+  /** Keeps the file name part of the path and puts it in the chosen folder. */
+  async function chooseFolder() {
+    const folder = await (await api).pickFolder();
+    if (!folder) return;
+    const old = String(props.step.path ?? "");
+    const name = old.split("/").pop() || "[[safe_title]].md";
+    // `\[[` is the template escape, so Windows paths are written with `/` (Windows accepts it).
+    set("path", `${folder.replace(/\\/g, "/").replace(/\/$/, "")}/${name}`);
+  }
   return (
     <fieldset
       class="step"
@@ -139,6 +230,9 @@ function StepForm(props: { step: Step; index: number; count: number; set(s: Step
           Remove
         </button>
       </legend>
+      <Show when={STEP_HELP[props.step.type]}>
+        <p class="hint help">{STEP_HELP[props.step.type]}</p>
+      </Show>
       <Show
         when={spec()}
         fallback={
@@ -192,6 +286,11 @@ function StepForm(props: { step: Step; index: number; count: number; set(s: Step
                       onInput={(e) => set(f.key, f.nullable && !e.currentTarget.value ? null : e.currentTarget.value)}
                     />
                   )}
+                  <Show when={props.step.type === "file" && f.key === "path"}>
+                    <button type="button" class="pick" onClick={() => chooseFolder()}>
+                      Choose folder…
+                    </button>
+                  </Show>
                   <Show when={f.hint}>
                     <small class="hint">{f.hint}</small>
                   </Show>
@@ -347,7 +446,11 @@ export default function ActionEditor(props: Props) {
           </label>
           <label class="field wide">
             <span>Description</span>
-            <input value={a().description} onInput={(e) => update({ description: e.currentTarget.value })} />
+            <input
+              value={a().description}
+              placeholder="What it does, in a sentence. Shown when you point at the action."
+              onInput={(e) => update({ description: e.currentTarget.value })}
+            />
           </label>
           <div class="field">
             <span>Colour</span>
@@ -423,10 +526,52 @@ export default function ActionEditor(props: Props) {
           </label>
           <label class="field inline">
             <input type="checkbox" checked={a().hidden} onChange={(e) => update({ hidden: e.currentTarget.checked })} />
-            <span>Hidden from the list</span>
+            <span>Hide from the list (“Show hidden” under the list brings it back)</span>
           </label>
         </div>
+        <Show when={!a().uuid}>
+          <h3>Start from an example</h3>
+          <div class="examples">
+            <For each={EXAMPLES}>
+              {(x) => (
+                <button
+                  type="button"
+                  title={x.description}
+                  onClick={() =>
+                    update({
+                      name: a().name.trim() ? a().name : x.name,
+                      description: a().description || x.description,
+                      icon: x.icon,
+                      color: x.color,
+                      steps: structuredClone(x.steps),
+                    })
+                  }
+                >
+                  <Icon name={x.icon} /> {x.name}
+                </button>
+              )}
+            </For>
+          </div>
+        </Show>
         <h3>Steps</h3>
+        <p class="hint">Steps run from top to bottom. If one fails, the draft is left as it was.</p>
+        <details class="tags-help">
+          <summary>Tags you can use in any text field</summary>
+          <table>
+            <tbody>
+              <For each={TAGS}>
+                {([tag, what]) => (
+                  <tr>
+                    <td>
+                      <code>{tag}</code>
+                    </td>
+                    <td>{what}</td>
+                  </tr>
+                )}
+              </For>
+            </tbody>
+          </table>
+        </details>
         <Index each={a().steps}>
           {(s, i) => (
             <StepForm
@@ -446,6 +591,7 @@ export default function ActionEditor(props: Props) {
           <button type="button" onClick={() => update({ steps: [...a().steps, newStep(adding())] })}>
             Add step
           </button>
+          <span class="hint">{STEP_HELP[adding()]}</span>
         </div>
       </div>
       <datalist id="petrel-groups">

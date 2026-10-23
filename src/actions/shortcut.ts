@@ -12,7 +12,7 @@ const RESERVED_CHORDS = [
 ].map((s) => s.toLowerCase());
 
 /** Keys the action list uses itself. */
-const RESERVED_BARE = ["j", "k", "g", "enter", "escape", "arrowup", "arrowdown", " ", "tab"];
+const RESERVED_BARE = ["j", "k", "g", "e", "enter", "escape", "arrowup", "arrowdown", " ", "tab"];
 
 /** Letters and digits by physical key, so Shift and the layout's symbols don't change the name. */
 function keyName(e: KeyboardEvent): string {

@@ -45,11 +45,13 @@ export default function ActionList(props: Props) {
   const [open, setOpen] = createSignal<Set<string>>(remembered() ?? new Set());
   const [at, setAt] = createSignal(0);
   const [active, setActive] = createSignal<string | null>(null);
+  const [showHidden, setShowHidden] = createSignal(false);
+  const hiddenCount = () => props.actions.filter((a) => a.hidden).length;
 
   const groups = createMemo(() => {
     const by = new Map<string, Action[]>();
     for (const a of props.actions) {
-      if (a.hidden) continue;
+      if (a.hidden && !showHidden()) continue;
       by.set(a.group, [...(by.get(a.group) ?? []), a]);
     }
     return [...by].map(([name, actions]) => ({ name, actions }));
@@ -118,6 +120,11 @@ export default function ActionList(props: Props) {
       case "Escape":
         props.onBack();
         return true;
+      case "e": {
+        const r = rows()[at()];
+        if (r?.action) props.onEdit(r.action);
+        return true;
+      }
     }
     // A bare-key shortcut, from any group.
     const hit = props.actions.find((a) => a.shortcut && !isChord(a.shortcut) && same(a.shortcut, e.key));
@@ -164,35 +171,46 @@ export default function ActionList(props: Props) {
                 {(a) => {
                   const i = () => rows().findIndex((r) => r.action?.uuid === a.uuid);
                   return (
-                    <button
+                    <div
                       class="action"
                       classList={{
                         at: at() === i(),
                         running: props.running === a.name,
                         off: a.disabled || a.steps.some((s) => s.type === "unsupported"),
+                        hidden: a.hidden,
                       }}
                       data-i={i()}
-                      title={a.description || (a.shortcut ? `${a.name} (${a.shortcut})` : a.name)}
-                      onClick={() => {
-                        setAt(i());
-                        run(a);
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        props.onEdit(a);
                       }}
-                      onDblClick={() => props.onEdit(a)}
                     >
-                      <span class={`dot c-${a.color || "grey"}`} />
-                      <Icon name={a.icon} />
-                      <span class="name">{a.name}</span>
-                      <Show when={a.shortcut}>
-                        {(s) => (
-                          <span class="caps">
-                            <For each={caps(s())}>{(c) => <kbd>{c}</kbd>}</For>
-                          </span>
-                        )}
-                      </Show>
+                      <button
+                        class="run"
+                        title={a.description || a.name}
+                        onClick={() => {
+                          setAt(i());
+                          run(a);
+                        }}
+                      >
+                        <span class={`dot c-${a.color || "grey"}`} />
+                        <Icon name={a.icon} />
+                        <span class="name">{a.name}</span>
+                        <Show when={a.shortcut}>
+                          {(s) => (
+                            <span class="caps">
+                              <For each={caps(s())}>{(c) => <kbd>{c}</kbd>}</For>
+                            </span>
+                          )}
+                        </Show>
+                      </button>
+                      <button class="edit" title="Edit, hide or delete (e)" aria-label={`Edit ${a.name}`} onClick={() => props.onEdit(a)}>
+                        <Icon name="edit" />
+                      </button>
                       <Show when={props.running === a.name}>
                         <span class="progress" />
                       </Show>
-                    </button>
+                    </div>
                   );
                 }}
               </For>
@@ -204,6 +222,14 @@ export default function ActionList(props: Props) {
         <button class="link" onClick={() => props.onEdit(null)} title="Ctrl Shift A">
           New action
         </button>
+        <Show when={hiddenCount() > 0}>
+          <button class="link" onClick={() => setShowHidden(!showHidden())}>
+            {showHidden() ? "Hide hidden" : `Show hidden (${hiddenCount()})`}
+          </button>
+        </Show>
+        <p class="hint">
+          Click to run. <Icon name="edit" /> or <kbd>e</kbd> to edit, hide or delete.
+        </p>
       </div>
     </aside>
   );

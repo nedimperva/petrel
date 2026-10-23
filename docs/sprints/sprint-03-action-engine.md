@@ -76,6 +76,19 @@ modify a draft they failed on, and tell you exactly which step broke and why.
 
 ## Decisions
 
+- 2026-10-23 — **After the owner's first look** (asked for: edit/hide/delete from the list, fewer duplicate
+  defaults, hints in the editor, a choosable save folder, "Copy to clipboard" as the name):
+  - The default list is 7 actions with a description each. "Copy with wl-copy/clip" is gone (it did what Copy does),
+    "Copy" is "Copy to clipboard", and the journal is `~/Documents/Petrel/Journal/<date>.md`, beside "Save to file",
+    instead of inside the data folder. A database with the first list gets these changes once, only for defaults
+    whose steps were not edited (`meta.actions_defaults` = 2).
+  - A `url` step refuses text that is not a link (`scheme:` and no space after it). Handing plain text to
+    `xdg-open` can start an app that quits again, which moves tiled windows on Hyprland.
+  - Each row has an edit button; `e` and a right-click also open the editor. Double-click no longer edits, because
+    the two clicks also ran the action twice. Hidden actions come back with "Show hidden" under the list.
+  - The editor explains each step, lists the common tags, offers six examples for a new action, and has "Choose
+    folder…" on a file step (`tauri-plugin-dialog`).
+
 - 2026-10-23 — **The window side** (each easy to change):
   - Dialogs an action needs are `host-request` events; the webview answers with `host_reply`. A cancelled run
     closes its dialog (`host-closed`). Only the run's thread waits; autosave and the list keep the store.
@@ -152,3 +165,5 @@ modify a draft they failed on, and tell you exactly which step broke and why.
   against the fake store: Copy by `Ctrl Enter` and by `c`, a prompt answered and dismissed, the trust dialog, `Esc`
   cancelling a run, a failure with its Log link, the preview, a new action with a `Ctrl Alt J` shortcut. Not tried:
   the real window (no display here), Hyprland, Windows.
+- 2026-10-23 — Owner feedback round (see Decisions). 79 engine tests. Bundle 208.5 kB gz at launch; the editor
+  chunk is 7.1 kB.

@@ -110,6 +110,8 @@ fn main() {
             }
         }))
         .plugin(tauri_plugin_opener::init())
+        // The folder picker in the action editor.
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             init_logging(app);
             let path = db_path(app)?;

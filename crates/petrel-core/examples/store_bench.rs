@@ -184,7 +184,7 @@ fn main() -> anyhow::Result<()> {
         ..Action::default()
     };
     store.save_action(&filing, true)?;
-    for (label, key) in [("action: Copy", "Copy"), ("action: 3 steps + archive", "File it")] {
+    for (label, key) in [("action: Copy", "Copy to clipboard"), ("action: 3 steps + archive", "File it")] {
         let (p50, p95) = measure(100, || {
             let mut host = RecordingHost::default();
             let id = pick(&mut rng);

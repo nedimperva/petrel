@@ -363,70 +363,155 @@ impl Store {
     }
 
     /// Adds the default group on the first start (actions.md, package 03): once, so deleting them sticks.
-    /// Returns how many were added.
+    /// A database that got an older default list has the defaults it still holds unchanged brought up to date.
+    /// Returns how many actions were added or changed.
     pub fn seed_default_actions(&mut self) -> Result<usize> {
-        let seeded: Option<String> = self
-            .conn
-            .query_row("SELECT value FROM meta WHERE key = 'actions_seeded'", [], |r| r.get(0))
-            .optional()?;
-        if seeded.is_some() {
+        let meta = |s: &Store, key: &str| -> Result<Option<String>> {
+            Ok(s.conn
+                .query_row("SELECT value FROM meta WHERE key = ?1", params![key], |r| r.get(0))
+                .optional()?)
+        };
+        let set = |s: &Store, key: &str, value: &str| -> Result<()> {
+            s.conn.execute(
+                "INSERT INTO meta (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                params![key, value],
+            )?;
+            Ok(())
+        };
+        let version = DEFAULTS_VERSION.to_string();
+        if meta(self, "actions_seeded")?.is_none() {
+            let defaults = default_actions();
+            for a in &defaults {
+                self.save_action(a, true)?;
+            }
+            set(self, "actions_seeded", &self.now().to_string())?;
+            set(self, "actions_defaults", &version)?;
+            return Ok(defaults.len());
+        }
+        if meta(self, "actions_defaults")?.as_deref() == Some(version.as_str()) {
             return Ok(0);
         }
-        let defaults = default_actions();
-        for a in &defaults {
-            self.save_action(a, true)?;
+        let changed = self.upgrade_defaults_v1()?;
+        set(self, "actions_defaults", &version)?;
+        Ok(changed)
+    }
+
+    /// The first list (2026-10-23) had a second copy action through `wl-copy`/`clip`, a "Copy" without a
+    /// description and a journal under the data folder. Only actions whose steps are still the shipped ones change.
+    fn upgrade_defaults_v1(&mut self) -> Result<usize> {
+        let step = |json: serde_json::Value| -> Step {
+            serde_json::from_value(json).expect("a default step parses")
+        };
+        let old_journal = vec![step(serde_json::json!({
+            "type": "file", "path": "journal/[[date]].md", "mode": "append",
+            "text": "\n## [[time]]\n\n[[draft]]\n"
+        }))];
+        let mut changed = 0;
+        let new = default_actions();
+        for a in self.actions()? {
+            if a.group != "Basics" {
+                continue;
+            }
+            let old_clip = ["Copy with wl-copy", "Copy with clip"].contains(&a.name.as_str())
+                && matches!(a.steps.as_slice(), [Step::RunCommand { command, .. }] if command == "wl-copy" || command == "clip");
+            if old_clip {
+                self.delete_action(&a.uuid)?;
+                changed += 1;
+                continue;
+            }
+            let target_name = if a.name == "Copy" { "Copy to clipboard" } else { a.name.as_str() };
+            let Some(target) = new.iter().find(|n| n.name == target_name) else { continue };
+            let same_steps =
+                a.steps == target.steps || (a.name == "Append to journal" && a.steps == old_journal);
+            if !same_steps
+                || (a.name == target.name && a.description == target.description && a.steps == target.steps)
+            {
+                continue;
+            }
+            let updated = Action {
+                name: target.name.clone(),
+                description: if a.description.is_empty() {
+                    target.description.clone()
+                } else {
+                    a.description.clone()
+                },
+                steps: target.steps.clone(),
+                ..a
+            };
+            self.save_action(&updated, true)?;
+            changed += 1;
         }
-        self.conn.execute(
-            "INSERT INTO meta (key, value) VALUES ('actions_seeded', ?1)",
-            params![self.now().to_string()],
-        )?;
-        Ok(defaults.len())
+        Ok(changed)
     }
 }
+
+/// Bumped when the shipped list changes; `seed_default_actions` brings unchanged defaults up to it.
+const DEFAULTS_VERSION: u32 = 2;
 
 /// The default group. Shipped actions are trusted: they are saved as if from the editor.
 pub fn default_actions() -> Vec<Action> {
     let step =
         |json: serde_json::Value| -> Step { serde_json::from_value(json).expect("a default step parses") };
-    let action = |name: &str, icon: &str, color: &str, steps: Vec<Step>| Action {
+    let action = |name: &str, icon: &str, color: &str, description: &str, steps: Vec<Step>| Action {
         name: name.into(),
         group: "Basics".into(),
+        description: description.into(),
         icon: icon.into(),
         color: color.into(),
         steps,
         ..Action::default()
     };
-    let (clip_name, clip_cmd) =
-        if cfg!(windows) { ("Copy with clip", "clip") } else { ("Copy with wl-copy", "wl-copy") };
     vec![
         Action {
             shortcut: Some("c".into()),
-            ..action("Copy", "copy", "blue", vec![step(serde_json::json!({ "type": "clipboard" }))])
+            ..action(
+                "Copy to clipboard",
+                "copy",
+                "blue",
+                "Copies the whole draft.",
+                vec![step(serde_json::json!({ "type": "clipboard" }))],
+            )
         },
         action(
             "Copy as Markdown link",
             "link",
             "blue",
+            "Copies a link to this draft, like [Title](petrel://open?uuid=…), to paste into another note.",
             vec![step(serde_json::json!({ "type": "clipboard", "text": "[[[title]]]([[draft_open_url]])" }))],
         ),
         action(
             "Save to file",
             "save",
             "green",
+            "Saves the draft as a Markdown file named after its title in ~/Documents/Petrel. Saving again \
+             replaces that file. Edit the action to choose another folder.",
             vec![step(serde_json::json!({
                 "type": "file", "path": "~/Documents/Petrel/[[safe_title]].md", "mode": "overwrite"
+            }))],
+        ),
+        action(
+            "Append to journal",
+            "book",
+            "purple",
+            "Adds the draft to today's journal, one Markdown file per day in ~/Documents/Petrel/Journal, \
+             under the time it was added.",
+            vec![step(serde_json::json!({
+                "type": "file", "path": "~/Documents/Petrel/Journal/[[date]].md", "mode": "append",
+                "text": "\n## [[time]]\n\n[[draft]]\n"
             }))],
         ),
         action(
             "Open as URL",
             "globe",
             "teal",
+            "Opens the first line in the browser when it is a link.",
             vec![step(serde_json::json!({ "type": "url", "url": "[[line|1]]", "encode": false }))],
         ),
         action(
             "Search the web",
             "search",
             "teal",
+            "Searches DuckDuckGo for the selected text, or for the whole draft when nothing is selected.",
             vec![step(
                 serde_json::json!({ "type": "url", "url": "https://duckduckgo.com/?q=[[selection]]" }),
             )],
@@ -435,24 +520,10 @@ pub fn default_actions() -> Vec<Action> {
             "Send as mail",
             "mail",
             "orange",
+            "Opens a new mail in your mail app: the title is the subject, the rest is the body.",
             vec![step(
                 serde_json::json!({ "type": "mail", "subject": "[[title]]", "body": "[[trimmed_body]]" }),
             )],
-        ),
-        action(
-            "Append to journal",
-            "book",
-            "purple",
-            vec![step(serde_json::json!({
-                "type": "file", "path": "journal/[[date]].md", "mode": "append",
-                "text": "\n## [[time]]\n\n[[draft]]\n"
-            }))],
-        ),
-        action(
-            clip_name,
-            "terminal",
-            "grey",
-            vec![step(serde_json::json!({ "type": "runCommand", "command": clip_cmd }))],
         ),
     ]
 }

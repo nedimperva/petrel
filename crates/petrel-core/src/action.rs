@@ -588,6 +588,26 @@ pub fn run(
     finish(store, executed)
 }
 
+/// `scheme:` as in RFC 3986, so `https://…`, `mailto:…` and `obsidian://…` pass and `Hello world` and
+/// `Todo: milk` do not.
+fn has_scheme(url: &str) -> bool {
+    let Some((scheme, rest)) = url.split_once(':') else { return false };
+    let mut chars = scheme.chars();
+    chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+        && chars.all(|c| c.is_ascii_alphanumeric() || "+.-".contains(c))
+        && rest.starts_with(|c: char| !c.is_whitespace())
+}
+
+/// The first `max` characters, with an ellipsis when cut.
+fn tail_chars(s: &str, max: usize) -> String {
+    let cut: String = s.chars().take(max).collect();
+    if cut.len() < s.len() {
+        format!("{cut}…")
+    } else {
+        cut
+    }
+}
+
 fn tail(s: &str, max: usize) -> String {
     if s.len() <= max {
         return s.to_string();
@@ -831,6 +851,9 @@ impl Ctx<'_> {
                 let url = self.render(url, if *encode { Encoding::Url } else { Encoding::Raw });
                 if let Some(rest) = url.strip_prefix("petrel://") {
                     self.open = Some(petrel_url(rest)?);
+                } else if !has_scheme(&url) {
+                    // Handing plain text to the system opener can start an app that then quits.
+                    return Err(StepError::Failed(format!("“{}” is not a link", tail_chars(&url, 80))));
                 } else {
                     self.host.open_url(&url, *open_in == OpenIn::Browser)?;
                     self.log.push(format!("opened {url}"));
@@ -1464,7 +1487,7 @@ mod tests {
         assert_eq!((r.selection.anchor, r.selection.head), (6, 6), "the cursor after the inserted text");
 
         s.seed_default_actions().unwrap();
-        let copy = go(&mut s, "Copy", id, &mut RecordingHost::default());
+        let copy = go(&mut s, "Copy to clipboard", id, &mut RecordingHost::default());
         assert!(!copy.changed, "a copy leaves the text alone");
         drop(s);
         std::fs::remove_dir_all(dir).unwrap();
@@ -1677,11 +1700,11 @@ mod tests {
     #[test]
     fn the_default_group_is_added_once_and_mirrored() {
         let (mut s, dir, _) = setup();
-        assert_eq!(s.seed_default_actions().unwrap(), 8);
+        assert_eq!(s.seed_default_actions().unwrap(), 7);
         let all = s.actions().unwrap();
-        assert_eq!(all.len(), 8);
-        assert!(all.iter().all(|a| a.trusted && a.group == "Basics"));
-        assert_eq!(all[0].name, "Copy");
+        assert_eq!(all.len(), 7);
+        assert!(all.iter().all(|a| a.trusted && a.group == "Basics" && !a.description.is_empty()));
+        assert_eq!(all[0].name, "Copy to clipboard");
         assert_eq!(all[0].shortcut.as_deref(), Some("c"));
         let mirror = dir.join("actions/Basics/Copy as Markdown link.json");
         let doc: serde_json::Value =
@@ -1696,7 +1719,7 @@ mod tests {
         renamed.name = "Copy all".into();
         s.save_action(&renamed, true).unwrap();
         assert!(dir.join("actions/Basics/Copy all.json").exists());
-        assert!(!dir.join("actions/Basics/Copy.json").exists(), "a rename moves the mirror");
+        assert!(!dir.join("actions/Basics/Copy to clipboard.json").exists(), "a rename moves the mirror");
         drop(s);
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -1712,10 +1735,56 @@ mod tests {
         let mut h = RecordingHost::default();
         assert_eq!(go(&mut s, "Append to journal", id, &mut h).outcome, RunOutcome::Ok);
         let (path, text) = h.files.iter().next().unwrap();
-        assert!(path.starts_with(dir.join("files/journal")), "{}", path.display());
+        assert!(path.parent().unwrap().ends_with("Documents/Petrel/Journal"), "{}", path.display());
         assert!(text.ends_with("\n\nHello world\nsecond line\n"), "{text:?}");
         let r = go(&mut s, "Search the web", id, &mut RecordingHost::default());
         assert_eq!(r.outcome, RunOutcome::Ok);
+        let mut h = RecordingHost::default();
+        let r = go(&mut s, "Open as URL", id, &mut h);
+        assert_eq!(
+            r.outcome,
+            RunOutcome::Failed { step: 1, message: "“Hello world” is not a link".into() },
+            "plain text never reaches the system opener"
+        );
+        assert!(!h.calls.iter().any(|c| matches!(c, Call::OpenUrl(_))));
+        drop(s);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn an_older_default_list_is_brought_up_to_date_where_unchanged() {
+        let (mut s, dir, _) = setup();
+        let old =
+            |name: &str, steps: serde_json::Value| Action { group: "Basics".into(), ..act(name, steps) };
+        save(&mut s, old("Copy", json!([{ "type": "clipboard" }])));
+        save(&mut s, old("Copy with wl-copy", json!([{ "type": "runCommand", "command": "wl-copy" }])));
+        save(&mut s, old("Save to file", json!([{ "type": "file", "path": "~/Notes/[[safe_title]].md" }])));
+        save(
+            &mut s,
+            old(
+                "Append to journal",
+                json!([{ "type": "file", "path": "journal/[[date]].md", "mode": "append",
+                         "text": "\n## [[time]]\n\n[[draft]]\n" }]),
+            ),
+        );
+        s.conn.execute("INSERT INTO meta (key, value) VALUES ('actions_seeded', '1')", []).unwrap();
+
+        assert_eq!(s.seed_default_actions().unwrap(), 3);
+        let names: Vec<String> = s.actions().unwrap().into_iter().map(|a| a.name).collect();
+        assert!(names.contains(&"Copy to clipboard".to_string()) && !names.contains(&"Copy".to_string()));
+        assert!(!names.iter().any(|n| n.contains("wl-copy")), "the duplicate copy is gone");
+        let journal = s.action("Append to journal").unwrap().unwrap();
+        assert!(journal.trusted && !journal.description.is_empty());
+        assert!(
+            matches!(&journal.steps[0], Step::File { path, .. } if path.starts_with("~/Documents/Petrel/Journal"))
+        );
+        let save_to = s.action("Save to file").unwrap().unwrap();
+        assert!(
+            matches!(&save_to.steps[0], Step::File { path, .. } if path.starts_with("~/Notes")),
+            "an edited default is left alone"
+        );
+        assert!(save_to.description.is_empty());
+        assert_eq!(s.seed_default_actions().unwrap(), 0, "once");
         drop(s);
         std::fs::remove_dir_all(dir).unwrap();
     }
