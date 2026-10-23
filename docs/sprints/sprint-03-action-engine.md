@@ -1,6 +1,6 @@
 # Sprint 3 — Action engine
 
-**Status:** in progress · started 2026-10-23 (engine slice: PR from `claude/project-thread-1p0dru`)
+**Status:** M1 built, in review · started 2026-10-23 · PR #3 (engine and window side); owner acceptance open
 
 ## Delivery scope
 
@@ -54,16 +54,18 @@ modify a draft they failed on, and tell you exactly which step broke and why.
       `wl-copy` / `clip`. Other shortcuts are left for the owner to choose in the editor.
 
 ### UI (M1)
-- [ ] Action list column: groups, rows with colour/icon/name/keycap, run state, result toast with "Log".
-- [ ] Action editor panel: fields from step schemas; drag to reorder steps; shortcut recorder with conflict
-      detection; "Test on current draft" with a `DryRunHost` that returns what would happen.
-- [ ] Action log panel (`g l`): runs with status, step, message, "Run again".
-- [ ] Trust: `trusted_hash` set on save from the action editor; one-time dialog for untrusted actions listing all
+- [x] Action list column: groups, rows with colour/icon/name/keycap, run state, result toast with "Log".
+- [x] Action editor panel: fields from step schemas; reorder steps (↑/↓ and `Alt ↑/↓`, see Decisions); shortcut
+      recorder with conflict detection. "Test on current draft" with a `DryRunHost` moves to M2 (Delivery scope).
+- [x] Action log panel (`g l`): runs with status, step, message, "Run again".
+- [x] Trust: `trusted_hash` set on save from the action editor; one-time dialog for untrusted actions listing all
       rendered commands and out-of-scope paths; cleared when `steps` change outside the editor. Tests for each path.
-- [ ] Login-shell `PATH` resolved once at startup (`$SHELL -lc`), cached in `settings`, exported to every command;
+- [x] Login-shell `PATH` resolved once at startup (`$SHELL -lc`), cached in `settings`, exported to every command;
       `sh` default on Linux, PowerShell on Windows, per-step override.
 
 ### Later (M2)
+- [ ] "Test on current draft" in the action editor (`DryRunHost`).
+- [ ] Drag to reorder steps.
 - [ ] `htmlPreview` with user CSS and "Continue".
 - [ ] Action editor: duplicate, move to group, import/export buttons (package 06).
 
@@ -73,6 +75,22 @@ modify a draft they failed on, and tell you exactly which step broke and why.
 - [ ] `petrel run "Save to file" --draft <uuid>` from a terminal does the same as the window.
 
 ## Decisions
+
+- 2026-10-23 — **The window side** (each easy to change):
+  - Dialogs an action needs are `host-request` events; the webview answers with `host_reply`. A cancelled run
+    closes its dialog (`host-closed`). Only the run's thread waits; autosave and the list keep the store.
+  - Time spent in a prompt, preview or the trust dialog does not count against the 60 s run limit.
+  - The editor stops taking keys only when a run passes 150 ms (the same moment the row shows it is running), so
+    the result can load without losing typing. Most runs finish before then and nothing changes for the person.
+  - After a run that files the draft away (after-success, or a `move` step), the editor starts a new draft, as
+    `Ctrl E` does.
+  - Shortcuts: a bare key works when the action list has focus; a chord with `Ctrl` or `Alt` works anywhere. The
+    recorder refuses Petrel's keys and CodeMirror's.
+  - `g l` (action log) took the `l` that "All" used in the list; All is now `g d`.
+  - Steps reorder with buttons and `Alt ↑/↓` for now; drag is M2.
+  - The clipboard is `arboard` directly (text only, Wayland data-control on), not the Tauri plugin, which pulls in
+    image crates.
+  - The editor and the log load the first time they open, so the launch bundle grows less.
 
 - 2026-10-23 — **A run is three phases** so the store lock is never held while a step waits on a person or a
   process: `prepare` (store: load, `before_action` version), `execute` (no store; steps edit a working copy through
@@ -126,4 +144,11 @@ modify a draft they failed on, and tell you exactly which step broke and why.
 - 2026-10-23 — Engine slice: `template.rs`, `host.rs`, `action.rs`, `store_actions.rs` (actions CRUD, mirror,
   trust, commit, run log, default group). 76 engine tests (48 before). `store_bench` has two action rows (PLAN:
   < 20 ms): Copy 0.21 ms, three steps + archive 0.55 ms at 50k drafts. Tauri commands, `TauriHost` and the action
-  list and editor UI are the next PR.
+  list and editor UI follow below.
+- 2026-10-23 — Window side on the same PR: `TauriHost` and the request broker (3 tests), `run_action`/`cancel_run`/
+  `list_actions`/`save_action`/`delete_action`/`action_log`/`host_reply`, default actions seeded at start, the login
+  `PATH` (`host::system::login_path`, a test), `RunReport.selection`/`changed` (a test). UI in `src/actions/`. Bundle
+  208.0 kB gz at launch (was 197.6) plus 5.3 kB (editor) and 1.3 kB (log) loaded on first open. Headless run
+  against the fake store: Copy by `Ctrl Enter` and by `c`, a prompt answered and dismissed, the trust dialog, `Esc`
+  cancelling a run, a failure with its Log link, the preview, a new action with a `Ctrl Alt J` shortcut. Not tried:
+  the real window (no display here), Hyprland, Windows.

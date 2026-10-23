@@ -30,7 +30,10 @@ and keys; this file covers state and decisions that aren't visible from the code
 - **Package 03's engine slice** (on a PR, 2026-10-23): `template.rs` (`[[tags]]`), `host.rs` (`Host`,
   `RecordingHost`, `host::system` for files and processes), `action.rs` (`prepare` → `execute` → `finish`; the store
   is not locked while steps run), `store_actions.rs` (actions, JSON mirror, trust hash, run log, default "Basics"
-  group). Not yet: Tauri commands, `TauriHost`, the action list/editor UI, `CliHost`.
+  group). The window side is on the same PR: `src-tauri/src/host.rs` (`TauriHost`; dialogs are `host-request`
+  events answered by `host_reply`), `run_action` in `spawn_blocking` (one run at a time, `cancel_run` on `Esc`), the
+  login shell's `PATH` cached in `settings`, and `src/actions/` (column `Ctrl 2`, editor `Ctrl Shift A`, log `g l`,
+  dialogs). Tried headless against the fake store only. Not yet: `CliHost`, dry-run "Test" (M2).
 - **rquickjs is the scripting runtime** (owner decision 2026-10-22, package 03 Decisions); `bindgen` feature off.
   Newest-first search is accepted for M1; relevance ranking is a package 05 (M2) task.
   The spike is a standalone crate under `crates/petrel-core/examples/runtime_spike/`, not a workspace member.

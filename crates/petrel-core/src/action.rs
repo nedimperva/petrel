@@ -418,6 +418,10 @@ pub struct RunReport {
     pub new_draft: bool,
     pub unknown_tags: Vec<String>,
     pub log: Vec<String>,
+    /// The selection after the steps, in UTF-16 units, so the editor can put it back after reloading the text.
+    pub selection: EditorState,
+    /// The stored content changed; the editor reloads it.
+    pub changed: bool,
 }
 
 /// Where `runAction` finds actions.
@@ -521,6 +525,7 @@ pub fn finish(store: &mut Store, e: Executed) -> Result<RunReport> {
     }
     let mut open_draft = None;
     let mut new_draft = false;
+    let mut changed = false;
     if e.outcome == RunOutcome::Ok {
         let mut draft = e.draft.clone();
         match e.action.after_success {
@@ -531,6 +536,7 @@ pub fn finish(store: &mut Store, e: Executed) -> Result<RunReport> {
         }
         add_tags(&mut draft.tags, &e.action.add_tags);
         store.commit_draft(&e.before, &draft)?;
+        changed = draft.content != e.before.content;
         if let Some(t) = &e.open {
             open_draft = store.resolve_open(t)?;
         }
@@ -561,6 +567,8 @@ pub fn finish(store: &mut Store, e: Executed) -> Result<RunReport> {
         new_draft,
         unknown_tags: e.unknown_tags,
         log: e.log,
+        selection: EditorState { anchor: e.draft.anchor, head: e.draft.head },
+        changed,
     })
 }
 
@@ -648,8 +656,8 @@ impl Ctx<'_> {
             return RunOutcome::Failed { step: 0, message };
         }
         if action.confirm && source != Source::Action {
-            match self.host.confirm(&action.name, &format!("Run {} on “{}”?", action.name, self.title()))
-            {
+            let message = format!("Run {} on “{}”?", action.name, self.title());
+            match self.asking(|h| h.confirm(&action.name, &message)) {
                 Ok(true) => {}
                 Ok(false) => return RunOutcome::Cancelled,
                 Err(e) => return RunOutcome::Failed { step: 0, message: format!("{e:#}") },
@@ -661,6 +669,14 @@ impl Ctx<'_> {
             Err((_, StepError::Cancelled)) => RunOutcome::Cancelled,
             Err((step, StepError::Failed(message))) => RunOutcome::Failed { step, message },
         }
+    }
+
+    /// A host call that waits on the person. Their reading time does not count against the run's limit.
+    fn asking<T>(&mut self, f: impl FnOnce(&mut dyn Host) -> T) -> T {
+        let started = Instant::now();
+        let r = f(&mut *self.host);
+        self.deadline += started.elapsed();
+        r
     }
 
     fn title(&self) -> String {
@@ -725,7 +741,7 @@ impl Ctx<'_> {
         if items.is_empty() {
             return Ok(());
         }
-        match self.host.confirm_scope(&action.name, &items) {
+        match self.asking(|h| h.confirm_scope(&action.name, &items)) {
             Ok(true) => {
                 self.trusted.push((action.uuid.clone(), action.steps_hash()));
                 Ok(())
@@ -903,7 +919,7 @@ impl Ctx<'_> {
                         .collect(),
                     cancel_button: *cancel_button,
                 };
-                let Some(reply) = self.host.prompt(&spec)? else { return Ok(Flow::Stop) };
+                let Some(reply) = self.asking(|h| h.prompt(&spec))? else { return Ok(Flow::Stop) };
                 self.tags.insert("prompt_button".into(), reply.button);
                 for (k, v) in reply.values {
                     self.tags.insert(format!("prompt_{}", k.to_lowercase()), v);
@@ -918,7 +934,7 @@ impl Ctx<'_> {
                     }
                     _ => String::new(),
                 };
-                if !self.host.preview(&body, &css, *continue_button)? {
+                if !self.asking(|h| h.preview(&body, &css, *continue_button))? {
                     return Ok(Flow::Stop);
                 }
             }
@@ -1410,6 +1426,46 @@ mod tests {
             go(&mut s, "Lost", id, &mut RecordingHost::default()).outcome,
             RunOutcome::Failed { .. }
         ));
+        drop(s);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn the_editors_json_saves_trusted_and_reports_the_selection() {
+        let (mut s, dir, id) = setup();
+        // What the window's action editor sends: every field, nulls for engine defaults, `trusted` ignored.
+        let sent: Action = serde_json::from_value(json!({
+            "uuid": "", "name": "Shout", "group": "", "description": "", "icon": "bolt", "color": "grey",
+            "shortcut": "Ctrl+Alt+J", "afterSuccess": "nothing", "addTags": [], "confirm": false,
+            "hidden": false, "disabled": false, "trusted": false,
+            "steps": [
+                { "type": "runCommand", "command": "tr a-z A-Z", "stdin": "[[draft]]", "shell": null,
+                  "timeoutSecs": null, "output": "replace", "cwd": null },
+                { "type": "insertText", "text": "!", "position": "end", "moveCursor": true }
+            ]
+        }))
+        .unwrap();
+        let a = s.save_action(&sent, true).unwrap();
+        assert!(a.trusted && !a.uuid.is_empty() && a.group == "Actions");
+        let mut h = RecordingHost::default();
+        h.commands.push_back(Ok(CommandOutput {
+            status: 0,
+            stdout: "HELLO\n".into(),
+            stderr: String::new(),
+        }));
+        let r = go(&mut s, "Shout", id, &mut h);
+        assert_eq!(r.outcome, RunOutcome::Ok);
+        assert!(
+            !h.calls.iter().any(|c| matches!(c, Call::ConfirmScope(..))),
+            "saved from the editor: no prompt"
+        );
+        assert!(r.changed);
+        assert_eq!(s.draft(id).unwrap().content, "HELLO!");
+        assert_eq!((r.selection.anchor, r.selection.head), (6, 6), "the cursor after the inserted text");
+
+        s.seed_default_actions().unwrap();
+        let copy = go(&mut s, "Copy", id, &mut RecordingHost::default());
+        assert!(!copy.changed, "a copy leaves the text alone");
         drop(s);
         std::fs::remove_dir_all(dir).unwrap();
     }

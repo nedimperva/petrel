@@ -267,6 +267,7 @@ pub mod system {
     use std::io::{Read, Write};
     use std::path::Path;
     use std::process::Stdio;
+    use std::sync::RwLock;
     use std::time::{Duration, Instant};
 
     use anyhow::{anyhow, bail, Context, Result};
@@ -275,6 +276,62 @@ pub mod system {
 
     /// Output past this is dropped (actions.md: 1 MB cap).
     pub const OUTPUT_MAX: usize = 1 << 20;
+
+    static PATH: RwLock<Option<String>> = RwLock::new(None);
+
+    /// The `PATH` every command gets: the login shell's, so `~/.local/bin` and the like work from a desktop
+    /// launch, where the session's `PATH` is often the bare system one (actions.md "Shell").
+    pub fn use_path(path: Option<String>) {
+        if let Ok(mut p) = PATH.write() {
+            *p = path;
+        }
+    }
+
+    pub fn command_path() -> Option<String> {
+        PATH.read().ok().and_then(|p| p.clone())
+    }
+
+    /// Asks the login shell for its `PATH` (`$SHELL -l`). Slow (rc files, 50–300 ms), so the shell caches the
+    /// answer and calls this off the start path. `None` on Windows, with no `$SHELL`, or when the answer does
+    /// not look like a `PATH`.
+    pub fn login_path() -> Option<String> {
+        if cfg!(windows) {
+            return None;
+        }
+        let shell = std::env::var("SHELL").ok().filter(|s| !s.is_empty())?;
+        // A marker, because rc files may print things; fish keeps PATH as a list.
+        let print = if shell.ends_with("fish") {
+            "printf '\\n%s%s' __PETREL_PATH__ (string join : $PATH)"
+        } else {
+            "printf '\\n%s%s' __PETREL_PATH__ \"$PATH\""
+        };
+        let mut cmd = std::process::Command::new(&shell);
+        cmd.args(["-l", "-c", print]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            cmd.process_group(0);
+        }
+        let mut child = cmd.spawn().ok()?;
+        let out = child.stdout.take().map(|o| std::thread::spawn(move || read_capped(o)));
+        let started = Instant::now();
+        loop {
+            match child.try_wait() {
+                Ok(Some(_)) => break,
+                Ok(None) if started.elapsed() < Duration::from_secs(5) => {
+                    std::thread::sleep(Duration::from_millis(10))
+                }
+                _ => {
+                    kill(&mut child);
+                    let _ = child.wait();
+                    return None;
+                }
+            }
+        }
+        let text = out?.join().ok()?;
+        let path = text.rsplit("__PETREL_PATH__").next()?.trim();
+        (text.contains("__PETREL_PATH__") && path.contains('/')).then(|| path.to_string())
+    }
 
     pub fn read_file(path: &Path) -> Result<Option<String>> {
         match std::fs::read_to_string(path) {
@@ -362,6 +419,9 @@ pub mod system {
     /// process group is sent SIGTERM, then SIGKILL after half a second (Linux), or the tree is killed (Windows).
     pub fn run_command(command: &Command, cancel: &CancelToken) -> Result<CommandOutput> {
         let mut cmd = program(command)?;
+        if let Some(path) = command_path() {
+            cmd.env("PATH", path);
+        }
         cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
         if let Some(cwd) = &command.cwd {
             cmd.current_dir(cwd);
@@ -477,6 +537,18 @@ mod tests {
         });
         let err = run_command(&sh("sleep 30", "", 60), &cancel).unwrap_err();
         assert_eq!(err.to_string(), "cancelled");
+    }
+
+    #[test]
+    fn commands_get_the_login_path() {
+        if let Some(p) = login_path() {
+            assert!(p.contains('/') && !p.contains('\n'), "{p:?}");
+        }
+        let base = std::env::var("PATH").unwrap_or_default();
+        use_path(Some(format!("{base}:/petrel-test")));
+        let out = run_command(&sh("printf %s \"$PATH\"", "", 5), &CancelToken::default()).unwrap();
+        use_path(None);
+        assert!(out.stdout.ends_with(":/petrel-test"), "{}", out.stdout);
     }
 
     #[test]

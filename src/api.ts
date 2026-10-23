@@ -90,6 +90,109 @@ export interface AppInfo {
   debug: boolean;
 }
 
+// ---- actions (package 03) ---------------------------------------------------------------------------------
+
+export type AfterSuccess = "nothing" | "archive" | "trash" | "new";
+
+/** A step as the engine reads it: `type` plus that type's fields (docs/design/actions.md, "Built-in steps"). */
+export interface Step {
+  type: string;
+  [field: string]: unknown;
+}
+
+export interface Action {
+  uuid: string;
+  name: string;
+  /** Empty for a new action: the engine files it under "Actions". */
+  group: string;
+  description: string;
+  icon: string;
+  color: string;
+  /** A bare key (`c`, used when the action list has focus) or a chord with Ctrl/Alt (`Ctrl+Alt+J`, anywhere). */
+  shortcut: string | null;
+  steps: Step[];
+  afterSuccess: AfterSuccess;
+  addTags: string[];
+  confirm: boolean;
+  hidden: boolean;
+  disabled: boolean;
+  /** Read-only: the steps are the ones the person last saw or confirmed. */
+  trusted: boolean;
+}
+
+/** UTF-16 offsets, as CodeMirror reports them. */
+export interface Selection {
+  anchor: number;
+  head: number;
+}
+
+export type RunOutcome =
+  | { status: "ok" }
+  | { status: "stopped" }
+  | { status: "cancelled" }
+  | { status: "failed"; step: number; message: string };
+
+export interface RunReport {
+  runId: number;
+  action: string;
+  draftId: number;
+  outcome: RunOutcome;
+  openDraft: number | null;
+  newDraft: boolean;
+  unknownTags: string[];
+  log: string[];
+  selection: Selection;
+  /** The stored content changed; reload the editor. */
+  changed: boolean;
+}
+
+export interface RunLogEntry {
+  id: number;
+  /** Empty if the action was deleted since. */
+  action: string;
+  actionUuid: string | null;
+  draftId: number | null;
+  draftTitle: string | null;
+  startedAt: number;
+  endedAt: number | null;
+  status: "ok" | "stopped" | "cancelled" | "failed";
+  step: number | null;
+  message: string;
+  source: string;
+}
+
+export type ScopeItem = { kind: "command" | "path"; text: string };
+
+export interface PromptField {
+  key: string;
+  kind: "text" | "textarea" | "select" | "switch" | "date";
+  label: string;
+  default: string;
+  options: string[];
+}
+
+export interface PromptSpec {
+  title: string;
+  message: string;
+  buttons: string[];
+  fields: PromptField[];
+  cancelButton: boolean;
+}
+
+/** Something a running action needs from the person. Answer with `hostReply(id, …)`. */
+export type HostRequest =
+  | { id: number; kind: "confirm"; payload: { title: string; message: string } }
+  | { id: number; kind: "scope"; payload: { action: string; items: ScopeItem[] } }
+  | { id: number; kind: "prompt"; payload: PromptSpec }
+  | { id: number; kind: "preview"; payload: { html: string; css: string; continueButton: boolean } };
+
+export interface HostEvents {
+  request(r: HostRequest): void;
+  /** The run was cancelled while the request was up; close it. */
+  closed(id: number): void;
+  message(kind: "info" | "warning", text: string): void;
+}
+
 export interface Api {
   appInfo(): Promise<AppInfo>;
   newDraft(content: string): Promise<Draft>;
@@ -114,6 +217,18 @@ export interface Api {
   sweep(): Promise<SweepReport>;
   /** Shows the (initially hidden) window once the UI has rendered. No-op outside Tauri. */
   showWindow(): Promise<void>;
+
+  listActions(): Promise<Action[]>;
+  /** From the action editor, so the saved steps are trusted. Returns the stored action (uuid, group filled). */
+  saveAction(action: Action): Promise<Action>;
+  deleteAction(uuid: string): Promise<boolean>;
+  actionLog(limit: number): Promise<RunLogEntry[]>;
+  /** `key` is a uuid or a name. Rejects when the action or draft is missing or another run is going. */
+  runAction(key: string, draftId: number, editor: Selection | null, source: "ui" | "shortcut"): Promise<RunReport>;
+  /** Stops the running action. */
+  cancelRun(): Promise<boolean>;
+  hostReply(id: number, value: unknown): Promise<boolean>;
+  listenHost(events: HostEvents): Promise<void>;
 }
 
 const inTauri = "__TAURI_INTERNALS__" in window;
@@ -138,6 +253,21 @@ async function tauriApi(): Promise<Api> {
     emptyTrash: () => invoke("empty_trash"),
     sweep: () => invoke("sweep"),
     showWindow: () => invoke("show_window"),
+    listActions: () => invoke("list_actions"),
+    saveAction: (action) => invoke("save_action", { action }),
+    deleteAction: (uuid) => invoke("delete_action", { uuid }),
+    actionLog: (limit) => invoke("action_log", { limit }),
+    runAction: (key, draftId, editor, source) => invoke("run_action", { key, draftId, editor, source }),
+    cancelRun: () => invoke("cancel_run"),
+    hostReply: (id, value) => invoke("host_reply", { id, value }),
+    listenHost: async (events) => {
+      const { listen } = await import("@tauri-apps/api/event");
+      await listen<HostRequest>("host-request", (e) => events.request(e.payload));
+      await listen<number>("host-closed", (e) => events.closed(e.payload));
+      await listen<{ kind: "info" | "warning"; text: string }>("host-message", (e) =>
+        events.message(e.payload.kind, e.payload.text),
+      );
+    },
   };
 }
 
@@ -311,6 +441,174 @@ function fakeApi(): Api {
     },
     sweep: async () => ({ tombstoned: 0, purged: 0, tagsRemoved: 0, versionsThinned: 0 }),
     showWindow: async () => {},
+    ...fakeActions((id) => drafts.get(id)),
+  };
+}
+
+/** Actions without the engine: a few step types are acted out, the rest are logged. Enough to work on the list,
+ *  the editor, the dialogs and the log in a browser. */
+function fakeActions(draft: (id: number) => Draft | undefined) {
+  const base = { description: "", hidden: false, disabled: false, confirm: false, addTags: [], afterSuccess: "nothing" as const };
+  const make = (name: string, icon: string, color: string, steps: Step[], more: Partial<Action> = {}): Action => ({
+    ...base,
+    uuid: crypto.randomUUID(),
+    name,
+    group: "Basics",
+    icon,
+    color,
+    shortcut: null,
+    steps,
+    trusted: true,
+    ...more,
+  });
+  const actions: Action[] = [
+    make("Copy", "copy", "blue", [{ type: "clipboard", text: "[[draft]]", mode: "replace" }], { shortcut: "c" }),
+    make("Save to file", "save", "green", [{ type: "file", path: "~/Documents/Petrel/[[safe_title]].md", text: "[[draft]]", mode: "overwrite", createDirs: true }]),
+    make("Search the web", "search", "teal", [{ type: "url", url: "https://duckduckgo.com/?q=[[selection]]", encode: true, openIn: "default" }]),
+    make("Ask then append", "edit", "purple", [
+      { type: "prompt", title: "Append", message: "What should go at the end?", buttons: ["Append"], fields: [{ key: "text", kind: "text", label: "Text", default: "", options: [] }], cancelButton: true },
+      { type: "insertText", text: "\n[[prompt_text]]", position: "end", moveCursor: false },
+    ], { group: "Writing", afterSuccess: "nothing" }),
+    make("Preview", "eye", "grey", [{ type: "htmlPreview", template: "[[draft]]", html: false, css: null, continueButton: false }], { group: "Writing" }),
+    make("Word count (untrusted)", "terminal", "orange", [{ type: "runCommand", command: "wc -w", stdin: "[[draft]]", shell: null, timeoutSecs: null, output: "ignore", cwd: null }], { group: "Writing", trusted: false }),
+    make("Fails", "x", "red", [{ type: "runCommand", command: "false", stdin: "", shell: null, timeoutSecs: null, output: "ignore", cwd: null }], { group: "Writing" }),
+  ];
+  const log: RunLogEntry[] = [];
+  let events: HostEvents | null = null;
+  let nextRequest = 1;
+  const waiting = new Map<number, (v: unknown) => void>();
+  let cancel: (() => void) | null = null;
+  function ask(kind: HostRequest["kind"], payload: unknown): Promise<unknown> {
+    const id = nextRequest++;
+    return new Promise((resolve) => {
+      waiting.set(id, resolve);
+      events?.request({ id, kind, payload } as HostRequest);
+    });
+  }
+  const escape = (t: string) => t.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]!);
+  async function run(key: string, draftId: number, editor: Selection | null, source: string): Promise<RunReport> {
+    const a = actions.find((x) => x.uuid === key || x.name.toLowerCase() === key.toLowerCase());
+    const d = draft(draftId);
+    if (!a) throw new Error(`there is no action named ${key}`);
+    if (!d) throw new Error(`draft ${draftId} does not exist`);
+    if (cancel) throw new Error("another action is running");
+    let cancelled = false;
+    cancel = () => {
+      cancelled = true;
+      waiting.forEach((_, id) => events?.closed(id));
+      waiting.forEach((resolve) => resolve(null));
+      waiting.clear();
+    };
+    const tags: Record<string, string> = {};
+    let content = d.content;
+    let outcome: RunOutcome = { status: "ok" };
+    const lines: string[] = [];
+    const render = (t: string) =>
+      t.replace(/\[\[(\w+)\]\]/g, (m, k: string) => (k === "draft" ? content : k === "title" ? d.title : k === "safe_title" ? d.title.replace(/[\/\\:*?"<>|]/g, "-") : (tags[k] ?? m)));
+    try {
+      if (!a.trusted) {
+        const items = a.steps.filter((s) => s.type === "runCommand").map((s) => ({ kind: "command" as const, text: render(String(s.command)) }));
+        if (items.length && !(await ask("scope", { action: a.name, items }))) {
+          outcome = { status: "cancelled" };
+        } else a.trusted = true;
+      }
+      for (const [i, s] of a.steps.entries()) {
+        if (outcome.status !== "ok") break;
+        if (cancelled) {
+          outcome = { status: "cancelled" };
+          break;
+        }
+        if (s.type === "clipboard") {
+          await navigator.clipboard?.writeText(render(String(s.text))).catch(() => {});
+        } else if (s.type === "prompt") {
+          const reply = (await ask("prompt", s)) as { button: string; values: Record<string, string> } | null;
+          if (!reply) outcome = cancelled ? { status: "cancelled" } : { status: "stopped" };
+          else {
+            tags.prompt_button = reply.button;
+            Object.entries(reply.values).forEach(([k, v]) => (tags[`prompt_${k}`] = v));
+          }
+        } else if (s.type === "insertText") {
+          const t = render(String(s.text));
+          content = s.position === "start" ? t + content : content + t;
+        } else if (s.type === "htmlPreview") {
+          const html = `<pre style="white-space:pre-wrap;font:14px/1.5 system-ui">${escape(render(String(s.template)))}</pre>`;
+          if (!(await ask("preview", { html, css: "", continueButton: s.continueButton }))) outcome = { status: "stopped" };
+        } else if (s.type === "runCommand") {
+          await new Promise((r) => setTimeout(r, 400));
+          if (String(s.command) === "false") outcome = { status: "failed", step: i + 1, message: "exited with 1" };
+          else lines.push(`ran ${render(String(s.command))}`);
+        } else {
+          lines.push(`(fake store) ${s.type} skipped`);
+        }
+        if (cancelled) outcome = { status: "cancelled" };
+      }
+    } finally {
+      cancel = null;
+    }
+    const changed = outcome.status === "ok" && content !== d.content;
+    if (changed) Object.assign(d, { content, modifiedAt: Date.now() });
+    if (outcome.status === "ok" && a.afterSuccess === "archive") d.folder = "archive";
+    if (outcome.status === "ok" && a.afterSuccess === "trash") d.folder = "trash";
+    const t = Date.now();
+    log.unshift({
+      id: log.length + 1,
+      action: a.name,
+      actionUuid: a.uuid,
+      draftId,
+      draftTitle: d.title,
+      startedAt: t,
+      endedAt: t,
+      status: outcome.status,
+      step: outcome.status === "failed" ? outcome.step : null,
+      message: outcome.status === "failed" ? outcome.message : lines.join("\n"),
+      source,
+    });
+    const end = editor?.head ?? 0;
+    return {
+      runId: log.length,
+      action: a.name,
+      draftId,
+      outcome,
+      openDraft: null,
+      newDraft: outcome.status === "ok" && a.afterSuccess === "new",
+      unknownTags: [],
+      log: lines,
+      selection: { anchor: end, head: end },
+      changed,
+    };
+  }
+  return {
+    listActions: async () => actions.filter((a) => a.uuid).map((a) => ({ ...a, group: a.group || "Actions" })),
+    saveAction: async (a: Action) => {
+      const saved = { ...a, uuid: a.uuid || crypto.randomUUID(), group: a.group.trim() || "Actions", trusted: true };
+      const i = actions.findIndex((x) => x.uuid === saved.uuid);
+      if (actions.some((x) => x.uuid !== saved.uuid && x.name.toLowerCase() === saved.name.toLowerCase()))
+        throw new Error(`an action named ${saved.name} exists`);
+      if (i >= 0) actions[i] = saved;
+      else actions.push(saved);
+      return saved;
+    },
+    deleteAction: async (uuid: string) => {
+      const i = actions.findIndex((x) => x.uuid === uuid);
+      if (i >= 0) actions.splice(i, 1);
+      return i >= 0;
+    },
+    actionLog: async (limit: number) => log.slice(0, limit),
+    runAction: run,
+    cancelRun: async () => {
+      if (!cancel) return false;
+      cancel();
+      return true;
+    },
+    hostReply: async (id: number, value: unknown) => {
+      const resolve = waiting.get(id);
+      waiting.delete(id);
+      resolve?.(value);
+      return !!resolve;
+    },
+    listenHost: async (e: HostEvents) => {
+      events = e;
+    },
   };
 }
 
