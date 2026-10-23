@@ -3,13 +3,17 @@
 //! `backups/` (SQLite backup API), so a migration can never be the thing that loses someone's text.
 //!
 //! Everything here is synchronous behind one connection; callers hold the `Store` in a `Mutex`. Writes are
-//! tiny (autosave is one UPDATE), so this has not needed a pool. See `docs/research/data-model.md`.
+//! tiny (autosave is one UPDATE), so this has not needed a pool. The one other connection is the checkpointer's
+//! (`Checkpointer`), which copies the WAL into the database file off the write path. See
+//! `docs/research/data-model.md`.
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::mpsc;
+use std::thread::JoinHandle;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, bail, Context, Result};
 use rusqlite::types::{ToSql, Value};
@@ -22,7 +26,7 @@ use crate::retention::{self, Retention, VersionAge, DAY_MS, HOUR_MS};
 use crate::title;
 
 /// The schema version this build writes. A database with a higher `meta.schema_version` is refused.
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 /// How many backups `backup_before_migrate` keeps.
 const BACKUPS_KEPT: usize = 5;
@@ -44,6 +48,14 @@ pub const CANDIDATES_MAX: usize = 2_000;
 
 /// How many batch changes can be undone.
 const UNDO_KEPT: usize = 50;
+
+/// How often the checkpointer copies the WAL into the database file. This is also about the most a power cut can
+/// take under `synchronous = NORMAL` (an app crash loses nothing); SQLite's default was 1,000 pages of writes.
+const CHECKPOINT_EVERY: Duration = Duration::from_secs(2);
+
+/// The WAL size at which a write checkpoints inline after all, if the checkpointer has fallen behind or is not
+/// running (~16 MB).
+const WAL_CAP_PAGES: i64 = 4_000;
 
 const SCHEMA: &str = r#"
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -172,6 +184,73 @@ CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 /// v2: the list can be sorted by title without sorting a whole folder.
 const SCHEMA_V2: &str = r#"
 CREATE INDEX drafts_title ON drafts (folder, title COLLATE NOCASE, id) WHERE deleted_at IS NULL;
+"#;
+
+/// v3: counts kept by triggers, so the folder badges and the tag list never count rows, and the title, created
+/// and accessed indexes lose their folder column. With the folder first, moving a draft moved its entry in each
+/// of those indexes to another part of the tree: archiving 50 scattered drafts wrote 330 pages, and the undo as
+/// many (19 ms on Windows). Without it a move touches the row and the `drafts_list` entry, ~1 page a draft. Those
+/// three sorts now check the folder per row (`Store::scan`), or sort a small folder whole from `drafts_list`,
+/// which carries their keys so that sort never reads the table (0.2 ms for 1,000 drafts against 1.5 ms). Its
+/// entry is rewritten on every save and move anyway, so the extra columns cost bytes, not writes.
+///
+/// The counts Only live drafts are
+/// counted (`deleted_at IS NULL`). A row whose count reached 0 stays; readers skip it. `draft_tags` rows are only
+/// ever inserted or deleted, never updated. A live draft deleted outright (nothing does that today) is taken out
+/// of the counts in a BEFORE trigger, while its tags can still be read.
+const SCHEMA_V3: &str = r#"
+DROP INDEX drafts_list;
+DROP INDEX drafts_title;
+DROP INDEX drafts_created;
+DROP INDEX drafts_accessed;
+CREATE INDEX drafts_list     ON drafts (folder, modified_at DESC, id DESC, title COLLATE NOCASE, created_at, accessed_at)
+  WHERE deleted_at IS NULL;
+CREATE INDEX drafts_title    ON drafts (title COLLATE NOCASE, id) WHERE deleted_at IS NULL;
+CREATE INDEX drafts_created  ON drafts (created_at DESC, id DESC)  WHERE deleted_at IS NULL;
+CREATE INDEX drafts_accessed ON drafts (accessed_at DESC, id DESC) WHERE deleted_at IS NULL;
+
+CREATE TABLE folder_counts (folder INTEGER PRIMARY KEY, n INTEGER NOT NULL);
+CREATE TABLE tag_counts (
+  tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+  folder INTEGER NOT NULL,
+  n      INTEGER NOT NULL,
+  PRIMARY KEY (tag_id, folder)
+) WITHOUT ROWID;
+
+INSERT INTO folder_counts (folder, n)
+  SELECT folder, COUNT(*) FROM drafts WHERE deleted_at IS NULL GROUP BY folder;
+INSERT INTO tag_counts (tag_id, folder, n)
+  SELECT dt.tag_id, d.folder, COUNT(*) FROM draft_tags dt JOIN drafts d ON d.id = dt.draft_id
+  WHERE d.deleted_at IS NULL GROUP BY dt.tag_id, d.folder;
+
+CREATE TRIGGER counts_draft_ai AFTER INSERT ON drafts WHEN new.deleted_at IS NULL BEGIN
+  INSERT INTO folder_counts (folder, n) VALUES (new.folder, 1) ON CONFLICT (folder) DO UPDATE SET n = n + 1;
+END;
+CREATE TRIGGER counts_draft_au AFTER UPDATE OF folder, deleted_at ON drafts
+  WHEN old.folder IS NOT new.folder OR (old.deleted_at IS NULL) IS NOT (new.deleted_at IS NULL) BEGIN
+  UPDATE folder_counts SET n = n - 1 WHERE folder = old.folder AND old.deleted_at IS NULL;
+  INSERT INTO folder_counts (folder, n) SELECT new.folder, 1 WHERE new.deleted_at IS NULL
+    ON CONFLICT (folder) DO UPDATE SET n = n + 1;
+  UPDATE tag_counts SET n = n - 1 WHERE folder = old.folder AND old.deleted_at IS NULL
+    AND tag_id IN (SELECT tag_id FROM draft_tags WHERE draft_id = old.id);
+  INSERT INTO tag_counts (tag_id, folder, n)
+    SELECT tag_id, new.folder, 1 FROM draft_tags WHERE draft_id = new.id AND new.deleted_at IS NULL
+    ON CONFLICT (tag_id, folder) DO UPDATE SET n = n + 1;
+END;
+CREATE TRIGGER counts_draft_bd BEFORE DELETE ON drafts WHEN old.deleted_at IS NULL BEGIN
+  UPDATE folder_counts SET n = n - 1 WHERE folder = old.folder;
+  UPDATE tag_counts SET n = n - 1 WHERE folder = old.folder
+    AND tag_id IN (SELECT tag_id FROM draft_tags WHERE draft_id = old.id);
+END;
+CREATE TRIGGER counts_tag_ai AFTER INSERT ON draft_tags BEGIN
+  INSERT INTO tag_counts (tag_id, folder, n)
+    SELECT new.tag_id, folder, 1 FROM drafts WHERE id = new.draft_id AND deleted_at IS NULL
+    ON CONFLICT (tag_id, folder) DO UPDATE SET n = n + 1;
+END;
+CREATE TRIGGER counts_tag_ad AFTER DELETE ON draft_tags BEGIN
+  UPDATE tag_counts SET n = n - 1 WHERE tag_id = old.tag_id
+    AND folder = (SELECT folder FROM drafts WHERE id = old.draft_id AND deleted_at IS NULL);
+END;
 "#;
 
 /// Where a draft lives. Stored as an integer; the names are the wire format.
@@ -389,6 +468,8 @@ pub struct Version {
 }
 
 pub struct Store {
+    /// Declared first so it stops before the main connection closes; the last connection out removes the WAL.
+    _checkpointer: Option<Checkpointer>,
     conn: Connection,
     path: Option<PathBuf>,
     /// Milliseconds since the epoch; swapped out by tests.
@@ -409,19 +490,29 @@ impl Store {
         }
         let conn = Connection::open(path).with_context(|| format!("opening {}", path.display()))?;
         let mut store = Store {
+            _checkpointer: None,
             conn,
             path: Some(path.to_path_buf()),
             clock: Box::new(system_now),
             undo: VecDeque::new(),
         };
         store.init()?;
+        // After `init`, so the checkpointer never sees a database mid-migration.
+        store.conn.pragma_update(None, "wal_autocheckpoint", WAL_CAP_PAGES)?;
+        store._checkpointer = Some(Checkpointer::spawn(path)?);
         Ok(store)
     }
 
     /// An in-memory store for tests and the UI's fake mode.
     pub fn open_in_memory() -> Result<Store> {
         let conn = Connection::open_in_memory()?;
-        let mut store = Store { conn, path: None, clock: Box::new(system_now), undo: VecDeque::new() };
+        let mut store = Store {
+            _checkpointer: None,
+            conn,
+            path: None,
+            clock: Box::new(system_now),
+            undo: VecDeque::new(),
+        };
         store.init()?;
         Ok(store)
     }
@@ -489,6 +580,7 @@ impl Store {
                     )?;
                 }
                 2 => tx.execute_batch(SCHEMA_V2)?,
+                3 => tx.execute_batch(SCHEMA_V3)?,
                 _ => unreachable!("no migration step for v{next}"),
             }
             tx.execute(
@@ -819,21 +911,32 @@ impl Store {
         let mut tagged = self.conn.prepare_cached(
             "SELECT draft_id FROM draft_tags WHERE tag_id = ?1 ORDER BY draft_id DESC LIMIT ?2",
         )?;
+        let mut live =
+            self.conn.prepare_cached("SELECT IFNULL(SUM(n), 0) FROM tag_counts WHERE tag_id = ?1")?;
+        let mut walk: Vec<(i64, i64)> = Vec::new();
         for name in &q.tags_all {
             let name = tag_name(name);
             if name.is_empty() {
                 continue;
             }
             let Some(tag) = self.tag_id(&name)? else { return Ok(None) };
-            let ids: Vec<i64> = tagged
-                .query_map(params![tag, CANDIDATES_MAX as i64 + 1], |r| r.get(0))?
-                .collect::<rusqlite::Result<_>>()?;
-            if ids.len() <= CANDIDATES_MAX {
-                sets.push(ids);
-            } else {
-                f.walk_tags.push(tag);
+            // The live count is a lower bound on the tag's rows (tombstones keep theirs), so a tag over the
+            // limit is known broad without fetching its ids.
+            let n: i64 = live.query_row(params![tag], |r| r.get(0))?;
+            if n <= CANDIDATES_MAX as i64 {
+                let ids: Vec<i64> = tagged
+                    .query_map(params![tag, CANDIDATES_MAX as i64 + 1], |r| r.get(0))?
+                    .collect::<rusqlite::Result<_>>()?;
+                if ids.len() <= CANDIDATES_MAX {
+                    sets.push(ids);
+                    continue;
+                }
             }
+            walk.push((n, tag));
         }
+        // The rarest tag first: most rows walked fail its check, and the next one is never run.
+        walk.sort();
+        f.walk_tags = walk.into_iter().map(|(_, tag)| tag).collect();
         for name in &q.tags_none {
             if let Some(tag) = self.tag_id(&tag_name(name))? {
                 f.none_tags.push(tag);
@@ -852,6 +955,17 @@ impl Store {
             // so a broad text filter keeps the newest `CANDIDATES_MAX` matches instead, as `search` does.
             let mut ids = ids;
             ids.truncate(CANDIDATES_MAX);
+            sets.push(ids);
+        }
+        // Flagged-only with another filter: the flagged drafts are an index-only read (`drafts_flagged`), and
+        // adding them to the intersection usually leaves a set small enough to fetch by id. Walking the sort
+        // index instead tests every row of a folder when few of the set are flagged (10 ms on Windows).
+        if q.flagged_only && !sets.is_empty() {
+            let ids: Vec<i64> = self
+                .conn
+                .prepare_cached("SELECT id FROM drafts WHERE flagged = 1 AND deleted_at IS NULL")?
+                .query_map([], |r| r.get(0))?
+                .collect::<rusqlite::Result<_>>()?;
             sets.push(ids);
         }
         sets.sort_by_key(Vec::len);
@@ -901,10 +1015,24 @@ impl Store {
         // `+` on the folder and the order key makes SQLite look a small id set up and sort it, instead of walking
         // a folder's index and testing each row against the set.
         let by_id = f.by_id;
+        // Only `drafts_list` (modified) leads with the folder (v3). The other sorts walk their index and check
+        // the folder per row in the table, ~1.6 µs a row for about `want × drafts / folder size` rows; a small
+        // folder is read whole from `drafts_list`, which carries the sort keys, and sorted, ~0.2 µs a draft.
+        let mut sort_whole = false;
+        let mut walk_all = false;
+        if sort != Sort::Modified && !by_id {
+            let sizes = folders.iter().map(|f| self.count(*f)).collect::<Result<Vec<i64>>>()?;
+            let total: i64 = [Folder::Inbox, Folder::Archive, Folder::Trash]
+                .iter()
+                .map(|f| self.count(*f))
+                .sum::<Result<i64>>()?;
+            sort_whole = sizes.iter().all(|n| n * n <= 8 * want as i64 * total);
+            walk_all = !sort_whole;
+        }
         let mut sql = format!(
             "SELECT id, uuid, title, preview, folder, flagged, modified_at, {col} FROM drafts \
              WHERE {}folder = ?1 AND deleted_at IS NULL",
-            if by_flag || by_id { "+" } else { "" }
+            if by_flag || by_id || walk_all { "+" } else { "" }
         );
         match flagged {
             Some(true) if by_flag => sql += " AND flagged = 1",
@@ -935,7 +1063,7 @@ impl Store {
             // The plain bound lets SQLite seek the index; the row value alone does not under a collation.
             sql += &format!(" AND {col} {cmp}= {key} AND ({col}, id) {cmp} ({key}, {})", arg(Box::new(c.id)));
         }
-        let order = if by_id { format!("+{col}") } else { col.to_string() };
+        let order = if by_id || sort_whole { format!("+{col}") } else { col.to_string() };
         sql += &format!(" ORDER BY {order} {dir}, id {dir} LIMIT {}", arg(Box::new(want as i64)));
 
         let mut stmt = self.conn.prepare_cached(&sql)?;
@@ -1028,12 +1156,14 @@ impl Store {
         Ok(ids.iter().filter_map(|id| by_id.remove(id)).collect())
     }
 
+    /// Live drafts in a folder, from `folder_counts` (schema v3).
     pub fn count(&self, folder: Folder) -> Result<i64> {
-        Ok(self.conn.query_row(
-            "SELECT COUNT(*) FROM drafts WHERE folder = ?1 AND deleted_at IS NULL",
-            params![folder as i64],
-            |r| r.get(0),
-        )?)
+        Ok(self
+            .conn
+            .prepare_cached("SELECT n FROM folder_counts WHERE folder = ?1")?
+            .query_row(params![folder as i64], |r| r.get(0))
+            .optional()?
+            .unwrap_or(0))
     }
 
     // ---- tags --------------------------------------------------------------------------------------------
@@ -1084,13 +1214,10 @@ impl Store {
             Some(f) => vec![f as i64],
             None => vec![Folder::Inbox as i64, Folder::Archive as i64],
         };
-        // Driving from the folder's index and probing `draft_tags` by draft is the cheapest shape measured
-        // (package 01 Decisions); the names join the dozen or so result rows, not every tag link.
+        // The counts are kept by triggers (schema v3); counting rows was 31 ms at 50k here and 84 ms on Windows.
         let mut stmt = self.conn.prepare_cached(
-            "SELECT t.name, c.n FROM \
-               (SELECT dt.tag_id, COUNT(*) AS n FROM drafts d JOIN draft_tags dt ON dt.draft_id = d.id \
-                WHERE d.folder IN rarray(?1) AND d.deleted_at IS NULL GROUP BY dt.tag_id) c \
-             JOIN tags t ON t.id = c.tag_id ORDER BY t.name",
+            "SELECT t.name, SUM(c.n) AS n FROM tag_counts c JOIN tags t ON t.id = c.tag_id \
+             WHERE c.folder IN rarray(?1) GROUP BY c.tag_id HAVING n > 0 ORDER BY t.name",
         )?;
         let counts = stmt
             .query_map(params![id_array(&folders)], |r| Ok(TagCount { name: r.get(0)?, count: r.get(1)? }))?
@@ -1305,6 +1432,39 @@ struct Filter {
     /// Broad tags, checked per row.
     walk_tags: Vec<i64>,
     none_tags: Vec<i64>,
+}
+
+/// Copies the WAL into the database file every `CHECKPOINT_EVERY` on a thread and connection of its own. With
+/// SQLite's default, the write that crosses 1,000 WAL pages does the copy and the fsyncs itself; on Windows that
+/// write took a second (package 01 Results). A PASSIVE checkpoint takes no lock a writer needs, so the store's
+/// writes never wait for it, and it does nothing when the WAL has nothing new.
+struct Checkpointer {
+    stop: Option<mpsc::Sender<()>>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl Checkpointer {
+    fn spawn(path: &Path) -> Result<Checkpointer> {
+        let conn =
+            Connection::open(path).with_context(|| format!("opening {} to checkpoint", path.display()))?;
+        let (stop, stopped) = mpsc::channel::<()>();
+        let thread = std::thread::Builder::new().name("petrel-checkpoint".into()).spawn(move || {
+            while let Err(mpsc::RecvTimeoutError::Timeout) = stopped.recv_timeout(CHECKPOINT_EVERY) {
+                // A failed pass is retried on the next tick, and the WAL cap is the backstop.
+                let _ = conn.query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |_| Ok(()));
+            }
+        })?;
+        Ok(Checkpointer { stop: Some(stop), thread: Some(thread) })
+    }
+}
+
+impl Drop for Checkpointer {
+    fn drop(&mut self) {
+        drop(self.stop.take());
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+    }
 }
 
 fn id_array(ids: &[i64]) -> rusqlite::vtab::array::Array {
@@ -2028,12 +2188,12 @@ mod tests {
     }
 
     #[test]
-    fn a_v1_database_migrates_to_v2_with_a_backup() {
+    fn a_v1_database_migrates_to_the_current_version_with_a_backup() {
         let dir = std::env::temp_dir().join(format!("petrel-test-{}", uuid::Uuid::new_v4()));
         let path = dir.join("petrel.db");
         v1_fixture(&path);
         let s = Store::open(&path).unwrap();
-        assert_eq!(s.schema_version().unwrap(), 2);
+        assert_eq!(s.schema_version().unwrap(), SCHEMA_VERSION);
         let backups: Vec<_> =
             std::fs::read_dir(dir.join("backups")).unwrap().map(|e| e.unwrap().file_name()).collect();
         assert_eq!(backups.len(), 1);
@@ -2046,7 +2206,7 @@ mod tests {
         let plan: String = s
             .raw()
             .query_row(
-                "EXPLAIN QUERY PLAN SELECT id FROM drafts WHERE folder = 0 AND deleted_at IS NULL \
+                "EXPLAIN QUERY PLAN SELECT id FROM drafts WHERE +folder = 0 AND deleted_at IS NULL \
                  ORDER BY title COLLATE NOCASE, id LIMIT 5",
                 [],
                 |r| r.get(3),
@@ -2054,8 +2214,139 @@ mod tests {
             .unwrap();
         assert!(plan.contains("drafts_title"), "{plan}");
         assert_eq!(s.search("stripes", 5).unwrap().len(), 1, "the search index came through");
+        assert_eq!(s.count(Folder::Inbox).unwrap(), 2);
         drop(s);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_v2_database_gets_counts_that_match_its_rows() {
+        let dir = std::env::temp_dir().join(format!("petrel-test-{}", uuid::Uuid::new_v4()));
+        let path = dir.join("petrel.db");
+        v1_fixture(&path);
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(SCHEMA_V2).unwrap();
+            conn.execute_batch(
+                "UPDATE meta SET value = '2' WHERE key = 'schema_version';
+                 INSERT INTO drafts (uuid, content, title, preview, folder, created_at, modified_at, accessed_at)
+                   VALUES ('u3', 'old', 'old', '', 1, 3, 3, 3), ('u4', 'bin', 'bin', '', 2, 4, 4, 4);
+                 INSERT INTO drafts (uuid, folder, created_at, modified_at, accessed_at, deleted_at)
+                   VALUES ('u5', 2, 5, 5, 5, 5);
+                 INSERT INTO tags (uuid, name) VALUES ('t1', 'work'), ('t2', 'idea');
+                 INSERT INTO draft_tags (draft_id, tag_id) VALUES (1, 1), (2, 1), (3, 1), (3, 2), (5, 2);",
+            )
+            .unwrap();
+        }
+        let mut s = Store::open(&path).unwrap();
+        assert_eq!(s.schema_version().unwrap(), SCHEMA_VERSION);
+        assert_counts_match(&s);
+        assert_eq!(
+            (
+                s.count(Folder::Inbox).unwrap(),
+                s.count(Folder::Archive).unwrap(),
+                s.count(Folder::Trash).unwrap()
+            ),
+            (2, 1, 1),
+            "the tombstone is not counted"
+        );
+        let tags = |s: &Store, f| -> Vec<(String, i64)> {
+            s.tag_counts(f).unwrap().into_iter().map(|t| (t.name, t.count)).collect()
+        };
+        assert_eq!(tags(&s, None), vec![("idea".into(), 1), ("work".into(), 3)]);
+        assert_eq!(tags(&s, Some(Folder::Inbox)), vec![("work".into(), 2)]);
+        s.move_drafts(&[3], Folder::Inbox).unwrap();
+        assert_eq!(tags(&s, Some(Folder::Inbox)), vec![("idea".into(), 1), ("work".into(), 3)]);
+        assert_counts_match(&s);
+        drop(s);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The trigger-kept counts against counting the rows.
+    fn assert_counts_match(s: &Store) {
+        let rows = |sql: &str| -> Vec<(i64, i64, i64)> {
+            let mut stmt = s.raw().prepare(sql).unwrap();
+            let v = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+            v.collect::<rusqlite::Result<_>>().unwrap()
+        };
+        assert_eq!(
+            rows("SELECT 0, folder, n FROM folder_counts WHERE n != 0 ORDER BY folder"),
+            rows("SELECT 0, folder, COUNT(*) FROM drafts WHERE deleted_at IS NULL GROUP BY folder ORDER BY folder"),
+            "folder counts"
+        );
+        assert_eq!(
+            rows("SELECT tag_id, folder, n FROM tag_counts WHERE n != 0 ORDER BY tag_id, folder"),
+            rows(
+                "SELECT dt.tag_id, d.folder, COUNT(*) FROM draft_tags dt JOIN drafts d ON d.id = dt.draft_id \
+                 WHERE d.deleted_at IS NULL GROUP BY dt.tag_id, d.folder ORDER BY dt.tag_id, d.folder"
+            ),
+            "tag counts"
+        );
+    }
+
+    #[test]
+    fn counts_stay_right_through_every_kind_of_change() {
+        let (mut s, now) = store_with_clock(1_700_000_000_000);
+        let mut rng = crate::gen::Rng::new(11);
+        let names = ["a", "b", "c", "d"];
+        let mut ids = Vec::new();
+        let mut tokens = Vec::new();
+        for step in 0..400 {
+            now.fetch_add(60_000, Ordering::SeqCst);
+            let pick = |rng: &mut crate::gen::Rng, ids: &[i64]| ids[rng.below(ids.len() as u64) as usize];
+            match if ids.is_empty() { 0 } else { rng.below(11) } {
+                0 | 1 => ids.push(s.new_draft(&format!("draft {step}")).unwrap().id),
+                2 => {
+                    let tags: Vec<String> =
+                        (0..rng.below(3)).map(|_| names[rng.below(4) as usize].to_string()).collect();
+                    let _ = s.set_tags(pick(&mut rng, &ids), &tags); // a purged id fails, as it should
+                }
+                3 => {
+                    let batch: Vec<i64> = (0..3).map(|_| pick(&mut rng, &ids)).collect();
+                    let folder = [Folder::Inbox, Folder::Archive, Folder::Trash][rng.below(3) as usize];
+                    tokens.push(s.move_drafts(&batch, folder).unwrap().token);
+                }
+                4 => {
+                    let batch: Vec<i64> = (0..3).map(|_| pick(&mut rng, &ids)).collect();
+                    tokens
+                        .push(s.add_tags(&batch, &[names[rng.below(4) as usize].to_string()]).unwrap().token);
+                }
+                5 => {
+                    if let Some(t) = tokens.pop() {
+                        let _ = s.undo(&t);
+                    }
+                }
+                6 => {
+                    let _ = s.rename_tag(names[rng.below(4) as usize], names[rng.below(4) as usize]);
+                }
+                7 => {
+                    let _ = s.merge_tags(
+                        &[names[rng.below(4) as usize].to_string()],
+                        names[rng.below(4) as usize],
+                    );
+                }
+                8 => {
+                    s.empty_trash().unwrap();
+                }
+                9 => {
+                    now.fetch_add(40 * DAY_MS, Ordering::SeqCst);
+                    s.sweep().unwrap();
+                }
+                _ => {
+                    tokens.push(s.flag_drafts(&[pick(&mut rng, &ids)], true).unwrap().token);
+                }
+            }
+            assert_counts_match(&s);
+        }
+        let (purged, live): (i64, i64) = s
+            .raw()
+            .query_row(
+                "SELECT ?1 - COUNT(*), COUNT(*) FILTER (WHERE deleted_at IS NULL) FROM drafts",
+                params![ids.len() as i64],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert!(purged > 0 && live > 0, "the walk reached purges and kept live drafts: {purged} {live}");
     }
 
     #[test]

@@ -14,13 +14,14 @@ and keys; this file covers state and decisions that aren't visible from the code
   `-D warnings` and fmt are clean. The speed table passes at 50k (package 00 Results).
 - **Search is newest-first** (400 newest matches by rowid, then `modified_at`), not bm25-ranked; see package 00
   Decisions for the numbers. Snippets are made in Rust (`store::snippet`).
-- **Package 01's M1 store slice** (schema v2, 45 tests): `Store::list(&ListQuery)` (folder or All, flags, tags
+- **Package 01's M1 store slice** (schema v3, 48 tests): `Store::list(&ListQuery)` (folder or All, flags, tags
   all/none, text, four sorts, flagged-top, keyset `Cursor { key, id, flagged }`), `search` with `tag:`/`-tag:`/
   `is:flagged`/`in:`/phrases parsed in `query.rs`, `tag_counts`/`rename_tag`/`merge_tags`, `move_drafts`/
   `flag_drafts` → `UndoToken` → `undo`, version thinning in `sweep()` (`retention.rs`, settings with floors). A text
-  filter in `list` is the newest 2,000 matches; filters on ≤ 2,000 drafts become `rarray` id sets. Open owner
-  questions in package 01 Decisions: two broad tags (1.5 ms), tag counts (31 ms at 50k), move/flag bumping
-  `modified_at`.
+  filter in `list` is the newest 2,000 matches; filters on ≤ 2,000 drafts become `rarray` id sets. v3 (after the
+  owner's Windows bench, 2026-10-23): trigger-kept `folder_counts`/`tag_counts`, only `drafts_list` leads with the
+  folder, and a checkpointer thread (`Checkpointer` in `store.rs`) so no write does a WAL checkpoint inline. Open
+  owner question: move/flag bumping `modified_at`.
 - **The list panel and editor keys are on the same PR** (packages 05 and 02, partial): `src/list/DraftList.tsx`
   (`Ctrl L`; tabs, chips, `/` search, `j k Enter x e # f t z`, `Del` empties Trash), `src/editor/commands.ts`,
   `Ctrl E`/`Ctrl #`/`Ctrl Shift F`/`Ctrl T` on the open draft, a new draft after 10 minutes away. Tried only

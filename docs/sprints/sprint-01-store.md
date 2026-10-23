@@ -67,8 +67,8 @@ no user action can lose text: versions before risk, tombstones instead of delete
 
 How to check these before package 05's list UI exists: the first is `store_bench` (Results below); the second is
 `cargo test -p petrel-core sweep_tombstones` (injected clock) until the list shows Trash; for the third, run this
-branch's dev build once (the dev database migrates to v2 and `<data dir>/dev/backups/petrel-v1-*.db` appears), then
-the `main` build: it refuses to open with "written by a newer Petrel (schema 2, this build knows 1)".
+branch's dev build once (the dev database migrates to v3 and `<data dir>/dev/backups/petrel-v<old>-*.db` appears),
+then the `main` build: it refuses to open with "written by a newer Petrel (schema 3, this build knows 1)".
 
 ## Results
 
@@ -81,18 +81,49 @@ adds.
 | list page, Inbox by modified | < 1 ms | 0.077 ms (0.108) |
 | list page 200 via cursor | < 1 ms | 0.062 ms (0.111) |
 | list by title / by created | < 1 ms | 0.059 / 0.053 ms |
+| list, Archive by created / Trash by title (v3, 2026-10-23) | < 1 ms | 0.114 / 0.396 ms |
 | list, all folders / flagged first / flagged only | < 1 ms | 0.108 / 0.077 / 0.222 ms |
 | list, one common tag / rare tag / without a tag | < 1 ms | 0.295 / 0.109 / 0.087 ms |
-| list, two common tags | < 2 ms (see Decisions) | 1.49 ms (1.66) |
+| list, two common tags | < 2 ms (see Decisions) | 1.49 ms (1.66); 1.2–1.4 ms on 2026-10-23 |
 | list, text filter: stopword / mid word / rare word | < 10 ms | 2.85 / 1.43 / 0.76 ms |
-| search, word + `tag:` / `is:flagged` + word | < 10 ms | 3.93 / 4.56 ms |
+| search, word + `tag:` / `is:flagged` + word | < 10 ms | 3.93 / 4.56 ms; 4.58 / 2.77 ms on 2026-10-23 |
 | search, stopword / short prefix (unchanged path) | < 10 ms | 2.14 / 4.41 ms |
-| tag counts, Inbox | none in PLAN; guard 50 ms | 30.6 ms (42.8) |
-| archive 50 + undo | < 5 ms | 4.19 ms (17.8; WAL checkpoints) |
+| folder count | < 5 ms | 1.93 ms; 0.002 ms on 2026-10-23 (v3 counts) |
+| tag counts, Inbox | none in PLAN; guard 50 ms | 30.6 ms (42.8); 0.012 ms on 2026-10-23 (v3 counts) |
+| archive 50 + undo | < 5 ms | 4.19 ms (17.8; WAL checkpoints); 1.94 ms (3.13) on 2026-10-23 |
+
+The database is 92.7 MB at 50k with v3 (88.0 before: `drafts_list` carries three more keys).
+
+The owner's Windows machine (`D:\GitHub\petrel`, 2026-10-23, before the v3 changes) missed five rows, p50 (p95):
+two common tags 2.01 (2.08) ms, search flagged only 10.5 (12.6) ms, folder count 6.5 (8.3) ms, tag counts 84
+(225) ms, archive 50 + undo 19.4 (1,022) ms. Generation took 27 s against 7 s here, so writes there cost ~4× this
+sandbox and reads ~1.3–2×. Decisions of 2026-10-23 below are the response; a rerun there is pending.
 
 ## Decisions
 
-- 2026-10-22 — **Schema v2 adds one index**, `drafts_title (folder, title COLLATE NOCASE, id)`. Sorting by title
+- 2026-10-23 — **WAL checkpoints run on their own thread.** SQLite's default makes the write that crosses 1,000
+  WAL pages copy the WAL into the database and fsync both, inline: the 1,022 ms p95 on Windows. A checkpointer
+  thread with its own connection runs a PASSIVE checkpoint every 2 s (no lock a writer waits for; nothing to do
+  when the WAL is clean), and the main connection's `wal_autocheckpoint` is raised to 4,000 pages as a backstop.
+  Power-cut exposure under `synchronous = NORMAL` drops from up to 1,000 pages of writes to about 2 s; an app crash
+  loses nothing either way.
+- 2026-10-23 — **Schema v3: only `drafts_list` leads with the folder.** A folder change moved a draft's entry in
+  the title, created and accessed indexes to another part of each tree, so archiving 50 scattered drafts wrote 234
+  pages (and 330 with v2's title index scattered too) and the undo as many. Without the folder in those indexes a
+  move writes ~58 pages. The three sorts check the folder per row while walking (~1.6 µs a row), or, for a
+  folder smaller than `√(8 × page × drafts)` (~4,500 at 50k), sort it whole from `drafts_list`, which now also
+  carries title, created and accessed so that sort reads no table rows (~0.2 µs a draft; a page of Trash by
+  title went 1.5 → 0.2 ms with it). Its entry is rewritten on every save and move anyway, so the extra columns
+  cost index bytes, not writes. Worst case is a folder near the crossover: ~1 ms at 50k.
+- 2026-10-23 — **Schema v3: trigger-kept `folder_counts` and `tag_counts (tag_id, folder, n)`.** Counting rows was
+  6.5 ms (folder) and 84 ms (tags) on Windows. The triggers fire only on what changes counts (insert, folder or
+  `deleted_at` change, delete of a live row, tag link insert/delete), so autosave does not pay for them. The
+  migration counts once. Tag counts also let `list` know a tag is broad without fetching its ids, and check the
+  rarest broad tag first.
+- 2026-10-23 — **Flagged-only with another filter adds the flagged ids to the intersection** (an index-only read
+  of `drafts_flagged`). Walking the sort index tested every row of a folder when few of the set were flagged.
+
+- 2026-10-22 — **Schema v2 adds one index**, `drafts_title (folder, title COLLATE NOCASE, id)` (v3 drops the folder). Sorting by title
   otherwise sorts a whole folder per page. The migration is the first real step, so it also exercises
   backup-before-migrate on a v1 fixture.
 - 2026-10-22 — **Filters become id sets when small.** A tag on at most 2,000 drafts is fetched as ids, intersected
@@ -107,9 +138,8 @@ adds.
 - 2026-10-22 — **Two broad tags together are the one list shape over 1 ms** (1.5 ms at 50k when both tags are on
   12 % of drafts: ~3,000 rows walked for a page). Intersecting the two index ranges first measured worse end to end
   (2.2 ms). The bench allows 2 ms for this row. At the owner's library size (a few thousand drafts) it is far under
-  1 ms. Accepted as the default while the owner is away (2026-10-22); a per-tag count table (next item) is the fix
-  if it ever matters.
-- 2026-10-22 — **`tag_counts` is a GROUP BY, 31 ms at 50k** (1–2 ms at 2,000 drafts). Five query shapes were
+  1 ms. Accepted as the default while the owner is away (2026-10-22). With v3's counts it is 1.2–1.4 ms here.
+- 2026-10-22 (superseded by v3 on 2026-10-23) — **`tag_counts` is a GROUP BY, 31 ms at 50k** (1–2 ms at 2,000 drafts). Five query shapes were
   measured (24–63 ms); the cheapest drives from the folder index. It is called once per list change, off the typing
   path, as data-model.md planned. A trigger-maintained `tag_counts (tag_id, folder, n)` table would make it
   microseconds at the cost of triggers on `draft_tags` and on folder changes; not done unless the owner wants it.
@@ -128,6 +158,11 @@ adds.
   each, so a second sweep deletes nothing.
 
 ## Log
+
+- 2026-10-23 — The owner's Windows bench missed five rows (Results). Schema v3 (folder-free title/created/accessed
+  indexes, trigger-kept counts), the checkpointer thread, flagged-only intersection and count-based tag ordering
+  fix all five here. 48 tests (two new: counts against row counts after a random walk of every write path, and a
+  v2 database migrated to v3).
 
 - 2026-10-22 — `add_tags(ids, names)` with undo for the list's `t` (46 tests). The list panel and editor keys
   (packages 05 and 02) went onto the same PR, since the session can push only one branch.

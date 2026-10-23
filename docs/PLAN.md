@@ -38,7 +38,9 @@ implement every checkbox in numeric order.
   Omarchy. The kill test, the Windows smoke test and the laptop's bench numbers are open acceptance checks.
 - 2026-10-22: package 01's M1 store slice is in review: list queries with folders, flags, tags, text, four sorts
   and keyset paging; search filters; tag counts/rename/merge; batch move and flag with undo; version thinning and
-  retention settings; schema v2. Every list and search shape is within target at 50k drafts (package 01 Results).
+  retention settings; schema v3 (counts kept by triggers, checkpoints off the write path, after the owner's
+  Windows bench on 2026-10-23). Every list and search shape is within target at 50k drafts in the sandbox
+  (package 01 Results); a Windows rerun is pending.
 - The owner has shipped Tern through its Linux beta on the same stack, so the toolchain, CI shape, AppImage/MSI
   packaging, self-update, AUR packaging and Hyprland behaviour are known quantities. Reuse them; do not re-research.
 - The design is based on the owner's use of Drafts and on its public documentation

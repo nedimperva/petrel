@@ -81,7 +81,15 @@ fn main() -> anyhow::Result<()> {
 
     let lists: Vec<(&str, ListQuery)> = vec![
         ("list, by title", ListQuery { sort: Sort::Title, desc: false, ..inbox.clone() }),
+        (
+            "list, Trash by title",
+            ListQuery { folder: Some(Folder::Trash), sort: Sort::Title, desc: false, ..inbox.clone() },
+        ),
         ("list, by created", ListQuery { sort: Sort::Created, ..inbox.clone() }),
+        (
+            "list, Archive by created",
+            ListQuery { folder: Some(Folder::Archive), sort: Sort::Created, ..inbox.clone() },
+        ),
         ("list, all folders", ListQuery { folder: None, ..inbox.clone() }),
         ("list, flagged first", ListQuery { flagged_top: true, ..inbox.clone() }),
         ("list, flagged only", ListQuery { folder: None, flagged_only: true, ..inbox.clone() }),
@@ -101,7 +109,7 @@ fn main() -> anyhow::Result<()> {
             store.list(q).unwrap();
         });
         // A text filter is a search, and has the search target. Two tags that are each on 12 % of the drafts
-        // walk ~3,000 rows for a page: the one list shape allowed 2 ms (package 01 Decisions).
+        // walk ~2,500 rows for a page: the one list shape allowed 2 ms (package 01 Decisions).
         let target_ms = if !q.fts.is_empty() {
             10.0
         } else if q.tags_all.len() > 1 {
