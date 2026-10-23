@@ -26,7 +26,7 @@ use crate::retention::{self, Retention, VersionAge, DAY_MS, HOUR_MS};
 use crate::title;
 
 /// The schema version this build writes. A database with a higher `meta.schema_version` is refused.
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 /// How many backups `backup_before_migrate` keeps.
 const BACKUPS_KEPT: usize = 5;
@@ -250,6 +250,28 @@ END;
 CREATE TRIGGER counts_tag_ad AFTER DELETE ON draft_tags BEGIN
   UPDATE tag_counts SET n = n - 1 WHERE tag_id = old.tag_id
     AND folder = (SELECT folder FROM drafts WHERE id = old.draft_id AND deleted_at IS NULL);
+END;
+"#;
+
+/// v4: a batch move keeps the counts itself. The per-row folder trigger cost ~13 µs a draft, most of the time of
+/// archiving 50 drafts and undoing it (5.2 ms on Windows). `move_drafts` and `undo` set `count_ctl.manual`, work
+/// out the change per folder and tag in two grouped queries, and clear it before commit; a failed batch rolls the
+/// flag back with everything else. Every other write still goes through the trigger.
+const SCHEMA_V4: &str = r#"
+CREATE TABLE count_ctl (id INTEGER PRIMARY KEY CHECK (id = 1), manual INTEGER NOT NULL);
+INSERT INTO count_ctl (id, manual) VALUES (1, 0);
+DROP TRIGGER counts_draft_au;
+CREATE TRIGGER counts_draft_au AFTER UPDATE OF folder, deleted_at ON drafts
+  WHEN (old.folder IS NOT new.folder OR (old.deleted_at IS NULL) IS NOT (new.deleted_at IS NULL))
+    AND (SELECT manual FROM count_ctl WHERE id = 1) = 0 BEGIN
+  UPDATE folder_counts SET n = n - 1 WHERE folder = old.folder AND old.deleted_at IS NULL;
+  INSERT INTO folder_counts (folder, n) SELECT new.folder, 1 WHERE new.deleted_at IS NULL
+    ON CONFLICT (folder) DO UPDATE SET n = n + 1;
+  UPDATE tag_counts SET n = n - 1 WHERE folder = old.folder AND old.deleted_at IS NULL
+    AND tag_id IN (SELECT tag_id FROM draft_tags WHERE draft_id = old.id);
+  INSERT INTO tag_counts (tag_id, folder, n)
+    SELECT tag_id, new.folder, 1 FROM draft_tags WHERE draft_id = new.id AND new.deleted_at IS NULL
+    ON CONFLICT (tag_id, folder) DO UPDATE SET n = n + 1;
 END;
 "#;
 
@@ -581,6 +603,7 @@ impl Store {
                 }
                 2 => tx.execute_batch(SCHEMA_V2)?,
                 3 => tx.execute_batch(SCHEMA_V3)?,
+                4 => tx.execute_batch(SCHEMA_V4)?,
                 _ => unreachable!("no migration step for v{next}"),
             }
             tx.execute(
@@ -736,6 +759,9 @@ impl Store {
             ))?
             .query_map(params![id_array(ids), value], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
             .collect::<rusqlite::Result<_>>()?;
+        if column == "folder" {
+            count_move(&tx, ids, value)?;
+        }
         tx.execute(
             &format!(
                 "UPDATE drafts SET {column} = ?2, modified_at = ?3 \
@@ -743,6 +769,9 @@ impl Store {
             ),
             params![id_array(ids), value, now],
         )?;
+        if column == "folder" {
+            tx.execute("UPDATE count_ctl SET manual = 0", [])?;
+        }
         tx.commit()?;
         let count = rows.len();
         Ok(self.remember(now, count, Change::Column { column, rows }))
@@ -819,6 +848,15 @@ impl Store {
                             WHERE id = ?1 AND deleted_at IS NULL";
         match &batch.change {
             Change::Column { column, rows } => {
+                if *column == "folder" {
+                    let mut by_folder: HashMap<i64, Vec<i64>> = HashMap::new();
+                    for (id, old, _) in rows {
+                        by_folder.entry(*old).or_default().push(*id);
+                    }
+                    for (folder, ids) in &by_folder {
+                        count_move(&tx, ids, *folder)?;
+                    }
+                }
                 let mut stmt = tx.prepare(&format!(
                     "UPDATE drafts SET {column} = ?2, \
                      modified_at = CASE WHEN modified_at = ?4 THEN ?3 ELSE modified_at END \
@@ -827,6 +865,8 @@ impl Store {
                 for (id, old, modified) in rows {
                     n += stmt.execute(params![id, old, modified, batch.at])?;
                 }
+                drop(stmt);
+                tx.execute("UPDATE count_ctl SET manual = 0", [])?;
             }
             Change::Tags { rows } => {
                 let mut clear = tx.prepare("DELETE FROM draft_tags WHERE draft_id = ?1")?;
@@ -1432,6 +1472,44 @@ struct Filter {
     /// Broad tags, checked per row.
     walk_tags: Vec<i64>,
     none_tags: Vec<i64>,
+}
+
+/// Moves the counts of the live drafts in `ids` that are not already in `folder` to `folder`, and turns the
+/// per-row trigger off (`count_ctl.manual`, schema v4) for the UPDATE that follows. The caller clears the flag
+/// before commit.
+fn count_move(tx: &Transaction, ids: &[i64], folder: i64) -> Result<()> {
+    tx.execute("UPDATE count_ctl SET manual = 1", [])?;
+    let moving = "FROM drafts d WHERE d.id IN rarray(?1) AND d.deleted_at IS NULL AND d.folder != ?2";
+    let folders: Vec<(i64, i64)> = tx
+        .prepare_cached(&format!("SELECT d.folder, COUNT(*) {moving} GROUP BY d.folder"))?
+        .query_map(params![id_array(ids), folder], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    let tags: Vec<(i64, i64, i64)> = tx
+        .prepare_cached(&format!(
+            "SELECT dt.tag_id, d.folder, COUNT(*) {} GROUP BY dt.tag_id, d.folder",
+            moving.replace("FROM drafts d", "FROM drafts d JOIN draft_tags dt ON dt.draft_id = d.id")
+        ))?
+        .query_map(params![id_array(ids), folder], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut out_folder = tx.prepare_cached("UPDATE folder_counts SET n = n - ?2 WHERE folder = ?1")?;
+    let mut in_folder = tx.prepare_cached(
+        "INSERT INTO folder_counts (folder, n) VALUES (?1, ?2) ON CONFLICT (folder) DO UPDATE SET n = n + ?2",
+    )?;
+    for (from, n) in &folders {
+        out_folder.execute(params![from, n])?;
+        in_folder.execute(params![folder, n])?;
+    }
+    let mut out_tag =
+        tx.prepare_cached("UPDATE tag_counts SET n = n - ?3 WHERE tag_id = ?1 AND folder = ?2")?;
+    let mut in_tag = tx.prepare_cached(
+        "INSERT INTO tag_counts (tag_id, folder, n) VALUES (?1, ?2, ?3) \
+         ON CONFLICT (tag_id, folder) DO UPDATE SET n = n + ?3",
+    )?;
+    for (tag, from, n) in &tags {
+        out_tag.execute(params![tag, from, n])?;
+        in_tag.execute(params![tag, folder, n])?;
+    }
+    Ok(())
 }
 
 /// Copies the WAL into the database file every `CHECKPOINT_EVERY` on a thread and connection of its own. With
@@ -2264,6 +2342,8 @@ mod tests {
 
     /// The trigger-kept counts against counting the rows.
     fn assert_counts_match(s: &Store) {
+        let manual: i64 = s.raw().query_row("SELECT manual FROM count_ctl", [], |r| r.get(0)).unwrap();
+        assert_eq!(manual, 0, "a batch left the per-row trigger off");
         let rows = |sql: &str| -> Vec<(i64, i64, i64)> {
             let mut stmt = s.raw().prepare(sql).unwrap();
             let v = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();

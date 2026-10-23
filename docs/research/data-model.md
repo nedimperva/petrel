@@ -180,6 +180,17 @@ the two tables instead of counting rows (84 ms for tag counts on Windows at 50k)
 `a_v2_database_gets_counts_that_match_its_rows`, `counts_stay_right_through_every_kind_of_change`,
 `a_v1_database_migrates_to_the_current_version_with_a_backup`.
 
+## v4
+
+```sql
+CREATE TABLE count_ctl (id INTEGER PRIMARY KEY CHECK (id = 1), manual INTEGER NOT NULL);  -- one row, manual = 0
+-- counts_draft_au gains: AND (SELECT manual FROM count_ctl WHERE id = 1) = 0
+```
+
+`move_drafts` and `undo` set `manual`, apply the folder and tag count changes from two grouped queries, and
+clear it before commit. The per-row trigger was ~13 µs a draft, most of archive + undo (5.2 ms on Windows at 50
+drafts). Every other write still counts through the trigger. The random-walk test also checks `manual` is 0.
+
 ## Connections
 
 The store has one connection behind a `Mutex`, and a checkpointer thread with its own connection runs

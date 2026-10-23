@@ -92,7 +92,8 @@ adds.
 | tag counts, Inbox | none in PLAN; guard 50 ms | 30.6 ms (42.8); 0.012 ms on 2026-10-23 (v3 counts) |
 | archive 50 + undo | < 5 ms | 4.19 ms (17.8; WAL checkpoints); 1.94 ms (3.13) on 2026-10-23 |
 
-The database is 92.7 MB at 50k with v3 (88.0 before: `drafts_list` carries three more keys).
+v4 (2026-10-23): archive 50 + undo 1.2–2.1 ms over two runs (noisy sandbox); the owner's Windows run of v3 was 5.2
+(15.4) ms. The database is 92.7 MB at 50k with v3 (88.0 before: `drafts_list` carries three more keys).
 
 The owner's Windows machine (`D:\GitHub\petrel`, 2026-10-23, before the v3 changes) missed five rows, p50 (p95):
 two common tags 2.01 (2.08) ms, search flagged only 10.5 (12.6) ms, folder count 6.5 (8.3) ms, tag counts 84
@@ -100,6 +101,15 @@ two common tags 2.01 (2.08) ms, search flagged only 10.5 (12.6) ms, folder count
 sandbox and reads ~1.3–2×. Decisions of 2026-10-23 below are the response; a rerun there is pending.
 
 ## Decisions
+
+- 2026-10-23 — **Schema v4: batch moves keep the counts themselves.** The Windows rerun after v3 passed every row
+  but archive 50 + undo: 5.2 ms (p95 15.4) against 5 ms. Profiling here showed v3's per-row count trigger was ~60
+  % of it (move + undo of 50 scattered drafts: 2.3 ms with it, 0.9 ms with no trigger). `move_drafts` and `undo`
+  now turn the trigger off for their UPDATE through a one-row `count_ctl` table, apply the changes from two
+  grouped queries, and turn it back on before commit (a failed batch rolls the flag back too): 1.4 ms. Expected on
+  Windows at the measured ratio: ~3 ms. The 5 ms target stays. The bench's p95 there includes the 4,000-page WAL
+  backstop: 100 back-to-back pairs write ~11,000 pages in under a second, faster than the 2 s checkpointer; a
+  person archiving does not.
 
 - 2026-10-23 — **WAL checkpoints run on their own thread.** SQLite's default makes the write that crosses 1,000
   WAL pages copy the WAL into the database and fsync both, inline: the 1,022 ms p95 on Windows. A checkpointer
@@ -158,6 +168,9 @@ sandbox and reads ~1.3–2×. Decisions of 2026-10-23 below are the response; a 
   each, so a second sweep deletes nothing.
 
 ## Log
+
+- 2026-10-23 — Windows rerun of v3: all rows ok but archive 50 + undo (5.2 ms). Schema v4 moves count upkeep for
+  batch moves and undo out of the per-row trigger (Decisions).
 
 - 2026-10-23 — The owner's Windows bench missed five rows (Results). Schema v3 (folder-free title/created/accessed
   indexes, trigger-kept counts), the checkpointer thread, flagged-only intersection and count-based tag ordering
