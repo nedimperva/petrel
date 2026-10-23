@@ -197,6 +197,8 @@ export interface Api {
   appInfo(): Promise<AppInfo>;
   newDraft(content: string): Promise<Draft>;
   openDraft(id: number): Promise<Draft>;
+  /** The draft as `openDraft` returns it, without marking it accessed (the list's preview). */
+  peekDraft(id: number): Promise<Draft>;
   saveDraft(id: number, content: string, cursor: number): Promise<boolean>;
   listDrafts(query: ListQuery): Promise<ListPage>;
   /** The search box: free words plus `tag:x`, `-tag:x`, `is:flagged`, `in:archive`, `"a phrase"`. */
@@ -217,6 +219,8 @@ export interface Api {
   sweep(): Promise<SweepReport>;
   /** Shows the (initially hidden) window once the UI has rendered. No-op outside Tauri. */
   showWindow(): Promise<void>;
+  /** The capture window is done: close it (and quit if the main window was never shown). */
+  closeCapture(): Promise<void>;
 
   listActions(): Promise<Action[]>;
   /** From the action editor, so the saved steps are trusted. Returns the stored action (uuid, group filled). */
@@ -241,6 +245,7 @@ async function tauriApi(): Promise<Api> {
     appInfo: () => invoke("app_info"),
     newDraft: (content) => invoke("new_draft", { content }),
     openDraft: (id) => invoke("open_draft", { id }),
+    peekDraft: (id) => invoke("peek_draft", { id }),
     saveDraft: (id, content, cursor) => invoke("save_draft", { id, content, cursor }),
     listDrafts: (query) => invoke("list_drafts", { query }),
     searchDrafts: (query, limit) => invoke("search_drafts", { query, limit }),
@@ -255,6 +260,7 @@ async function tauriApi(): Promise<Api> {
     emptyTrash: () => invoke("empty_trash"),
     sweep: () => invoke("sweep"),
     showWindow: () => invoke("show_window"),
+    closeCapture: () => invoke("close_capture"),
     listActions: () => invoke("list_actions"),
     saveAction: (action) => invoke("save_action", { action }),
     deleteAction: (uuid) => invoke("delete_action", { uuid }),
@@ -268,10 +274,12 @@ async function tauriApi(): Promise<Api> {
       return typeof picked === "string" ? picked : null;
     },
     listenHost: async (events) => {
-      const { listen } = await import("@tauri-apps/api/event");
-      await listen<HostRequest>("host-request", (e) => events.request(e.payload));
-      await listen<number>("host-closed", (e) => events.closed(e.payload));
-      await listen<{ kind: "info" | "warning"; text: string }>("host-message", (e) =>
+      // This window's events only: a run's dialogs go to the window that started it.
+      const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+      const win = getCurrentWebviewWindow();
+      await win.listen<HostRequest>("host-request", (e) => events.request(e.payload));
+      await win.listen<number>("host-closed", (e) => events.closed(e.payload));
+      await win.listen<{ kind: "info" | "warning"; text: string }>("host-message", (e) =>
         events.message(e.payload.kind, e.payload.text),
       );
     },
@@ -367,6 +375,11 @@ function fakeApi(): Api {
       if (!d) throw new Error(`draft ${id} does not exist`);
       return d;
     },
+    peekDraft: async (id) => {
+      const d = drafts.get(id);
+      if (!d) throw new Error(`draft ${id} does not exist`);
+      return { ...d };
+    },
     saveDraft: async (id, content, cursor) => {
       const d = drafts.get(id);
       if (!d) return false;
@@ -448,6 +461,8 @@ function fakeApi(): Api {
     },
     sweep: async () => ({ tombstoned: 0, purged: 0, tagsRemoved: 0, versionsThinned: 0 }),
     showWindow: async () => {},
+    // A browser tab cannot close itself; a fresh capture is the nearest thing.
+    closeCapture: async () => location.reload(),
     ...fakeActions((id) => drafts.get(id)),
   };
 }

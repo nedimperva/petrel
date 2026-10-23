@@ -43,8 +43,8 @@ const theme = EditorView.theme({
   "&": { height: "100%", fontSize: "var(--editor-size, 14px)", color: "var(--fg-0)", backgroundColor: "transparent" },
   ".cm-scroller": {
     fontFamily: "var(--editor-font, var(--font-ui))",
-    lineHeight: "1.55",
-    padding: "var(--s-5) 0",
+    lineHeight: "var(--editor-leading, 1.55)",
+    padding: "var(--editor-top, var(--s-5)) 0 var(--s-6)",
   },
   ".cm-content": {
     maxWidth: "var(--editor-max)",

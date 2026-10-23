@@ -6,6 +6,8 @@ use petrel_core::host::CancelToken;
 use petrel_core::store::SweepReport;
 use petrel_core::store_actions::RunLogEntry;
 use petrel_core::{Draft, Folder, ListPage, ListQuery, SearchHit, Store, TagCount, UndoToken};
+use std::sync::atomic::Ordering;
+
 use tauri::{Manager, State};
 
 use crate::host::TauriHost;
@@ -43,6 +45,12 @@ pub fn new_draft(state: State<AppState>, content: String) -> R<Draft> {
 #[tauri::command]
 pub fn open_draft(state: State<AppState>, id: i64) -> R<Draft> {
     with(&state, |s| s.draft(id))
+}
+
+/// The list's preview: read without marking the draft accessed.
+#[tauri::command]
+pub fn peek_draft(state: State<AppState>, id: i64) -> R<Draft> {
+    with(&state, |s| s.peek(id))
 }
 
 #[tauri::command]
@@ -114,10 +122,25 @@ pub fn sweep(state: State<AppState>) -> R<SweepReport> {
 
 /// The window starts hidden and the UI shows it once it has rendered, so there is no white flash.
 #[tauri::command]
-pub fn show_window(app: tauri::AppHandle) {
-    if let Some(w) = app.get_webview_window("main") {
-        let _ = w.show();
-        let _ = w.set_focus();
+pub fn show_window(state: State<AppState>, window: tauri::WebviewWindow) {
+    // `petrel --capture` as the first launch: the main window loads but stays hidden until asked for.
+    if window.label() == "main" && state.capture_launch.swap(false, Ordering::SeqCst) {
+        return;
+    }
+    let _ = window.show();
+    let _ = window.set_focus();
+}
+
+/// The capture window saved its draft and is done. If the main window was never shown, nothing is left on
+/// screen; until the tray exists (package 07) that means quitting rather than lingering unseen.
+#[tauri::command]
+pub fn close_capture(app: tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("capture") {
+        let _ = w.destroy();
+    }
+    let main_visible = app.get_webview_window("main").and_then(|w| w.is_visible().ok()).unwrap_or(false);
+    if !main_visible {
+        app.exit(0);
     }
 }
 
@@ -187,11 +210,14 @@ impl Drop for Running<'_> {
 #[tauri::command]
 pub async fn run_action(
     app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
     key: String,
     draft_id: i64,
     editor: Option<EditorState>,
     source: Option<Source>,
 ) -> R<RunReport> {
+    // Dialogs go to the window that started the run, not to every window.
+    let target = window.label().to_string();
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
         let cancel = CancelToken::default();
@@ -208,6 +234,7 @@ pub async fn run_action(
         })?;
         let mut host = TauriHost {
             app: &app,
+            target: &target,
             broker: &state.broker,
             clipboard: &state.clipboard,
             cancel: cancel.clone(),

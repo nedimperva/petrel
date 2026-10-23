@@ -1,20 +1,16 @@
 import { createSignal, For, lazy, onCleanup, onMount, Show } from "solid-js";
 import { api, type Action, type AppInfo, type Draft, type HostRequest, type RunLogEntry, type RunReport, type TagCount, type UndoToken } from "./api";
-import ActionList, { type ActionListHandle } from "./actions/ActionList";
+import ActionList, { firstAction, type ActionListHandle } from "./actions/ActionList";
 import type { LogHandle } from "./actions/ActionLog";
 import HostDialog from "./actions/HostDialog";
 import { fromEvent, isChord, same } from "./actions/shortcut";
+import { countWords, createAutosave, type SaveState } from "./editor/autosave";
 import { createEditor, type EditorHandle } from "./editor/editor";
 import DraftList, { type ListHandle } from "./list/DraftList";
 
 // Not on the launch path: loaded the first time they open.
 const ActionEditor = lazy(() => import("./actions/ActionEditor"));
 const ActionLog = lazy(() => import("./actions/ActionLog"));
-
-type SaveState = "saved" | "dirty" | "saving" | "error";
-
-/** Autosave waits this long after the last keystroke. The kill test allows exactly this much loss. */
-export const AUTOSAVE_MS = 300;
 
 /** Coming back after this long away opens a new draft (package 02 "open to new draft"; a setting later). */
 export const NEW_AFTER_AWAY_MS = 10 * 60 * 1000;
@@ -27,11 +23,12 @@ const RUNNING_AFTER_MS = 150;
 
 const ACTIONS_KEY = "petrel.actions.visible";
 
+// Hidden until asked for: the launch screen is the text and nothing else.
 function actionsVisible(): boolean {
   try {
-    return localStorage.getItem(ACTIONS_KEY) !== "0";
+    return localStorage.getItem(ACTIONS_KEY) === "1";
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -51,6 +48,7 @@ export default function App() {
   let actionLog: LogHandle | undefined;
   const [draft, setDraft] = createSignal<Draft | null>(null);
   const [save, setSave] = createSignal<SaveState>("saved");
+  const [words, setWords] = createSignal(0);
   const [info, setInfo] = createSignal<AppInfo | null>(null);
   const [listOpen, setListOpen] = createSignal(false);
   const [tagging, setTagging] = createSignal(false);
@@ -66,54 +64,21 @@ export default function App() {
   const [running, setRunning] = createSignal<{ name: string; shown: boolean } | null>(null);
   let undoStack: Undoable[] = [];
   let toastTimer: number | undefined;
-  let timer: number | undefined;
-  let saving: Promise<void> | null = null;
+  let wordsTimer: number | undefined;
   let awaySince: number | null = null;
   let gPending = false;
 
-  // The row is created on the first keystroke, never for an untouched new draft.
-  async function flush() {
-    const a = await api;
-    if (!editor) return;
-    const text = editor.text();
-    const cursor = editor.cursor();
-    const current = draft();
-    if (!current && text === "") return;
-    setSave("saving");
-    try {
-      if (!current) {
-        const d = await a.newDraft(text);
-        setDraft(d);
-        // Text may have changed while the insert ran.
-        if (editor.text() !== text) await a.saveDraft(d.id, editor.text(), editor.cursor());
-      } else {
-        const ok = await a.saveDraft(current.id, text, cursor);
-        if (!ok) throw new Error("draft vanished");
-      }
-      setSave(editor.text() === text ? "saved" : "dirty");
-    } catch (e) {
-      console.error(e);
-      setSave("error");
-      schedule(2000); // not a dialog: retry quietly
-    }
-  }
+  const autosave = createAutosave({ editor: () => editor, draft, setDraft, setSave });
+  const flushNow = autosave.flushNow;
 
-  function schedule(ms = AUTOSAVE_MS) {
-    window.clearTimeout(timer);
-    timer = window.setTimeout(() => {
-      saving = flush().finally(() => (saving = null));
-    }, ms);
+  function countLater() {
+    window.clearTimeout(wordsTimer);
+    wordsTimer = window.setTimeout(() => setWords(editor ? countWords(editor.text()) : 0), 300);
   }
 
   function onChange() {
-    setSave("dirty");
-    schedule();
-  }
-
-  async function flushNow() {
-    window.clearTimeout(timer);
-    if (saving) await saving;
-    await flush();
+    autosave.changed();
+    countLater();
   }
 
   async function newDraft() {
@@ -122,6 +87,7 @@ export default function App() {
     setListOpen(false);
     editor?.load("", 0);
     setSave("saved");
+    setWords(0);
   }
 
   async function openDraft(id: number) {
@@ -132,6 +98,7 @@ export default function App() {
       setListOpen(false);
       editor?.load(d.content, d.cursor);
       setSave("saved");
+      setWords(countWords(d.content));
     } catch (e) {
       say(`Cannot open: ${e}`);
     }
@@ -340,6 +307,7 @@ export default function App() {
     if (r.changed) {
       editor?.load(fresh.content, r.selection.head);
       editor?.select(r.selection.anchor, r.selection.head);
+      countLater();
     }
   }
 
@@ -370,7 +338,7 @@ export default function App() {
       if (k === "l") return stop(e, toggleList);
       if (k === "2") return stop(e, toggleActions);
       if (k === "enter") {
-        const first = actionList?.first();
+        const first = actionList?.first() ?? firstAction(actions());
         return stop(e, () => (first ? runAction(first, "shortcut") : say("No actions yet. Ctrl Shift A makes one.")));
       }
       if (k === "e" && !listOpen()) return stop(e, () => moveCurrent("archive"));
@@ -540,6 +508,7 @@ export default function App() {
       <datalist id="petrel-tags">
         <For each={allTags()}>{(t) => <option value={t.name} />}</For>
       </datalist>
+      {/* Quiet by design: what the writer needs to trust (saved), a count, and the two ways out. */}
       <footer class="strip">
         <span class={`save save-${save()}`}>
           {save() === "saved" && "saved"}
@@ -547,25 +516,25 @@ export default function App() {
           {save() === "saving" && "saving…"}
           {save() === "error" && "not saved — retrying"}
         </span>
-        <span class="sep" />
+        <Show when={words()}>
+          <span class="meta">{words() === 1 ? "1 word" : `${words().toLocaleString()} words`}</span>
+        </Show>
         <Show when={draft()}>
           {(d) => (
             <>
               <Show when={d().flagged}>
                 <span class="flag on" title="Flagged" />
               </Show>
-              <span class="meta">{d().title || "untitled"}</span>
               <Show when={d().folder !== "inbox"}>
-                <span class="meta">· {d().folder}</span>
+                <span class="meta">{d().folder}</span>
               </Show>
-              <For each={d().tags}>{(t) => <span class="tag">{t}</span>}</For>
+              <For each={d().tags}>{(t) => <span class="meta">#{t}</span>}</For>
             </>
           )}
         </Show>
         <Show when={toast()}>
           {(t) => (
             <>
-              <span class="sep" />
               <span class="toast">{t().text}</span>
               <Show when={t().log}>
                 <button class="link" onClick={openLog}>
@@ -576,9 +545,6 @@ export default function App() {
                 <button class="link" onClick={undo}>
                   Undo
                 </button>
-                <span class="meta">
-                  <kbd>z</kbd> in the list
-                </span>
               </Show>
             </>
           )}
@@ -588,30 +554,45 @@ export default function App() {
           <span class="meta">
             {running()!.name} running · <kbd>Esc</kbd> stop
           </span>
-          <span class="sep" />
         </Show>
         <Show
           when={listOpen()}
           fallback={
             <span class="meta keys">
-              <kbd>Ctrl</kbd>
-              <kbd>L</kbd> list <kbd>Ctrl</kbd>
-              <kbd>N</kbd> new <kbd>Ctrl</kbd>
-              <kbd>E</kbd> archive <kbd>Ctrl</kbd>
-              <kbd>T</kbd> tag <kbd>Ctrl</kbd>
-              <kbd>Enter</kbd> run <kbd>Ctrl</kbd>
-              <kbd>2</kbd> actions
+              <span>
+                <kbd>Ctrl L</kbd> drafts
+              </span>
+              <span>
+                <kbd>Ctrl 2</kbd> actions
+              </span>
             </span>
           }
         >
           <span class="meta keys">
-            <kbd>j</kbd>
-            <kbd>k</kbd> move <kbd>Enter</kbd> open <kbd>x</kbd> select <kbd>e</kbd> archive <kbd>#</kbd> trash{" "}
-            <kbd>f</kbd> flag <kbd>t</kbd> tag <kbd>z</kbd> undo <kbd>/</kbd> search <kbd>Esc</kbd> back
+            <span>
+              <kbd>j k</kbd> move
+            </span>
+            <span>
+              <kbd>Enter</kbd> write
+            </span>
+            <span>
+              <kbd>x</kbd> select
+            </span>
+            <span>
+              <kbd>e</kbd> archive
+            </span>
+            <span>
+              <kbd>f</kbd> flag
+            </span>
+            <span>
+              <kbd>z</kbd> undo
+            </span>
+            <span>
+              <kbd>Esc</kbd> back
+            </span>
           </span>
         </Show>
         <Show when={info()?.debug}>
-          <span class="sep" />
           <span class="meta" title={info()?.dbPath}>
             dev
           </span>

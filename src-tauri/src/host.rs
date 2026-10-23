@@ -79,6 +79,8 @@ struct Request<'a> {
 
 pub struct TauriHost<'a> {
     pub app: &'a AppHandle,
+    /// The label of the window that started the run; its dialogs and messages go there.
+    pub target: &'a str,
     pub broker: &'a Broker,
     pub clipboard: &'a Mutex<Option<arboard::Clipboard>>,
     pub cancel: CancelToken,
@@ -86,11 +88,11 @@ pub struct TauriHost<'a> {
 
 impl TauriHost<'_> {
     fn ask(&self, kind: &str, payload: Value) -> Option<Value> {
-        let app = self.app;
+        let (app, target) = (self.app, self.target);
         self.broker.ask(
-            |id| Ok(app.emit("host-request", Request { id, kind, payload })?),
+            |id| Ok(app.emit_to(target, "host-request", Request { id, kind, payload })?),
             |id| {
-                let _ = app.emit("host-closed", id);
+                let _ = app.emit_to(target, "host-closed", id);
             },
             &self.cancel,
         )
@@ -162,7 +164,7 @@ impl Host for TauriHost<'_> {
     fn message(&mut self, kind: MessageKind, text: &str) {
         // Success and failure come back to the window in the run report; only other messages need an event.
         if matches!(kind, MessageKind::Info | MessageKind::Warning) {
-            let _ = self.app.emit("host-message", json!({ "kind": kind, "text": text }));
+            let _ = self.app.emit_to(self.target, "host-message", json!({ "kind": kind, "text": text }));
         }
     }
 }
