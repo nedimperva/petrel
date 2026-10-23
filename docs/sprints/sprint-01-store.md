@@ -1,6 +1,6 @@
 # Sprint 1 — Store and drafts
 
-**Status:** in progress · started 2026-10-22
+**Status:** M1 slice merged 2026-10-23 · PR #2 · M2 tasks open
 
 ## Delivery scope
 
@@ -98,7 +98,8 @@ v4 (2026-10-23): archive 50 + undo 1.2–2.1 ms over two runs (noisy sandbox); t
 The owner's Windows machine (`D:\GitHub\petrel`, 2026-10-23, before the v3 changes) missed five rows, p50 (p95):
 two common tags 2.01 (2.08) ms, search flagged only 10.5 (12.6) ms, folder count 6.5 (8.3) ms, tag counts 84
 (225) ms, archive 50 + undo 19.4 (1,022) ms. Generation took 27 s against 7 s here, so writes there cost ~4× this
-sandbox and reads ~1.3–2×. Decisions of 2026-10-23 below are the response; a rerun there is pending.
+sandbox and reads ~1.3–2×. Decisions of 2026-10-23 below are the response. The owner's rerun with v4 passed all 28
+rows; the closest were archive 50 + undo 4.20 ms (p95 8.24) and two common tags 1.64 ms (2.13).
 
 ## Decisions
 
