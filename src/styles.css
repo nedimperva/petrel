@@ -64,7 +64,24 @@ body {
   color: var(--warn);
 }
 
-.strip kbd {
+
+
+/* ---- package 01/05: the draft list panel, bars and toasts ------------------------------------------------ */
+
+:root {
+  --flag: #e9b81c;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --flag: #f2c94c;
+  }
+}
+
+.app {
+  position: relative;
+}
+
+kbd {
   display: inline-block;
   min-width: 18px;
   height: 18px;
@@ -77,4 +94,227 @@ body {
   border: 1px solid var(--line);
   border-radius: 4px;
   box-sizing: border-box;
+}
+
+button {
+  font: inherit;
+  color: var(--fg-1);
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 2px var(--s-2);
+  cursor: pointer;
+}
+button:hover {
+  background: var(--soft-hover);
+}
+button.danger {
+  color: var(--danger);
+}
+button.link {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: 12px;
+}
+
+input {
+  font: inherit;
+  color: var(--fg-0);
+  background: var(--bg-0);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 2px var(--s-2);
+  outline: none;
+}
+input:focus {
+  border-color: var(--accent);
+}
+
+.flag {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+.flag.on {
+  background: var(--flag);
+}
+
+.strip .tag,
+.chip {
+  font-size: 11px;
+  line-height: 16px;
+  padding: 0 6px;
+  border-radius: 8px;
+  color: var(--fg-1);
+  background: var(--bg-2);
+}
+.strip .toast {
+  color: var(--fg-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 50ch;
+}
+.strip .keys {
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.list {
+  position: absolute;
+  inset: 0 0 28px 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-0);
+  outline: none;
+  z-index: 2;
+}
+
+.list-head {
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-1);
+}
+
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  padding: var(--s-2) var(--s-3);
+}
+.tab {
+  border: none;
+  background: none;
+  color: var(--fg-2);
+  font-size: 13px;
+}
+.tab.on {
+  color: var(--fg-0);
+  background: var(--bg-2);
+}
+.tabs .grow {
+  flex: 1;
+}
+.tabs .search {
+  width: 32ch;
+  font-size: 13px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-1);
+  padding: 0 var(--s-3) var(--s-2);
+}
+.chip {
+  border: 1px solid transparent;
+}
+.chip.on {
+  border-color: var(--accent);
+  color: var(--fg-0);
+}
+.chip .n {
+  color: var(--fg-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-3);
+  font-size: 13px;
+  color: var(--fg-1);
+  background: var(--bg-1);
+  border-top: 1px solid var(--line);
+}
+.bar input {
+  flex: 1;
+  max-width: 48ch;
+}
+.bar.danger {
+  background: var(--warn-soft);
+}
+.bar .hint {
+  font-size: 12px;
+  color: var(--fg-2);
+}
+.tagbar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 28px;
+  z-index: 3;
+}
+
+.list-body {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 7px minmax(8ch, max-content) 1fr auto;
+  align-items: center;
+  gap: var(--s-2);
+  height: 36px;
+  padding: 0 var(--s-3);
+  font-size: 13px;
+  border-left: 2px solid transparent;
+  cursor: default;
+  user-select: none;
+}
+.row .title {
+  color: var(--fg-0);
+  max-width: 40ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.row .title.recent {
+  font-weight: 600;
+}
+.row .preview {
+  color: var(--fg-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.row .preview mark {
+  color: var(--fg-0);
+  background: var(--warn-soft);
+  border-radius: 2px;
+}
+.row .time {
+  color: var(--fg-2);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.row.at {
+  background: var(--bg-selected, var(--bg-2));
+  border-left-color: var(--accent);
+}
+.row.picked {
+  background: var(--accent-soft);
+}
+.row.open .title {
+  text-decoration: underline;
+  text-decoration-color: var(--fg-2);
+}
+
+.list .empty {
+  padding: var(--s-5);
+  color: var(--fg-2);
+  font-size: 13px;
+}
+
+.list-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: var(--s-2) var(--s-3);
+  border-top: 1px solid var(--line);
 }

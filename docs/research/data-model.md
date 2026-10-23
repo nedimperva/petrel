@@ -143,17 +143,79 @@ CREATE TABLE workspaces (
 CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);   -- JSON values; UI prefs, hotkey, paths
 ```
 
+## v2
+
+```sql
+CREATE INDEX drafts_title ON drafts (folder, title COLLATE NOCASE, id) WHERE deleted_at IS NULL;
+```
+
+Title sort walks this index instead of sorting a folder. (Replaced in v3.)
+
+## v3
+
+```sql
+DROP INDEX drafts_list; DROP INDEX drafts_title; DROP INDEX drafts_created; DROP INDEX drafts_accessed;
+CREATE INDEX drafts_list     ON drafts (folder, modified_at DESC, id DESC, title COLLATE NOCASE, created_at, accessed_at)
+  WHERE deleted_at IS NULL;
+CREATE INDEX drafts_title    ON drafts (title COLLATE NOCASE, id) WHERE deleted_at IS NULL;
+CREATE INDEX drafts_created  ON drafts (created_at DESC, id DESC)  WHERE deleted_at IS NULL;
+CREATE INDEX drafts_accessed ON drafts (accessed_at DESC, id DESC) WHERE deleted_at IS NULL;
+
+CREATE TABLE folder_counts (folder INTEGER PRIMARY KEY, n INTEGER NOT NULL);
+CREATE TABLE tag_counts (
+  tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+  folder INTEGER NOT NULL,
+  n      INTEGER NOT NULL,
+  PRIMARY KEY (tag_id, folder)
+) WITHOUT ROWID;
+-- filled by counting in the migration, then kept by triggers on drafts (insert, folder/deleted_at change,
+-- delete of a live row) and draft_tags (insert, delete). Live drafts only.
+```
+
+Only `drafts_list` (modified) still leads with the folder. A move used to rewrite the draft's entry in every
+sort index (330 pages for 50 scattered drafts, 19 ms on Windows for archive + undo); now it touches the row and
+its `drafts_list` entry. The other sorts check the folder per row, or sort a small folder whole from
+`drafts_list`, which carries their keys so the sort never reads the table. Counts come from
+the two tables instead of counting rows (84 ms for tag counts on Windows at 50k). Tests:
+`a_v2_database_gets_counts_that_match_its_rows`, `counts_stay_right_through_every_kind_of_change`,
+`a_v1_database_migrates_to_the_current_version_with_a_backup`.
+
+## v4
+
+```sql
+CREATE TABLE count_ctl (id INTEGER PRIMARY KEY CHECK (id = 1), manual INTEGER NOT NULL);  -- one row, manual = 0
+-- counts_draft_au gains: AND (SELECT manual FROM count_ctl WHERE id = 1) = 0
+```
+
+`move_drafts` and `undo` set `manual`, apply the folder and tag count changes from two grouped queries, and
+clear it before commit. The per-row trigger was ~13 µs a draft, most of archive + undo (5.2 ms on Windows at 50
+drafts). Every other write still counts through the trigger. The random-walk test also checks `manual` is 0.
+
+## Connections
+
+The store has one connection behind a `Mutex`, and a checkpointer thread with its own connection runs
+`PRAGMA wal_checkpoint(PASSIVE)` every 2 s. `wal_autocheckpoint` on the main connection is 4,000 pages, a
+backstop only. With SQLite's default (1,000 pages), the write that crossed the limit did the checkpoint and its
+fsyncs inline: a one-second write on Windows.
+
+## Settings the engine reads
+
+`retention.trashDays` (30, floor 1), `retention.tombstoneDays` (90, floor 30), `retention.versionsAllHours` (1),
+`retention.versionsHourlyDays` (1), `retention.versionsDailyDays` (30, floor 7), `retention.versionsProtectedDays`
+(90, floor 30). Whole numbers; a missing or non-numeric value means the default. See `retention.rs`.
+
 ## Queries the store must answer fast (all in `store_bench`)
 
 | Name | Shape |
 |---|---|
-| `list(folder, filter, sort, cursor, limit)` | Index scan on `drafts_list` (or created/accessed/title); tag filters join `draft_tags`; FTS filter joins `drafts_fts`; flagged-top is two ordered scans concatenated, not `ORDER BY flagged DESC` |
+| `list(ListQuery)` | Index scan on `drafts_list` (or created/accessed/title, checking the folder per row; a folder under `√(8 × page × drafts)` is sorted whole from `drafts_list`'s keys) with a row-value keyset bound; "All" merges the Inbox and Archive scans; flagged-top is two ordered scans concatenated, not `ORDER BY flagged DESC`. Filters on at most 2,000 drafts become an id set (`rarray`), fetched by rowid when tiny, else tested while walking; broader tags are `EXISTS` on `draft_tags` per row; text is the newest 2,000 FTS matches (package 01 Decisions) |
 | `search(query, scope)` | `SELECT rowid FROM drafts_fts WHERE MATCH ? ORDER BY rowid DESC LIMIT 400` (FTS5 stops early: microseconds for any term), then the drafts rows by `modified_at DESC`; snippets made in Rust. Exact under 400 matches; newest-first above. `bm25` was 21 ms for a stopword at 50k and is not used (package 00 Decisions) |
 | `open(id)` | Row + tags + `COUNT(versions)` in one statement with subqueries |
 | `save(id, content, cursor)` | One UPDATE; title/preview computed in Rust; FTS by trigger |
 | `version_if_due(id)` | Insert a version when the newest `edit` one is older than 5 min; no trimming here |
-| `tag_counts(folder)` | Group by on `draft_tags` joined to visible drafts; cached by the UI per list change |
-| `sweep()` | Trash > 30 days → tombstone; tombstones > 90 days → delete; versions thinned by the age tiers; orphan tags removed |
+| `tag_counts(folder)`, `count(folder)` | Read from `tag_counts` / `folder_counts` (v3, trigger-kept): 0.01 ms at 50k |
+| `move_drafts`/`flag_drafts`/`undo` | One UPDATE over an id set; the old values are kept in memory for the undo token |
+| `sweep()` | Trash > `trashDays` → tombstone; tombstones > `tombstoneDays` → delete; versions thinned by the age tiers (newest per UTC hour/day/week bucket); orphan tags removed. At start and every 24 h |
 
 ## Candidate later versions (allocate numbers when a slice is implemented)
 

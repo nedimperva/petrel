@@ -4,9 +4,11 @@
 import { EditorState, Compartment } from "@codemirror/state";
 import { EditorView, keymap, placeholder, drawSelection, highlightActiveLine } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
+import { search, searchKeymap } from "@codemirror/search";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { syntaxHighlighting, HighlightStyle } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
+import { insertLink, toggleBold, toggleItalic, toggleList, toggleTask } from "./commands";
 
 export interface EditorHandle {
   view: EditorView;
@@ -51,6 +53,11 @@ const theme = EditorView.theme({
   ".cm-cursor": { borderLeftColor: "var(--accent)", borderLeftWidth: "2px" },
   ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": { backgroundColor: "var(--accent-soft)" },
   ".cm-placeholder": { color: "var(--fg-2)", fontStyle: "normal" },
+  ".cm-panels": { backgroundColor: "var(--bg-1)", color: "var(--fg-1)", borderColor: "var(--line)" },
+  ".cm-panels-top": { borderBottom: "1px solid var(--line)" },
+  ".cm-searchMatch": { backgroundColor: "var(--warn-soft)" },
+  ".cm-searchMatch-selected": { backgroundColor: "var(--accent-soft)" },
+  ".cm-textfield, .cm-button": { font: "inherit", fontSize: "12px" },
 });
 
 export function createEditor(parent: HTMLElement, onChange: () => void): EditorHandle {
@@ -65,7 +72,17 @@ export function createEditor(parent: HTMLElement, onChange: () => void): EditorH
       markdown({ base: markdownLanguage }),
       syntaxHighlighting(markdownHighlight),
       placeholder("Type. It's saved. Act on it later."),
-      keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
+      search({ top: true }),
+      // Petrel's own keys first. Alt ↑/↓ (move line), Shift Alt ↓ (duplicate line) and Enter continuing lists
+      // come with the defaults and the Markdown language.
+      keymap.of([
+        { key: "Mod-Shift-x", run: toggleTask },
+        { key: "Mod-Shift-8", run: toggleList },
+        { key: "Mod-b", run: toggleBold },
+        { key: "Mod-i", run: toggleItalic },
+        { key: "Mod-Shift-k", run: insertLink },
+      ]),
+      keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
       theme,
       EditorView.updateListener.of((u) => {
         if (u.docChanged) onChange();

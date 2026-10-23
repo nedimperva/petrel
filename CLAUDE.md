@@ -5,7 +5,7 @@ Drafts (capture first, act later) and built like Tern (`github.com/nedimperva/te
 (`crates/petrel-core`), a Tauri 2 shell (`src-tauri`) and a SolidJS UI (`src`). The README covers layout, setup
 and keys; this file covers state and decisions that aren't visible from the code.
 
-## Where things stand (2026-10-22, package 00 merged)
+## Where things stand (2026-10-22, package 00 merged, package 01 M1 slice in review)
 
 - The workspace compiles: `petrel-core` (schema v1, migrations with backup-before-migrate, drafts, tags, versions,
   FTS search, sweep; 21 tests; `gen_store` and `store_bench` examples), `src-tauri` (five commands, single instance,
@@ -14,6 +14,19 @@ and keys; this file covers state and decisions that aren't visible from the code
   `-D warnings` and fmt are clean. The speed table passes at 50k (package 00 Results).
 - **Search is newest-first** (400 newest matches by rowid, then `modified_at`), not bm25-ranked; see package 00
   Decisions for the numbers. Snippets are made in Rust (`store::snippet`).
+- **Package 01's M1 store slice** (schema v4, 48 tests): `Store::list(&ListQuery)` (folder or All, flags, tags
+  all/none, text, four sorts, flagged-top, keyset `Cursor { key, id, flagged }`), `search` with `tag:`/`-tag:`/
+  `is:flagged`/`in:`/phrases parsed in `query.rs`, `tag_counts`/`rename_tag`/`merge_tags`, `move_drafts`/
+  `flag_drafts` → `UndoToken` → `undo`, version thinning in `sweep()` (`retention.rs`, settings with floors). A text
+  filter in `list` is the newest 2,000 matches; filters on ≤ 2,000 drafts become `rarray` id sets. v3 (after the
+  owner's Windows bench, 2026-10-23): trigger-kept `folder_counts`/`tag_counts`, only `drafts_list` leads with the
+  folder, and a checkpointer thread (`Checkpointer` in `store.rs`) so no write does a WAL checkpoint inline. v4:
+  `move_drafts`/`undo` keep the counts per batch (`count_move`, `count_ctl.manual`) instead of per row. Open
+  owner question: move/flag bumping `modified_at`.
+- **The list panel and editor keys are on the same PR** (packages 05 and 02, partial): `src/list/DraftList.tsx`
+  (`Ctrl L`; tabs, chips, `/` search, `j k Enter x e # f t z`, `Del` empties Trash), `src/editor/commands.ts`,
+  `Ctrl E`/`Ctrl #`/`Ctrl Shift F`/`Ctrl T` on the open draft, a new draft after 10 minutes away. Tried only
+  headless against the fake store.
 - **rquickjs is the scripting runtime** (owner decision 2026-10-22, package 03 Decisions); `bindgen` feature off.
   Newest-first search is accepted for M1; relevance ranking is a package 05 (M2) task.
   The spike is a standalone crate under `crates/petrel-core/examples/runtime_spike/`, not a workspace member.
@@ -36,8 +49,8 @@ compatibility is the documented subset in `docs/design/actions.md`, nothing more
 ## First steps for the next session
 
 1. Read `docs/PLAN.md`, `docs/sprints/README.md`, then `docs/sprints/sprint-00-compile-and-boot.md` (Log first).
-2. Package 01's M1 slice (list filters, tags, undo tokens, version tiers) on `sprint/01-list-and-tags`, then
-   package 02 (editor commands, open-to-new-draft, capture window) and package 05's list UI.
+2. Package 02 (editor commands, open-to-new-draft, capture window) and package 05's list UI on top of the
+   package 01 commands (`list_drafts`, `search_drafts`, `move_drafts`, `undo`, …; types in `src/api.ts`).
 3. Owner, when convenient: `scripts/kill-test.sh`, the Windows smoke list, laptop `store_bench` numbers.
 
 ## Design decisions to keep

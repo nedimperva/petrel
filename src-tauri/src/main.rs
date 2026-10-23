@@ -24,6 +24,18 @@ fn db_path(app: &tauri::App) -> anyhow::Result<PathBuf> {
     Ok(if cfg!(debug_assertions) { dir.join("dev").join("petrel.db") } else { dir.join("petrel.db") })
 }
 
+const SWEEP_EVERY: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
+fn sweep(store: &mut Store) {
+    match store.sweep() {
+        Ok(r) if r.tombstoned + r.purged + r.tags_removed + r.versions_thinned > 0 => {
+            log::info!("sweep: {r:?}")
+        }
+        Ok(_) => {}
+        Err(e) => log::warn!("sweep failed: {e:#}"),
+    }
+}
+
 /// Log to stderr and to `<app data>/petrel.log` (truncated when it passes 5 MB; rotation comes later).
 fn init_logging(app: &tauri::App) {
     let mut builder = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"));
@@ -81,13 +93,17 @@ fn main() {
                 log::error!("cannot open {}: {e:#}", path.display());
                 e
             })?;
-            match store.sweep() {
-                Ok(r) if r.tombstoned + r.purged + r.tags_removed > 0 => log::info!("sweep: {r:?}"),
-                Ok(_) => {}
-                Err(e) => log::warn!("sweep failed: {e:#}"),
-            }
+            sweep(&mut store);
             log::info!("Petrel {} · {}", env!("CARGO_PKG_VERSION"), path.display());
             app.manage(AppState { store: Mutex::new(store), db_path: path });
+            // Petrel can stay open for weeks; the Trash and version policies still apply.
+            let handle = app.handle().clone();
+            std::thread::spawn(move || loop {
+                std::thread::sleep(SWEEP_EVERY);
+                let state = handle.state::<AppState>();
+                let Ok(mut store) = state.store.lock() else { return };
+                sweep(&mut store);
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -96,6 +112,17 @@ fn main() {
             commands::open_draft,
             commands::save_draft,
             commands::list_drafts,
+            commands::search_drafts,
+            commands::set_tags,
+            commands::tag_counts,
+            commands::rename_tag,
+            commands::merge_tags,
+            commands::move_drafts,
+            commands::flag_drafts,
+            commands::add_tags,
+            commands::undo,
+            commands::empty_trash,
+            commands::sweep,
             commands::show_window,
         ])
         .run(tauri::generate_context!())
