@@ -188,7 +188,8 @@ fn main() -> anyhow::Result<()> {
         let (p50, p95) = measure(100, || {
             let mut host = RecordingHost::default();
             let id = pick(&mut rng);
-            let r = action::run(&mut store, key, id, None, Source::Ui, &mut host, &CancelToken::default()).unwrap();
+            let r = action::run(&mut store, key, id, None, Source::Ui, &mut host, &CancelToken::default())
+                .unwrap();
             assert_eq!(r.outcome, action::RunOutcome::Ok);
         });
         rows.push(Row { what: label, target_ms: 20.0, p50, p95 });
