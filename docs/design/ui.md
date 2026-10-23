@@ -126,7 +126,7 @@ or action column); in the editor everything is `Ctrl`-modified.
 | `Ctrl N` | anywhere | New draft (saves the current one first) |
 | `Ctrl L` | anywhere | Toggle the draft list |
 | `Ctrl K` | anywhere | Command bar |
-| `Ctrl 1` / `Ctrl 2` | anywhere | Toggle sidebar / action list |
+| `Ctrl 1` / `Ctrl 2` | anywhere | Toggle sidebar / action list (`Ctrl 2` focuses the list when it is open but not focused, and hides it from inside) |
 | `Ctrl Enter` | editor | Run the default action of the active group |
 | `Ctrl Shift A` | anywhere | Action editor |
 | `Ctrl E` / `Ctrl #` / `Ctrl Shift F` | editor | Archive / trash / flag current draft (`Ctrl Shift F` toggles flag; focus mode is on `Ctrl Shift D`) |
@@ -136,7 +136,7 @@ or action column); in the editor everything is `Ctrl`-modified.
 | `Ctrl ,` | anywhere | Settings |
 | `/` | list | Search |
 | `j` / `k` / `Enter` / `x` / `e` / `#` / `f` / `t` / `z` | list | Move / open / select / archive / trash / flag / tag / undo |
-| `g i` / `g f` / `g a` / `g t` / `g l` | anywhere | Inbox / Flagged / Archive / Trash / action log |
+| `g i` / `g f` / `g a` / `g t` / `g d` / `g l` | outside the editor | Inbox / Flagged / Archive / Trash / All drafts / action log |
 | `Esc` | anywhere | Close the top panel; in the capture window, save and close |
 | `Ctrl Q` | anywhere | Quit (closing the window keeps Petrel in the tray) |
 | per action | anywhere | The action's own shortcut; conflicts with the table above are refused in the recorder |

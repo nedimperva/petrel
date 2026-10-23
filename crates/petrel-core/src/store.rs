@@ -492,7 +492,7 @@ pub struct Version {
 pub struct Store {
     /// Declared first so it stops before the main connection closes; the last connection out removes the WAL.
     _checkpointer: Option<Checkpointer>,
-    conn: Connection,
+    pub(crate) conn: Connection,
     path: Option<PathBuf>,
     /// Milliseconds since the epoch; swapped out by tests.
     clock: Box<dyn Fn() -> i64 + Send>,
@@ -544,7 +544,7 @@ impl Store {
         self.clock = Box::new(clock);
     }
 
-    fn now(&self) -> i64 {
+    pub(crate) fn now(&self) -> i64 {
         (self.clock)()
     }
 

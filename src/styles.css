@@ -166,7 +166,7 @@ input:focus {
 
 .list {
   position: absolute;
-  inset: 0 0 28px 0;
+  inset: 0;
   display: flex;
   flex-direction: column;
   background: var(--bg-0);
@@ -246,7 +246,7 @@ input:focus {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 28px;
+  bottom: 0;
   z-index: 3;
 }
 
@@ -317,4 +317,480 @@ input:focus {
   justify-content: flex-end;
   padding: var(--s-2) var(--s-3);
   border-top: 1px solid var(--line);
+}
+
+/* ---- package 03: the action list, its editor, the log and the dialogs ------------------------------------ */
+
+:root {
+  --actions-w: 232px;
+  --action-grey: #8b8b94;
+  --action-blue: #3b82f6;
+  --action-green: #2f9e6e;
+  --action-yellow: #e9b81c;
+  --action-orange: #e8772e;
+  --action-red: #d0453f;
+  --action-purple: #8b5cf6;
+  --action-teal: #0e9aa7;
+}
+
+.work {
+  display: flex;
+  min-height: 0;
+}
+.center {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+.center .editor {
+  height: 100%;
+}
+
+.actions {
+  flex: none;
+  width: var(--actions-w);
+  overflow-y: auto;
+  padding: var(--s-2) 0;
+  background: var(--bg-1);
+  border-left: 1px solid var(--line);
+  outline: none;
+  font-size: var(--t-md);
+}
+.actions .group,
+.actions .run {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  width: 100%;
+  border: none;
+  border-left: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  text-align: left;
+  padding: 0 var(--s-3);
+}
+.actions .group {
+  height: 28px;
+  color: var(--fg-2);
+  font-size: var(--t-sm);
+  font-weight: 600;
+}
+.actions .caret {
+  width: 10px;
+  font-size: 10px;
+}
+.actions .action {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 30px;
+  border-left: 2px solid transparent;
+}
+.actions .run {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  color: var(--fg-0);
+  border-left: none;
+}
+.actions .edit {
+  visibility: hidden;
+  border: none;
+  background: none;
+  padding: 2px var(--s-2);
+  line-height: 0;
+}
+.actions .action:hover .edit,
+.actions .action.at .edit {
+  visibility: visible;
+}
+.actions .edit:hover .icon {
+  color: var(--accent);
+}
+.actions .action.hidden .name {
+  color: var(--fg-2);
+  font-style: italic;
+}
+.actions .action:hover,
+.actions .group:hover {
+  background: var(--soft-hover);
+}
+.actions:focus-within .at {
+  background: var(--bg-2);
+  border-left-color: var(--accent);
+}
+.actions .action.off .name {
+  color: var(--fg-2);
+  text-decoration: line-through;
+}
+.actions .name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.actions .caps kbd {
+  margin: 0 0 0 2px;
+}
+.actions .progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  background-size: 50% 100%;
+  background-repeat: no-repeat;
+  animation: petrel-progress 1s linear infinite;
+}
+@keyframes petrel-progress {
+  from {
+    background-position: -50% 0;
+  }
+  to {
+    background-position: 150% 0;
+  }
+}
+.actions-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-1) var(--s-3);
+  padding: var(--s-2) var(--s-3);
+}
+.actions-foot .hint {
+  margin: var(--s-1) 0 0;
+  line-height: 1.6;
+}
+.actions-foot .hint .icon {
+  width: 12px;
+  height: 12px;
+  vertical-align: -2px;
+}
+
+.icon {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  color: var(--fg-1);
+}
+
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+  padding: 0;
+  border: none;
+}
+.c-grey { background: var(--action-grey); }
+.c-blue { background: var(--action-blue); }
+.c-green { background: var(--action-green); }
+.c-yellow { background: var(--action-yellow); }
+.c-orange { background: var(--action-orange); }
+.c-red { background: var(--action-red); }
+.c-purple { background: var(--action-purple); }
+.c-teal { background: var(--action-teal); }
+
+button.primary {
+  color: var(--accent-fg);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+button.primary kbd {
+  color: var(--fg-1);
+}
+.meta.warn,
+.hint.warn {
+  color: var(--warn);
+}
+
+/* The action log reuses the list's rows. */
+.row.run {
+  grid-template-columns: 9ch minmax(8ch, max-content) 1fr auto;
+}
+.status {
+  font-size: var(--t-sm);
+  color: var(--fg-2);
+}
+.status.s-ok {
+  color: var(--ok);
+}
+.status.s-failed {
+  color: var(--danger);
+}
+.tabs .meta {
+  font-size: var(--t-sm);
+  color: var(--fg-2);
+}
+
+/* The action editor. */
+.editor-panel .tabs button {
+  font-size: var(--t-sm);
+}
+.form {
+  padding: var(--s-4) var(--s-5) var(--s-6);
+}
+.form .grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--s-3) var(--s-4);
+  max-width: 900px;
+}
+.form .wide {
+  grid-column: 1 / -1;
+}
+.form h3 {
+  margin: var(--s-5) 0 var(--s-2);
+  font-size: var(--t-md);
+  color: var(--fg-1);
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  font-size: var(--t-md);
+  color: var(--fg-1);
+}
+.field.inline {
+  flex-direction: row;
+  align-items: center;
+}
+.field textarea,
+.field select,
+.dialog textarea,
+.dialog select {
+  font: 13px/1.45 var(--font-mono);
+  color: var(--fg-0);
+  background: var(--bg-0);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: var(--s-1) var(--s-2);
+  resize: vertical;
+  outline: none;
+}
+.field select,
+.dialog select {
+  font-family: var(--font-ui);
+}
+.field textarea:focus,
+.field select:focus {
+  border-color: var(--accent);
+}
+.hint {
+  font-size: var(--t-sm);
+  color: var(--fg-2);
+}
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-1);
+}
+.swatches .dot {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  outline-offset: 2px;
+}
+.swatches .on {
+  outline: 2px solid var(--accent);
+}
+.icon-pick {
+  padding: 2px;
+  line-height: 0;
+}
+.recorder {
+  min-height: 26px;
+  text-align: left;
+  color: var(--fg-2);
+}
+.recorder.on {
+  border-color: var(--accent);
+}
+.step {
+  max-width: 900px;
+  margin: 0 0 var(--s-3);
+  padding: var(--s-2) var(--s-3) var(--s-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  display: grid;
+  gap: var(--s-2);
+}
+.step legend {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  width: 100%;
+  font-size: var(--t-md);
+  font-weight: 600;
+  color: var(--fg-0);
+}
+.step legend .n {
+  color: var(--fg-2);
+  margin-right: var(--s-1);
+}
+.step legend .grow {
+  flex: 1;
+}
+.step legend button {
+  font-weight: 400;
+  font-size: var(--t-sm);
+}
+.add-step {
+  display: flex;
+  gap: var(--s-2);
+}
+
+/* Dialogs that a running action opens. */
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--scrim);
+}
+.dialog {
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  overflow: auto;
+  box-sizing: border-box;
+  padding: var(--s-4) var(--s-5);
+  background: var(--bg-0);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow);
+  outline: none;
+  font-size: var(--t-md);
+  color: var(--fg-1);
+}
+.dialog.wide {
+  width: min(900px, calc(100vw - 32px));
+  height: calc(100vh - 64px);
+  display: flex;
+  flex-direction: column;
+}
+.dialog h2 {
+  margin: 0 0 var(--s-2);
+  font-size: var(--t-lg);
+  color: var(--fg-0);
+}
+.dialog p {
+  margin: 0 0 var(--s-3);
+  line-height: 1.5;
+}
+.dialog form {
+  display: grid;
+  gap: var(--s-3);
+}
+.dialog .buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--s-2);
+  margin-top: var(--s-3);
+}
+.scope {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--s-2);
+}
+.scope li {
+  display: grid;
+  grid-template-columns: 6ch 1fr;
+  gap: var(--s-2);
+  align-items: baseline;
+}
+.scope .what {
+  font-size: var(--t-sm);
+  color: var(--fg-2);
+}
+.scope code {
+  font: 12px/1.5 var(--font-mono);
+  color: var(--fg-0);
+  background: var(--bg-2);
+  border-radius: var(--r-sm);
+  padding: var(--s-1) var(--s-2);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+iframe.preview {
+  flex: 1;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg-0);
+}
+
+.step .help {
+  margin: 0;
+}
+.field .pick {
+  align-self: flex-start;
+  font-size: var(--t-sm);
+}
+.examples {
+  max-width: 900px;
+  margin: var(--s-4) 0 0;
+  font-size: var(--t-md);
+}
+.examples summary {
+  cursor: pointer;
+  color: var(--accent);
+}
+.examples h4 {
+  margin: var(--s-3) 0 var(--s-1);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  color: var(--fg-2);
+}
+.examples ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--s-1);
+}
+.examples li {
+  display: flex;
+  gap: var(--s-2);
+  align-items: baseline;
+}
+.examples .link {
+  font-size: var(--t-md);
+  white-space: nowrap;
+}
+.form > .hint {
+  margin: 0 0 var(--s-2);
+}
+.tags-help {
+  max-width: 900px;
+  margin: 0 0 var(--s-3);
+  font-size: var(--t-md);
+  color: var(--fg-1);
+}
+.tags-help summary {
+  cursor: pointer;
+  color: var(--accent);
+}
+.tags-help table {
+  margin-top: var(--s-2);
+  border-collapse: collapse;
+}
+.tags-help td {
+  padding: 2px var(--s-3) 2px 0;
+  vertical-align: top;
+}
+.tags-help code {
+  font: 12px var(--font-mono);
+  color: var(--fg-0);
+}
+.add-step .hint {
+  align-self: center;
 }

@@ -1,7 +1,15 @@
-import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
-import { api, type AppInfo, type Draft, type TagCount, type UndoToken } from "./api";
+import { createSignal, For, lazy, onCleanup, onMount, Show } from "solid-js";
+import { api, type Action, type AppInfo, type Draft, type HostRequest, type RunLogEntry, type RunReport, type TagCount, type UndoToken } from "./api";
+import ActionList, { type ActionListHandle } from "./actions/ActionList";
+import type { LogHandle } from "./actions/ActionLog";
+import HostDialog from "./actions/HostDialog";
+import { fromEvent, isChord, same } from "./actions/shortcut";
 import { createEditor, type EditorHandle } from "./editor/editor";
 import DraftList, { type ListHandle } from "./list/DraftList";
+
+// Not on the launch path: loaded the first time they open.
+const ActionEditor = lazy(() => import("./actions/ActionEditor"));
+const ActionLog = lazy(() => import("./actions/ActionLog"));
 
 type SaveState = "saved" | "dirty" | "saving" | "error";
 
@@ -13,6 +21,19 @@ export const NEW_AFTER_AWAY_MS = 10 * 60 * 1000;
 
 /** How long a toast stays in the strip. */
 const TOAST_MS = 5000;
+
+/** A run shows as running (and the editor stops taking keys) only after this long; most runs are done by then. */
+const RUNNING_AFTER_MS = 150;
+
+const ACTIONS_KEY = "petrel.actions.visible";
+
+function actionsVisible(): boolean {
+  try {
+    return localStorage.getItem(ACTIONS_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
 
 interface Undoable {
   label: string;
@@ -26,18 +47,29 @@ export default function App() {
   let tagInput: HTMLInputElement | undefined;
   let editor: EditorHandle | undefined;
   let list: ListHandle | undefined;
+  let actionList: ActionListHandle | undefined;
+  let actionLog: LogHandle | undefined;
   const [draft, setDraft] = createSignal<Draft | null>(null);
   const [save, setSave] = createSignal<SaveState>("saved");
   const [info, setInfo] = createSignal<AppInfo | null>(null);
   const [listOpen, setListOpen] = createSignal(false);
   const [tagging, setTagging] = createSignal(false);
   const [allTags, setAllTags] = createSignal<TagCount[]>([]);
-  const [toast, setToast] = createSignal<{ text: string; undo: boolean } | null>(null);
+  const [toast, setToast] = createSignal<{ text: string; undo: boolean; log?: boolean } | null>(null);
+  const [actions, setActions] = createSignal<Action[]>([]);
+  const [actionsOpen, setActionsOpen] = createSignal(actionsVisible());
+  /** The action editor is open; `action` null is a new one. */
+  const [editing, setEditing] = createSignal<{ action: Action | null } | null>(null);
+  const [logOpen, setLogOpen] = createSignal(false);
+  const [requests, setRequests] = createSignal<HostRequest[]>([]);
+  /** The action that is running, and whether it has run long enough to show. */
+  const [running, setRunning] = createSignal<{ name: string; shown: boolean } | null>(null);
   let undoStack: Undoable[] = [];
   let toastTimer: number | undefined;
   let timer: number | undefined;
   let saving: Promise<void> | null = null;
   let awaySince: number | null = null;
+  let gPending = false;
 
   // The row is created on the first keystroke, never for an untouched new draft.
   async function flush() {
@@ -105,9 +137,9 @@ export default function App() {
     }
   }
 
-  function say(text: string, undo = false) {
+  function say(text: string, undo = false, log = false) {
     window.clearTimeout(toastTimer);
-    setToast({ text, undo });
+    setToast({ text, undo, log });
     toastTimer = window.setTimeout(() => setToast(null), TOAST_MS);
   }
 
@@ -205,16 +237,142 @@ export default function App() {
       editor?.view.focus();
     } else {
       flushNow();
+      setLogOpen(false);
       setListOpen(true);
     }
   }
 
+  // ---- actions ------------------------------------------------------------------------------------------------
+
+  async function loadActions() {
+    try {
+      setActions(await (await api).listActions());
+    } catch (e) {
+      say(`Actions cannot be read: ${e}`);
+    }
+  }
+
+  /** `Ctrl 2`: show and focus the column; from inside it, hide it. */
+  function toggleActions() {
+    const inside = !!document.activeElement?.closest("aside.actions");
+    const show = !actionsOpen() || !inside;
+    setActionsOpen(show);
+    try {
+      localStorage.setItem(ACTIONS_KEY, show ? "1" : "0");
+    } catch {
+      // Remembering is a convenience.
+    }
+    if (show) queueMicrotask(() => actionList?.focus());
+    else editor?.view.focus();
+  }
+
+  function openLog() {
+    setListOpen(false);
+    setLogOpen(true);
+  }
+
+  function closeLog() {
+    setLogOpen(false);
+    editor?.view.focus();
+  }
+
+  function editAction(a: Action | null) {
+    setListOpen(false);
+    setLogOpen(false);
+    setEditing({ action: a });
+  }
+
+  function closeEditor() {
+    setEditing(null);
+    editor?.view.focus();
+  }
+
+  async function runAction(a: Action, source: "ui" | "shortcut", draftId?: number) {
+    if (running()) {
+      say(`${running()!.name} is still running. Esc stops it.`);
+      return;
+    }
+    await flushNow();
+    const id = draftId ?? draft()?.id;
+    if (id === undefined) {
+      say("Type something first: an action needs a draft.");
+      return;
+    }
+    const onEditor = id === draft()?.id;
+    setRunning({ name: a.name, shown: false });
+    const slow = window.setTimeout(() => {
+      setRunning((r) => r && { ...r, shown: true });
+      if (onEditor) editor?.setReadOnly(true);
+    }, RUNNING_AFTER_MS);
+    let report: RunReport | null = null;
+    try {
+      report = await (await api).runAction(a.uuid, id, onEditor && editor ? editor.selection() : null, source);
+    } catch (e) {
+      say(`${a.name}: ${String(e).replace(/^Error: /, "")}`);
+    } finally {
+      window.clearTimeout(slow);
+      editor?.setReadOnly(false);
+      setRunning(null);
+    }
+    if (report) await afterRun(report, onEditor);
+    if (logOpen()) actionLog?.reload();
+  }
+
+  async function afterRun(r: RunReport, onEditor: boolean) {
+    const o = r.outcome;
+    if (o.status === "failed") {
+      say(`${r.action}: failed at step ${o.step}: ${o.message}`, false, true);
+      return;
+    }
+    if (o.status === "cancelled") return say(`${r.action}: cancelled.`);
+    // Stopped is a clean exit (a dismissed prompt): nothing to say.
+    if (o.status === "stopped") return;
+    const unknown = r.unknownTags.length ? ` Unknown tags left as written: ${r.unknownTags.join(", ")}.` : "";
+    const last = r.log.length ? ` ${r.log[r.log.length - 1]}` : "";
+    say(`${r.action}: done.${last}${unknown}`, false, !!unknown);
+    list?.reload();
+    if (r.openDraft !== null) return openDraft(r.openDraft);
+    if (!onEditor) return;
+    const fresh = await (await api).openDraft(r.draftId);
+    // Drafts' habit: a draft the action filed away makes room for the next one.
+    if (r.newDraft || fresh.folder !== draft()?.folder) return newDraft();
+    setDraft(fresh);
+    if (r.changed) {
+      editor?.load(fresh.content, r.selection.head);
+      editor?.select(r.selection.anchor, r.selection.head);
+    }
+  }
+
+  async function runAgain(e: RunLogEntry) {
+    const a = actions().find((x) => x.uuid === e.actionUuid);
+    if (!a) return say("That action is gone.");
+    if (e.draftId !== null && e.draftId !== draft()?.id) await openDraft(e.draftId);
+    await runAction(a, "ui", e.draftId ?? undefined);
+  }
+
+  async function answer(r: HostRequest, value: unknown) {
+    setRequests((q) => q.filter((x) => x.id !== r.id));
+    await (await api).hostReply(r.id, value);
+  }
+
   function onKey(e: KeyboardEvent) {
+    // A dialog or the action editor takes every key.
+    if (requests().length || editing()) return;
     const k = e.key.toLowerCase();
     const ctrl = e.ctrlKey || e.metaKey;
+    if (e.key === "Escape" && running()) return stop(e, async () => (await api).cancelRun());
+    if (ctrl && e.shiftKey && !e.altKey && k === "a") {
+      const inside = !!document.activeElement?.closest("aside.actions");
+      return stop(e, () => editAction(inside ? (actionList?.current() ?? null) : null));
+    }
     if (ctrl && !e.shiftKey && !e.altKey) {
       if (k === "n") return stop(e, newDraft);
       if (k === "l") return stop(e, toggleList);
+      if (k === "2") return stop(e, toggleActions);
+      if (k === "enter") {
+        const first = actionList?.first();
+        return stop(e, () => (first ? runAction(first, "shortcut") : say("No actions yet. Ctrl Shift A makes one.")));
+      }
       if (k === "e" && !listOpen()) return stop(e, () => moveCurrent("archive"));
       if (k === "t" && !listOpen()) return stop(e, startTagging);
     }
@@ -223,9 +381,35 @@ export default function App() {
       // `Ctrl #` is Ctrl Shift 3 on most layouts; match the key and the physical key.
       if (e.key === "#" || e.code === "Digit3") return stop(e, () => moveCurrent("trash"));
     }
+    // An action's own chord works anywhere.
+    const chord = fromEvent(e);
+    if (chord && isChord(chord)) {
+      const a = actions().find((x) => x.shortcut && isChord(x.shortcut) && same(x.shortcut, chord));
+      if (a) return stop(e, () => runAction(a, "shortcut"));
+    }
     const el = e.target as HTMLElement | null;
     const typing = !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
-    if (listOpen() && !typing && list?.key(e)) e.preventDefault();
+    if (typing) return;
+    if (logOpen()) {
+      if (actionLog?.key(e)) e.preventDefault();
+      return;
+    }
+    if (listOpen()) {
+      if (list?.key(e)) e.preventDefault();
+      return;
+    }
+    if (el?.closest("aside.actions") && !ctrl && !e.altKey) {
+      if (gPending) {
+        gPending = false;
+        if (e.key === "l") return stop(e, openLog);
+        if ("ifatd".includes(e.key)) return stop(e, toggleList);
+      }
+      if (e.key === "g") {
+        gPending = true;
+        return stop(e, () => {});
+      }
+      if (actionList?.key(e)) e.preventDefault();
+    }
   }
 
   function stop(e: KeyboardEvent, run: () => unknown) {
@@ -259,45 +443,99 @@ export default function App() {
     window.addEventListener("beforeunload", flushNow);
     document.addEventListener("visibilitychange", () => away(document.hidden));
     window.addEventListener("keydown", onKey, true);
+    await a.listenHost({
+      request: (r) => setRequests((q) => [...q, r]),
+      closed: (id) => setRequests((q) => q.filter((x) => x.id !== id)),
+      message: (_kind, text) => say(text),
+    });
+    loadActions();
   });
   onCleanup(() => editor?.destroy());
 
   return (
     <div class="app">
-      <main class="editor" ref={editorEl} />
-      <Show when={listOpen()}>
-        <DraftList
-          ref={(h) => (list = h)}
-          openId={draft()?.id ?? null}
-          onOpen={openDraft}
-          onClose={toggleList}
-          onBatch={(label, t) => remember({ label, token: t.token }, t.count)}
-          onUndo={undo}
-          onToast={say}
-        />
-      </Show>
-      <Show when={tagging()}>
-        <div class="bar tagbar">
-          <span>Tags:</span>
-          <input
-            ref={tagInput}
-            list="petrel-tags"
-            placeholder="work, idea"
-            onKeyDown={(e) => {
-              e.stopPropagation();
-              // preventDefault: focus moves to the editor before the key's default action would type there.
-              if (e.key === "Enter" || e.key === "Escape") e.preventDefault();
-              if (e.key === "Enter") saveTags();
-              else if (e.key === "Escape") {
-                setTagging(false);
-                editor?.view.focus();
-              }
-            }}
-          />
-          <span class="hint">
-            <kbd>Enter</kbd> save <kbd>Esc</kbd> cancel
-          </span>
+      <div class="work">
+        <div class="center">
+          <main class="editor" ref={editorEl} />
+          <Show when={listOpen()}>
+            <DraftList
+              ref={(h) => (list = h)}
+              openId={draft()?.id ?? null}
+              onOpen={openDraft}
+              onClose={toggleList}
+              onBatch={(label, t) => remember({ label, token: t.token }, t.count)}
+              onUndo={undo}
+              onToast={say}
+              onLog={openLog}
+            />
+          </Show>
+          <Show when={logOpen()}>
+            <ActionLog
+              ref={(h) => (actionLog = h)}
+              onRunAgain={runAgain}
+              onOpenDraft={(id) => {
+                setLogOpen(false);
+                openDraft(id);
+              }}
+              onClose={closeLog}
+            />
+          </Show>
+          <Show when={editing()}>
+            {(a) => (
+              <ActionEditor
+                action={a().action}
+                all={actions()}
+                onSaved={async (saved) => {
+                  await loadActions();
+                  actionList?.reveal(saved.uuid);
+                  say(`Saved “${saved.name}”.`);
+                }}
+                onDeleted={() => {
+                  loadActions();
+                  closeEditor();
+                  say("Action deleted.");
+                }}
+                onClose={closeEditor}
+              />
+            )}
+          </Show>
+          <Show when={tagging()}>
+            <div class="bar tagbar">
+              <span>Tags:</span>
+              <input
+                ref={tagInput}
+                list="petrel-tags"
+                placeholder="work, idea"
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  // preventDefault: focus moves to the editor before the key's default action would type there.
+                  if (e.key === "Enter" || e.key === "Escape") e.preventDefault();
+                  if (e.key === "Enter") saveTags();
+                  else if (e.key === "Escape") {
+                    setTagging(false);
+                    editor?.view.focus();
+                  }
+                }}
+              />
+              <span class="hint">
+                <kbd>Enter</kbd> save <kbd>Esc</kbd> cancel
+              </span>
+            </div>
+          </Show>
         </div>
+        <Show when={actionsOpen()}>
+          <ActionList
+            ref={(h) => (actionList = h)}
+            actions={actions()}
+            running={running()?.shown ? running()!.name : null}
+            onRun={runAction}
+            onEdit={editAction}
+            onBack={() => editor?.view.focus()}
+          />
+        </Show>
+      </div>
+      <Show when={requests()[0]}>
+        {(r) => <HostDialog request={r()} onAnswer={(v) => answer(r(), v)} />}
       </Show>
       <datalist id="petrel-tags">
         <For each={allTags()}>{(t) => <option value={t.name} />}</For>
@@ -329,6 +567,11 @@ export default function App() {
             <>
               <span class="sep" />
               <span class="toast">{t().text}</span>
+              <Show when={t().log}>
+                <button class="link" onClick={openLog}>
+                  Log
+                </button>
+              </Show>
               <Show when={t().undo}>
                 <button class="link" onClick={undo}>
                   Undo
@@ -341,6 +584,12 @@ export default function App() {
           )}
         </Show>
         <span class="grow" />
+        <Show when={running()?.shown}>
+          <span class="meta">
+            {running()!.name} running · <kbd>Esc</kbd> stop
+          </span>
+          <span class="sep" />
+        </Show>
         <Show
           when={listOpen()}
           fallback={
@@ -349,7 +598,9 @@ export default function App() {
               <kbd>L</kbd> list <kbd>Ctrl</kbd>
               <kbd>N</kbd> new <kbd>Ctrl</kbd>
               <kbd>E</kbd> archive <kbd>Ctrl</kbd>
-              <kbd>T</kbd> tag
+              <kbd>T</kbd> tag <kbd>Ctrl</kbd>
+              <kbd>Enter</kbd> run <kbd>Ctrl</kbd>
+              <kbd>2</kbd> actions
             </span>
           }
         >

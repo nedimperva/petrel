@@ -11,7 +11,7 @@ export const TABS: { tab: Tab; label: string; key: string }[] = [
   { tab: "flagged", label: "Flagged", key: "f" },
   { tab: "archive", label: "Archive", key: "a" },
   { tab: "trash", label: "Trash", key: "t" },
-  { tab: "all", label: "All", key: "l" },
+  { tab: "all", label: "All", key: "d" },
 ];
 
 interface Row {
@@ -38,6 +38,8 @@ interface Props {
   onBatch(label: string, token: UndoToken): void;
   onUndo(): void;
   onToast(text: string): void;
+  /** `g l`: the action log. */
+  onLog(): void;
   ref(h: ListHandle): void;
 }
 
@@ -225,6 +227,10 @@ export default function DraftList(props: Props) {
     }
     if (gPending) {
       gPending = false;
+      if (e.key === "l") {
+        props.onLog();
+        return true;
+      }
       const t = TABS.find((t) => t.key === e.key);
       if (t) {
         setTab(t.tab);

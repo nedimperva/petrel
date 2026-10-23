@@ -1,16 +1,40 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+mod host;
 
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+use petrel_core::host::{system, CancelToken};
 use petrel_core::Store;
 use tauri::Manager;
 
 pub struct AppState {
     pub store: Mutex<Store>,
     pub db_path: PathBuf,
+    /// Dialogs an action is waiting on.
+    pub broker: host::Broker,
+    pub clipboard: Mutex<Option<arboard::Clipboard>>,
+    /// The running action's token, for `Esc`.
+    pub running: Mutex<Option<CancelToken>>,
+}
+
+/// The login shell's `PATH` is cached here and refreshed off the start path (actions.md "Shell").
+const PATH_SETTING: &str = "actions.command_path";
+
+fn refresh_command_path(app: &tauri::AppHandle) {
+    let Some(path) = system::login_path() else { return };
+    if system::command_path().as_deref() == Some(path.as_str()) {
+        return;
+    }
+    system::use_path(Some(path.clone()));
+    let state = app.state::<AppState>();
+    if let Ok(store) = state.store.lock() {
+        if let Err(e) = store.set_setting(PATH_SETTING, &path) {
+            log::warn!("caching the login PATH: {e:#}");
+        }
+    };
 }
 
 /// Where the database lives: `PETREL_DB` if set; otherwise `<app data>/petrel.db`, or `<app data>/dev/petrel.db`
@@ -86,6 +110,8 @@ fn main() {
             }
         }))
         .plugin(tauri_plugin_opener::init())
+        // The folder picker in the action editor.
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             init_logging(app);
             let path = db_path(app)?;
@@ -94,11 +120,25 @@ fn main() {
                 e
             })?;
             sweep(&mut store);
+            match store.seed_default_actions() {
+                Ok(0) => {}
+                Ok(n) => log::info!("added {n} default actions"),
+                Err(e) => log::warn!("default actions: {e:#}"),
+            }
+            system::use_path(store.setting(PATH_SETTING).ok().flatten());
             log::info!("Petrel {} · {}", env!("CARGO_PKG_VERSION"), path.display());
-            app.manage(AppState { store: Mutex::new(store), db_path: path });
-            // Petrel can stay open for weeks; the Trash and version policies still apply.
+            app.manage(AppState {
+                store: Mutex::new(store),
+                db_path: path,
+                broker: host::Broker::default(),
+                clipboard: Mutex::new(None),
+                running: Mutex::new(None),
+            });
+            // Petrel can stay open for weeks; the Trash and version policies still apply, and the login PATH
+            // may change.
             let handle = app.handle().clone();
             std::thread::spawn(move || loop {
+                refresh_command_path(&handle);
                 std::thread::sleep(SWEEP_EVERY);
                 let state = handle.state::<AppState>();
                 let Ok(mut store) = state.store.lock() else { return };
@@ -124,6 +164,13 @@ fn main() {
             commands::empty_trash,
             commands::sweep,
             commands::show_window,
+            commands::list_actions,
+            commands::save_action,
+            commands::delete_action,
+            commands::action_log,
+            commands::run_action,
+            commands::cancel_run,
+            commands::host_reply,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Petrel");

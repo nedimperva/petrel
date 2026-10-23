@@ -16,6 +16,11 @@ export interface EditorHandle {
   load(text: string, cursor: number): void;
   text(): string;
   cursor(): number;
+  /** The main selection, in UTF-16 offsets. */
+  selection(): { anchor: number; head: number };
+  select(anchor: number, head: number): void;
+  /** While an action that may change the text runs, typing would be lost when its result loads. */
+  setReadOnly(on: boolean): void;
   destroy(): void;
 }
 
@@ -62,6 +67,7 @@ const theme = EditorView.theme({
 
 export function createEditor(parent: HTMLElement, onChange: () => void): EditorHandle {
   const wrap = new Compartment();
+  const readOnly = new Compartment();
   const state = EditorState.create({
     doc: "",
     extensions: [
@@ -69,6 +75,7 @@ export function createEditor(parent: HTMLElement, onChange: () => void): EditorH
       drawSelection(),
       highlightActiveLine(),
       wrap.of(EditorView.lineWrapping),
+      readOnly.of(EditorState.readOnly.of(false)),
       markdown({ base: markdownLanguage }),
       syntaxHighlighting(markdownHighlight),
       placeholder("Type. It's saved. Act on it later."),
@@ -101,6 +108,13 @@ export function createEditor(parent: HTMLElement, onChange: () => void): EditorH
     },
     text: () => view.state.doc.toString(),
     cursor: () => view.state.selection.main.head,
+    selection: () => ({ anchor: view.state.selection.main.anchor, head: view.state.selection.main.head }),
+    select(anchor, head) {
+      const len = view.state.doc.length;
+      const clamp = (n: number) => Math.min(Math.max(0, n), len);
+      view.dispatch({ selection: { anchor: clamp(anchor), head: clamp(head) }, scrollIntoView: true });
+    },
+    setReadOnly: (on) => view.dispatch({ effects: readOnly.reconfigure(EditorState.readOnly.of(on)) }),
     destroy: () => view.destroy(),
   };
 }
