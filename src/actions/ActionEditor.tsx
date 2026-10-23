@@ -4,6 +4,7 @@
 import { createMemo, createSignal, For, Index, onMount, Show } from "solid-js";
 import { api, type Action, type AfterSuccess, type Step } from "../api";
 import Icon, { COLORS, ICONS } from "./icons";
+import { ADVANCED, SIMPLE, type Example } from "./examples";
 import { caps, conflict, fromEvent } from "./shortcut";
 
 type Kind = "text" | "textarea" | "bool" | "select" | "number" | "list" | "json";
@@ -107,55 +108,6 @@ const TAGS: [string, string][] = [
   ["[[tags]]", "the draft's tags, comma separated"],
   ["[[clipboard]]", "what is on the clipboard"],
   ["[[line|1]]", "the first line; [[line|2..4]] for a range"],
-];
-
-/** Ready-made starting points for a new action. */
-const EXAMPLES: { name: string; icon: string; color: string; description: string; steps: Step[] }[] = [
-  {
-    name: "Save to my notes folder",
-    icon: "save",
-    color: "green",
-    description: "Saves the draft as a Markdown file named after its title.",
-    steps: [{ type: "file", path: "~/Notes/[[safe_title]].md", text: "[[draft]]", mode: "overwrite", createDirs: true }],
-  },
-  {
-    name: "Add to a todo file",
-    icon: "file",
-    color: "orange",
-    description: "Adds the draft as a task at the end of todo.md.",
-    steps: [{ type: "file", path: "~/Notes/todo.md", text: "- [ ] [[draft]]\n", mode: "append", createDirs: true }],
-  },
-  {
-    name: "Copy as a quote",
-    icon: "copy",
-    color: "blue",
-    description: "Copies the draft with the title in bold and today's date.",
-    steps: [{ type: "clipboard", text: "**[[title]]** ([[date]])\n\n[[body]]", mode: "replace" }],
-  },
-  {
-    name: "Look up on Wikipedia",
-    icon: "globe",
-    color: "teal",
-    description: "Searches Wikipedia for the selection.",
-    steps: [{ type: "url", url: "https://en.wikipedia.org/w/index.php?search=[[selection]]", encode: true, openIn: "default" }],
-  },
-  {
-    name: "Ask, then add a line",
-    icon: "edit",
-    color: "purple",
-    description: "Asks for a line of text and adds it to the end of the draft.",
-    steps: [
-      { type: "prompt", title: "Add a line", message: "", buttons: ["Add"], fields: [{ key: "text", kind: "text", label: "Line", default: "", options: [] }], cancelButton: true },
-      { type: "insertText", text: "\n[[prompt_text]]", position: "end", moveCursor: false },
-    ],
-  },
-  {
-    name: "Sort lines",
-    icon: "terminal",
-    color: "grey",
-    description: "Sorts the draft's lines with the sort command.",
-    steps: [{ type: "runCommand", command: "sort", stdin: "[[draft]]", shell: null, timeoutSecs: null, output: "replace", cwd: null }],
-  },
 ];
 
 export function newStep(type: string): Step {
@@ -317,6 +269,19 @@ export default function ActionEditor(props: Props) {
   const [confirming, setConfirming] = createSignal<null | "discard" | "delete">(null);
   const [adding, setAdding] = createSignal("clipboard");
 
+  let examples: HTMLDetailsElement | undefined;
+  /** Fills the form from an example; the name and description stay if already typed. */
+  function useExample(x: Example) {
+    update({
+      ...x.more,
+      name: a().name.trim() ? a().name : x.name,
+      description: a().description || x.description,
+      icon: x.icon,
+      color: x.color,
+      steps: x.steps.map((s) => ({ ...newStep(s.type), ...structuredClone(s) })),
+    });
+    if (examples) examples.open = false;
+  }
   const update = (patch: Partial<Action>) => {
     setA({ ...a(), ...patch });
     setDirty(true);
@@ -530,28 +495,28 @@ export default function ActionEditor(props: Props) {
           </label>
         </div>
         <Show when={!a().uuid}>
-          <h3>Start from an example</h3>
-          <div class="examples">
-            <For each={EXAMPLES}>
-              {(x) => (
-                <button
-                  type="button"
-                  title={x.description}
-                  onClick={() =>
-                    update({
-                      name: a().name.trim() ? a().name : x.name,
-                      description: a().description || x.description,
-                      icon: x.icon,
-                      color: x.color,
-                      steps: structuredClone(x.steps),
-                    })
-                  }
-                >
-                  <Icon name={x.icon} /> {x.name}
-                </button>
+          <details class="examples" ref={examples}>
+            <summary>Start from an example</summary>
+            <For each={[["Simple", SIMPLE], ["Advanced", ADVANCED]] as const}>
+              {([title, list]) => (
+                <>
+                  <h4>{title}</h4>
+                  <ul>
+                    <For each={list}>
+                      {(x) => (
+                        <li>
+                          <button type="button" class="link" onClick={() => useExample(x)}>
+                            {x.name}
+                          </button>
+                          <span class="hint">{x.description}</span>
+                        </li>
+                      )}
+                    </For>
+                  </ul>
+                </>
               )}
             </For>
-          </div>
+          </details>
         </Show>
         <h3>Steps</h3>
         <p class="hint">Steps run from top to bottom. If one fails, the draft is left as it was.</p>

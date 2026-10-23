@@ -86,8 +86,11 @@ modify a draft they failed on, and tell you exactly which step broke and why.
     `xdg-open` can start an app that quits again, which moves tiled windows on Hyprland.
   - Each row has an edit button; `e` and a right-click also open the editor. Double-click no longer edits, because
     the two clicks also ran the action twice. Hidden actions come back with "Show hidden" under the list.
-  - The editor explains each step, lists the common tags, offers six examples for a new action, and has "Choose
-    folder…" on a file step (`tauri-plugin-dialog`).
+  - The editor explains each step, lists the common tags, and has "Choose folder…" on a file step
+    (`tauri-plugin-dialog`). A new action can start from an example: a collapsed list (owner: "more subtle") of 4
+    simple and 8 advanced ones in `src/actions/examples.ts` (a prompt that picks the folder and tags, git commit,
+    command output as a tag, `bc`, `jq`, `llm`, preview then publish, tomorrow's daily note). Commands take text
+    on stdin, never spliced into the command line, so quotes in a draft cannot break them.
 
 - 2026-10-23 — **The window side** (each easy to change):
   - Dialogs an action needs are `host-request` events; the webview answers with `host_reply`. A cancelled run

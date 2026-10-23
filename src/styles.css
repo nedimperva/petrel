@@ -736,15 +736,35 @@ iframe.preview {
   font-size: var(--t-sm);
 }
 .examples {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--s-2);
   max-width: 900px;
+  margin: var(--s-4) 0 0;
+  font-size: var(--t-md);
 }
-.examples button {
-  display: inline-flex;
-  align-items: center;
+.examples summary {
+  cursor: pointer;
+  color: var(--accent);
+}
+.examples h4 {
+  margin: var(--s-3) 0 var(--s-1);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  color: var(--fg-2);
+}
+.examples ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
   gap: var(--s-1);
+}
+.examples li {
+  display: flex;
+  gap: var(--s-2);
+  align-items: baseline;
+}
+.examples .link {
+  font-size: var(--t-md);
+  white-space: nowrap;
 }
 .form > .hint {
   margin: 0 0 var(--s-2);
