@@ -694,6 +694,12 @@ impl Store {
             "UPDATE drafts SET accessed_at = ?2 WHERE id = ?1 AND accessed_at < ?2 - 60000",
             params![id, now],
         )?;
+        self.peek(id)
+    }
+
+    /// A draft as `draft` returns it, without marking it accessed: the list's preview pane reads every row the
+    /// cursor passes, and that is not opening them.
+    pub fn peek(&self, id: i64) -> Result<Draft> {
         let mut draft = self
             .conn
             .query_row(
@@ -2046,6 +2052,16 @@ mod tests {
         now.fetch_add(40_000, Ordering::SeqCst);
         assert_eq!(s.draft(d.id).unwrap().accessed_at, 10_070_000);
         assert_eq!(s.draft(d.id).unwrap().modified_at, 10_000_000, "opening is not a modification");
+    }
+
+    #[test]
+    fn peeking_never_marks_accessed() {
+        let (s, now) = store_with_clock(10_000_000);
+        let d = s.new_draft("x\nbody").unwrap();
+        now.fetch_add(120_000, Ordering::SeqCst);
+        let p = s.peek(d.id).unwrap();
+        assert_eq!((p.content.as_str(), p.accessed_at), ("x\nbody", 10_000_000));
+        assert_eq!(s.peek(d.id).unwrap().accessed_at, 10_000_000);
     }
 
     #[test]

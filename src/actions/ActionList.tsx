@@ -39,6 +39,13 @@ function remembered(): Set<string> | null {
   }
 }
 
+/** What `Ctrl Enter` runs when the column is closed: the first action of the group the column would open on. */
+export function firstAction(actions: Action[]): Action | null {
+  const shown = actions.filter((a) => !a.hidden);
+  const open = remembered();
+  return shown.find((a) => open?.has(a.group)) ?? shown[0] ?? null;
+}
+
 export default function ActionList(props: Props) {
   let panel!: HTMLDivElement;
   // Which groups are open; the first group alone on first run.

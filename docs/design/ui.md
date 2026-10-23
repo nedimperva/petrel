@@ -53,14 +53,22 @@ Editor type: `--t-rd` by default (14/21), a setting for 13–18 px, and a monosp
 ```
 
 - **Three columns, two of them optional.** Sidebar (`Ctrl 1`) and action list (`Ctrl 2`) toggle; their state is
-  remembered. The default on first run is editor + action list; the sidebar opens when the list is opened.
+  remembered. The default on first run is the editor alone (owner, 2026-10-23: the launch screen is the text and
+  nothing else); `Ctrl Enter` still runs the default action with the column closed.
+- **The strip is quiet.** No fill and no rule: save state, word count, flag/folder/tags of the open draft, toasts,
+  and two hints (`Ctrl L` drafts, `Ctrl 2` actions). The list swaps the hints for its own keys.
 - **The draft list is a panel over the editor's column**, not a permanent column (`Ctrl L` / `Esc`). This keeps the
-  launch screen to one thing. A setting (`layout: list-left`) makes it a permanent left column for people who
+  launch screen to one thing. The panel is two panes: the list on the left (about a third of the width, 300–420 px)
+  and the highlighted draft read in full on the right, so most drafts never need opening. Below 760 px the preview
+  pane is dropped. A setting (`layout: list-left`) makes it a permanent left column for people who
   want the Drafts-on-Mac shape; the sidebar then merges into it as a header row of filters.
 - **The capture window** (`petrel --capture`, tray, hotkey) is a separate small window: editor only, 560×320
-  default, class `petrel-capture`, no sidebar, action list collapsed to a single row of the active group's first
-  six actions. `Ctrl Enter` runs the group's default action (or just saves to Inbox); `Esc` saves to Inbox and
-  closes. It never shows an empty-state or a dialog.
+  default, title `Petrel capture` (Wayland rules match on it), no sidebar and no action row. One line under the
+  text: the folder it goes to (Inbox or Archive), its tags with "+ tag", the save state, the default action's name
+  on `Ctrl Enter`, and `Esc` done. `Ctrl Enter` runs the default action and closes (or just saves when nothing is
+  typed or there are no actions); `Esc` and the close button save and close. Folder and tags are applied when it
+  closes. It never shows an empty state; the only dialogs are ones the action asks for, and those go to the
+  window that started the run.
 - Minimum main window 720×480, like Tern.
 
 ## 4. Screens
@@ -76,8 +84,11 @@ Editor type: `--t-rd` by default (14/21), a setting for 13–18 px, and a monosp
 - Selection and cursor survive switching drafts (stored `cursor`).
 
 ### 4.2 Draft list (`Ctrl L`)
-- Rows 36 px dense: title (`--t-md`, 600 if modified in the last hour), preview (`--fg-2`, one line), relative
-  time right-aligned (`tnum`), flag dot on the left in `--flag`, tag chips only in comfortable density.
+- Rows are two lines: title (`--t-md`, 600) with the flag dot and relative time (`tnum`) on the right, then the
+  stored preview (`--fg-2`, `--t-sm`, clamped to two lines). Search box on top, then text tabs, then tag chips.
+- The preview pane shows the highlighted draft read-only as plain text (title line in 600, the rest `pre-wrap`,
+  first 20,000 characters), then tags, folder, flag, "edited …" and a word count. It reads with `peek_draft`, which
+  does not mark the draft accessed, 60 ms after the cursor stops.
 - `j`/`k` move, `Enter` opens, `Esc` back to the editor with the same draft, `x` selects for a batch
   (`e` archive, `#` trash, `f` flag, `t` tag) with one undo token.
 - Filters header: Inbox · Flagged · Archive · Trash · All, tag chips, search box (`/`). Workspace name when one is

@@ -38,9 +38,15 @@ type is kept, and the first line is the title. Everything else stays out of the 
 
 ### Capture window (M1)
 - [ ] Separate Tauri window `capture`, class `petrel-capture`, 560×320, always-on-top (setting), remembers size.
+      The window is in (`open_capture` in `main.rs`, `src/Capture.tsx`), 560×320, titled `Petrel capture`: Wayland
+      gives every Petrel window the same app id, so rules match the title. Not yet: always-on-top, remembered size.
 - [ ] `petrel --capture` and the tray "New draft" open it (or focus it) via the single-instance plugin.
-- [ ] `Ctrl Enter` runs the active group's default action; `Esc` saves and closes; close button saves.
-- [ ] Hyprland float rule and Windows behaviour documented in the README.
+      `--capture` works on first launch (the main window loads hidden) and from a second launch. The tray is
+      package 07; until then, closing a capture window opened on its own quits Petrel.
+- [x] `Ctrl Enter` runs the active group's default action; `Esc` saves and closes; close button saves.
+      Plus a folder (Inbox/Archive) and tags in the footer, applied on close. Action dialogs go only to the window
+      that started the run (`emit_to`). Tried headless in `npm run dev` (`?capture`); not yet in the real window.
+- [x] Hyprland float rule and Windows behaviour documented in the README. Hyprland only; Windows needs a look.
 
 ### Tags, flag, folder from the editor (M1)
 - [x] `Ctrl T` chip input with autocomplete from `tags`; `Ctrl Shift F` flag; `Ctrl E` archive (opens the next draft
@@ -70,5 +76,10 @@ type is kept, and the first line is the title. Everything else stays out of the 
 
 ## Log
 
+- 2026-10-23 — Owner's design pass ("minimalist and focused writing"): the writing screen is the text alone (action
+  column hidden by default, a quiet strip with save state and word count, 17 px type), the list gets a preview
+  pane (`Store::peek`, no access mark), and the capture window lands with a one-line footer. Autosave moved to
+  `src/editor/autosave.ts` so both windows share it. Tried headless against the fake store; the Tauri windows
+  have not been booted.
 - 2026-10-22 — Editor keys and open-to-new after 10 minutes away, on PR #2 with the package 05 list panel. Tried
   headless against the fake store only.

@@ -86,6 +86,20 @@ Debug builds keep their database at `<app data>/dev/petrel.db`, apart from an in
 Petrel sets `WEBKIT_DISABLE_DMABUF_RENDERER=1` itself (set it to `0` to opt out). On Hyprland the window class is
 `petrel`; to float it: `windowrulev2 = float, class:^(petrel)$`.
 
+`petrel --capture` opens the small capture window (or focuses it); a second launch hands the flag to the running
+Petrel. On Wayland every Petrel window shares the app id, so Hyprland rules match the capture window by title:
+
+```
+bind = SUPER, N, exec, petrel --capture
+windowrulev2 = float, title:^(Petrel capture)$
+windowrulev2 = size 560 320, title:^(Petrel capture)$
+windowrulev2 = center, title:^(Petrel capture)$
+```
+
+`Esc` saves and closes it, `Ctrl Enter` runs the default action and closes it. Until the tray arrives, closing a
+capture window that was opened on its own (Petrel not already running) quits Petrel. In `npm run dev` the capture
+window is [http://localhost:1420/?capture](http://localhost:1420/?capture).
+
 ## Project layout
 
 ```

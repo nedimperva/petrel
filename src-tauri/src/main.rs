@@ -4,13 +4,16 @@ mod commands;
 mod host;
 
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 
 use petrel_core::host::{system, CancelToken};
 use petrel_core::Store;
-use tauri::Manager;
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 pub struct AppState {
+    /// Launched as `petrel --capture`: the main window stays hidden until something asks for it.
+    pub capture_launch: AtomicBool,
     pub store: Mutex<Store>,
     pub db_path: PathBuf,
     /// Dialogs an action is waiting on.
@@ -46,6 +49,31 @@ fn db_path(app: &tauri::App) -> anyhow::Result<PathBuf> {
     }
     let dir = app.path().app_data_dir()?;
     Ok(if cfg!(debug_assertions) { dir.join("dev").join("petrel.db") } else { dir.join("petrel.db") })
+}
+
+fn wants_capture(args: &[String]) -> bool {
+    args.iter().skip(1).any(|a| a == "--capture")
+}
+
+/// Opens the capture window, or focuses it if it is open (ui.md §3). It starts hidden and shows itself once the
+/// editor has rendered, like the main window. The title is what a Hyprland float rule matches on: on Wayland
+/// every Petrel window shares the app id.
+fn open_capture(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("capture") {
+        let _ = w.show();
+        let _ = w.set_focus();
+        return;
+    }
+    let built = WebviewWindowBuilder::new(app, "capture", WebviewUrl::App("index.html".into()))
+        .title("Petrel capture")
+        .inner_size(560.0, 320.0)
+        .min_inner_size(360.0, 160.0)
+        .visible(false)
+        .initialization_script("window.__PETREL_CAPTURE__ = true;")
+        .build();
+    if let Err(e) = built {
+        log::error!("cannot open the capture window: {e}");
+    }
 }
 
 const SWEEP_EVERY: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
@@ -102,8 +130,11 @@ fn main() {
     }
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            // A second launch focuses the running one. Arguments (`--new`, `--capture`) arrive with package 07.
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // A second launch focuses the running one, or opens capture. `--new "text"` arrives with package 07.
+            if wants_capture(&args) {
+                return open_capture(app);
+            }
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.show();
                 let _ = w.set_focus();
@@ -127,7 +158,9 @@ fn main() {
             }
             system::use_path(store.setting(PATH_SETTING).ok().flatten());
             log::info!("Petrel {} · {}", env!("CARGO_PKG_VERSION"), path.display());
+            let capture = wants_capture(&std::env::args().collect::<Vec<_>>());
             app.manage(AppState {
+                capture_launch: AtomicBool::new(capture),
                 store: Mutex::new(store),
                 db_path: path,
                 broker: host::Broker::default(),
@@ -144,12 +177,16 @@ fn main() {
                 let Ok(mut store) = state.store.lock() else { return };
                 sweep(&mut store);
             });
+            if capture {
+                open_capture(app.handle());
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::app_info,
             commands::new_draft,
             commands::open_draft,
+            commands::peek_draft,
             commands::save_draft,
             commands::list_drafts,
             commands::search_drafts,
@@ -164,6 +201,7 @@ fn main() {
             commands::empty_trash,
             commands::sweep,
             commands::show_window,
+            commands::close_capture,
             commands::list_actions,
             commands::save_action,
             commands::delete_action,

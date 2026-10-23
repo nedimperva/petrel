@@ -1,7 +1,11 @@
 /* Layout for package 00: an editor and a status strip. Tokens come from styles/tokens.css (shared with Tern). */
 
 :root {
-  --editor-max: 72ch;
+  /* Writing type: a size up from the interface, a narrow measure, room above the first line. */
+  --editor-max: 66ch;
+  --editor-size: 17px;
+  --editor-leading: 1.7;
+  --editor-top: min(14vh, 120px);
   --font-ui: "Inter Variable", "Segoe UI", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
 }
@@ -31,29 +35,38 @@ body {
   min-height: 0;
 }
 
+/* The strip is part of the page, not a toolbar: no fill, no rule, the same quiet grey as meta text. */
 .strip {
   display: flex;
   align-items: center;
-  gap: var(--s-2);
-  height: 28px;
-  padding: 0 var(--s-3);
+  gap: var(--s-4);
+  height: 32px;
+  padding: 0 var(--s-5);
   font-size: 12px;
   line-height: 16px;
   color: var(--fg-2);
-  background: var(--bg-1);
-  border-top: 1px solid var(--line);
+  background: var(--bg-0);
   user-select: none;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.strip kbd {
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  margin: 0 2px 0 0;
+  border: none;
+  background: none;
+  font: 500 11px/16px var(--font-mono);
+  color: var(--fg-2);
+}
+.strip .keys {
+  display: flex;
+  gap: var(--s-4);
 }
 
 .strip .grow {
   flex: 1;
-}
-
-.strip .sep {
-  width: 1px;
-  height: 12px;
-  background: var(--line);
 }
 
 .strip .save {
@@ -143,7 +156,6 @@ input:focus {
   background: var(--flag);
 }
 
-.strip .tag,
 .chip {
   font-size: 11px;
   line-height: 16px;
@@ -793,4 +805,225 @@ iframe.preview {
 }
 .add-step .hint {
   align-self: center;
+}
+
+/* ---- the draft list with its preview (ui.md §4.2) --------------------------------------------------------- */
+
+.list.drafts {
+  flex-direction: row;
+}
+.drafts-side {
+  flex: 0 0 auto;
+  width: clamp(300px, 34%, 420px);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--line);
+}
+.drafts .list-head {
+  display: grid;
+  gap: var(--s-2);
+  padding: var(--s-4) var(--s-4) var(--s-1);
+  border-bottom: none;
+  background: none;
+}
+.drafts .search {
+  width: 100%;
+  box-sizing: border-box;
+  height: 32px;
+  padding: 0 var(--s-3);
+  font-size: var(--t-md);
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  background: var(--soft);
+}
+.drafts .search:focus {
+  border-color: var(--accent);
+  background: var(--bg-0);
+}
+.drafts .tabs {
+  gap: var(--s-4);
+  padding: 0 var(--s-1);
+}
+.drafts .tab {
+  padding: var(--s-1) 0;
+  border-radius: 0;
+  font-size: var(--t-sm);
+}
+.drafts .tab.on {
+  background: none;
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--fg-0);
+}
+.drafts .chips {
+  padding: 0 var(--s-1);
+}
+.drafts .bar {
+  border-top: none;
+  border-radius: var(--r-md);
+}
+.drafts .list-body {
+  padding: var(--s-1) var(--s-2) var(--s-3);
+}
+
+.row.draft {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  height: auto;
+  padding: var(--s-2) var(--s-3);
+  border-left: none;
+  border-radius: var(--r-md);
+}
+.row.draft .row-top {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+}
+.row.draft .title {
+  flex: 1;
+  min-width: 0;
+  max-width: none;
+  font-weight: 600;
+}
+.row.draft .preview {
+  font-size: var(--t-sm);
+  line-height: 1.5;
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.row.draft.at {
+  background: var(--soft-hover);
+}
+.row.draft.picked {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.row.draft.open .title {
+  text-decoration: none;
+}
+.row.draft.open .time::before {
+  content: "open · ";
+}
+
+.preview-pane {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+}
+.preview-text {
+  max-width: 64ch;
+  margin: 0 auto;
+  padding: min(10vh, 72px) var(--s-5) var(--s-6);
+  font-size: var(--t-lg);
+  line-height: 1.7;
+  color: var(--fg-0);
+}
+.preview-title {
+  font-weight: 600;
+}
+.preview-body {
+  margin-top: var(--s-3);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.preview-more {
+  margin-top: var(--s-3);
+  font-size: var(--t-sm);
+  color: var(--fg-2);
+}
+.preview-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-4);
+  margin-top: var(--s-5);
+  font-size: var(--t-sm);
+  color: var(--fg-2);
+}
+
+/* No room for two panes: the list alone, as before. */
+@media (max-width: 760px) {
+  .drafts-side {
+    width: 100%;
+    border-right: none;
+  }
+  .preview-pane {
+    display: none;
+  }
+}
+
+/* ---- the capture window (ui.md §3) ------------------------------------------------------------------------ */
+
+.capture {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  --editor-size: 16px;
+  --editor-top: var(--s-5);
+  --editor-max: none;
+}
+.capture .editor {
+  flex: 1;
+  min-height: 0;
+}
+.capture-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: 36px;
+  padding: 0 var(--s-4) var(--s-2) var(--s-4);
+  font-size: var(--t-sm);
+  color: var(--fg-2);
+  white-space: nowrap;
+}
+.capture-foot select,
+.capture-foot .add-tag {
+  height: 26px;
+  padding: 0 var(--s-2);
+  font: inherit;
+  color: var(--fg-1);
+  background: none;
+  border: none;
+  border-radius: var(--r-md);
+  cursor: pointer;
+}
+.capture-foot select:hover,
+.capture-foot .add-tag:hover {
+  background: var(--soft-hover);
+}
+.capture-foot .chip {
+  font-size: var(--t-sm);
+  line-height: 22px;
+  padding: 0 var(--s-2);
+  border-radius: 11px;
+  background: var(--soft);
+}
+.capture-foot input {
+  width: 16ch;
+  height: 24px;
+  font-size: var(--t-sm);
+}
+.capture-foot kbd {
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  border: none;
+  background: none;
+  font: 500 11px/16px var(--font-mono);
+  color: var(--fg-2);
+}
+.capture-foot .grow {
+  flex: 1;
+}
+.capture-foot .toast {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg-1);
+}
+.capture-foot .save-error {
+  color: var(--warn);
 }
