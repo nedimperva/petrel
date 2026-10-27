@@ -12,6 +12,15 @@ use crate::host::WriteMode;
 use crate::store::Store;
 use crate::title;
 
+/// What `commit_draft` did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Commit {
+    /// Written; `true` when anything differed.
+    Written(bool),
+    /// The stored text changed since the run started: nothing written.
+    Conflict,
+}
+
 /// Where an action without a group shows.
 pub const DEFAULT_GROUP: &str = "Actions";
 
@@ -239,10 +248,24 @@ impl Store {
     }
 
     /// Writes what a run changed in one transaction: only the fields that differ from `before`, so a run that
-    /// only copied text leaves the draft (and its `modified_at`) alone.
-    pub fn commit_draft(&mut self, before: &WorkingDraft, after: &WorkingDraft) -> Result<bool> {
+    /// only copied text leaves the draft (and its `modified_at`) alone. A run that changed the text commits only
+    /// if the stored text is still what it started from: autosave keeps working while steps run, and a newer
+    /// save must not be overwritten.
+    pub fn commit_draft(&mut self, before: &WorkingDraft, after: &WorkingDraft) -> Result<Commit> {
         let now = self.now();
         let tx = self.conn.transaction()?;
+        if after.content != before.content {
+            let stored: Option<String> = tx
+                .query_row(
+                    "SELECT content FROM drafts WHERE id = ?1 AND deleted_at IS NULL",
+                    params![after.id],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if stored.is_some_and(|s| s != before.content) {
+                return Ok(Commit::Conflict);
+            }
+        }
         let mut changed = false;
         if after.content != before.content {
             tx.execute(
@@ -283,7 +306,7 @@ impl Store {
             tx.execute("UPDATE drafts SET modified_at = ?2 WHERE id = ?1", params![after.id, now])?;
         }
         tx.commit()?;
-        Ok(changed)
+        Ok(Commit::Written(changed))
     }
 
     /// The draft an `openDraft` step or `petrel://open` link names; created (titled) if asked and missing.

@@ -1321,6 +1321,16 @@ impl Store {
         Ok(n == 1)
     }
 
+    /// Keeps text that is not the draft's own as one of its versions (an action's result that could not be
+    /// committed).
+    pub fn add_version(&self, id: i64, content: &str, reason: &str, now: i64) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO versions (uuid, draft_id, content, reason, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![uuid::Uuid::new_v4().to_string(), id, content, reason, now],
+        )?;
+        Ok(())
+    }
+
     pub fn versions(&self, id: i64) -> Result<Vec<Version>> {
         let mut stmt = self.conn.prepare_cached(
             "SELECT id, uuid, reason, created_at, length(content) FROM versions \

@@ -31,6 +31,8 @@ run(action, draft, source):
         Ok(Continue) → next
         Ok(Stop)     → break           // a script called context.cancel() or a Prompt was dismissed
         Err(e)       → record run(status=failed, step=i, message=e); host.error(step name, e); return Failed
+  if ctx.draft.content changed and the stored content is no longer what the run started from
+     → versions.insert(ctx.draft.content, reason = "action_conflict:" + action.uuid); record run(status=conflict); return Conflict
   commit ctx.draft changes (content/tags/flag/folder) in one transaction
   apply after_success and add_tags
   record run(status=ok)
@@ -42,8 +44,14 @@ Rules:
 - The draft in the store is **not touched until the run finishes**. Steps edit `ctx.draft`. A failure leaves the
   stored draft as it was before the run (steps with external effects — a file written, a command run — have
   happened; the log says which). This is why the version is taken first and why the UI shows "step 3 of 5 failed".
+- **A run never overwrites a newer save.** The editor is read-only while a run on its draft is going, but the
+  text can still be saved between `prepare` and `finish` (a save already queued, another window). Then the stored
+  text wins, nothing else is applied, and the action's text is kept as an `action_conflict` version.
+- After a run the editor shows the committed result as it is; it never saves the text it held before the run
+  over it (the save controller's `discard`, `src/editor/autosave.ts`).
 - `Stop` is a clean early exit: nothing is written, no error is shown, `after_success` is **not** applied.
-- Steps run on a core worker thread. The UI shows a running state after 150 ms and lets `Esc` cancel; cancel
+- Steps run on a core worker thread. The editor stops taking keys at once; the UI shows a running state after
+  150 ms and lets `Esc` cancel; cancel
   interrupts a script at the next instruction, a shell command with SIGTERM/taskkill, an HTTP request by dropping it.
 - Default time limit per run: 60 s; per script step 10 s; per command 30 s. All three are action-level settings.
 - Every run gets a row in `action_runs`. `g l` in the UI shows the log; `petrel log` prints it.
@@ -192,8 +200,8 @@ A step may set `shell: sh | bash | zsh | fish | $SHELL | powershell | cmd | none
 ### Versions: age-tiered, no hard cap
 
 Drafts are small; the cost of history is finding the right version, not disk. Keep every `edit` snapshot from the
-last hour, one per hour for 24 hours, one per day for 30 days, one per week after that. `before_action` and
-`restore` versions are kept 90 days then follow the weekly tier. Thinning happens in `sweep()` (start-up and daily),
+last hour, one per hour for 24 hours, one per day for 30 days, one per week after that. `before_action`,
+`action_conflict` and `restore` versions are kept 90 days then follow the weekly tier. Thinning happens in `sweep()` (start-up and daily),
 **never on the save path**, so autosave stays a single UPDATE plus at most one INSERT. Trashing a draft keeps its
 versions until the tombstone; "Empty trash" removes them. A setting can shorten every tier; none can disable the
 hour tier.

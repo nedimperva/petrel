@@ -1,10 +1,10 @@
 import { createSignal, For, lazy, onCleanup, onMount, Show } from "solid-js";
-import { api, type Action, type AppInfo, type Draft, type HostRequest, type RunLogEntry, type RunReport, type TagCount, type UndoToken } from "./api";
+import { api, type Action, type AppInfo, type Draft, type Folder, type HostRequest, type RunLogEntry, type RunReport, type TagCount, type UndoToken } from "./api";
 import ActionList, { firstAction, type ActionListHandle } from "./actions/ActionList";
 import type { LogHandle } from "./actions/ActionLog";
 import HostDialog from "./actions/HostDialog";
 import { fromEvent, isChord, same } from "./actions/shortcut";
-import { countWords, createAutosave, type SaveState } from "./editor/autosave";
+import { countWords, createAutosave, createCloser, type SaveState } from "./editor/autosave";
 import { createEditor, type EditorHandle } from "./editor/editor";
 import DraftList, { type ListHandle } from "./list/DraftList";
 
@@ -18,7 +18,7 @@ export const NEW_AFTER_AWAY_MS = 10 * 60 * 1000;
 /** How long a toast stays in the strip. */
 const TOAST_MS = 5000;
 
-/** A run shows as running (and the editor stops taking keys) only after this long; most runs are done by then. */
+/** A run shows as running only after this long; most runs are done by then. The editor stops taking keys at once. */
 const RUNNING_AFTER_MS = 150;
 
 const ACTIONS_KEY = "petrel.actions.visible";
@@ -68,8 +68,14 @@ export default function App() {
   let awaySince: number | null = null;
   let gPending = false;
 
-  const autosave = createAutosave({ editor: () => editor, draft, setDraft, setSave });
-  const flushNow = autosave.flushNow;
+  const autosave = createAutosave({ store: () => api, editor: () => editor, draft, setDraft, setSave });
+  const close = createCloser({
+    autosave,
+    text: () => editor?.text() ?? "",
+    rescue: async (text) => (await api).rescueText(text),
+    close: async () => (await api).closeWindow(),
+    say,
+  });
 
   function countLater() {
     window.clearTimeout(wordsTimer);
@@ -81,27 +87,40 @@ export default function App() {
     countLater();
   }
 
-  async function newDraft() {
-    await flushNow();
-    setDraft(null);
-    setListOpen(false);
-    editor?.load("", 0);
-    setSave("saved");
-    setWords(0);
+  /** Saves what is typed. False, said in the strip, when it can't be: the text stays in the editor (saving keeps
+   * retrying), so nothing may replace it. */
+  async function saved(): Promise<boolean> {
+    if (await autosave.flush()) return true;
+    say(`Not saved: ${autosave.error() ?? "unknown error"}. The text stays here until it is.`);
+    return false;
   }
 
-  async function openDraft(id: number) {
-    await flushNow();
-    try {
-      const d = await (await api).openDraft(id);
-      setDraft(d);
-      setListOpen(false);
-      editor?.load(d.content, d.cursor);
-      setSave("saved");
-      setWords(countWords(d.content));
-    } catch (e) {
-      say(`Cannot open: ${e}`);
+  /** Shows a draft without saving the editor's text; callers have saved it, or must not (after an action). */
+  function show(d: Draft | null) {
+    autosave.load(d);
+    setListOpen(false);
+    setWords(d ? countWords(d.content) : 0);
+  }
+
+  /** Saves, then shows what `next` loads. Nothing is awaited between the last save and the switch, so keys typed
+   * while the next draft loads are saved first rather than dropped. */
+  async function leaveFor(next: () => Promise<Draft | null>) {
+    for (let round = 0; round < 3; round++) {
+      if (!(await saved())) return;
+      let d: Draft | null;
+      try {
+        d = await next();
+      } catch (e) {
+        return say(`Cannot open: ${e}`);
+      }
+      if (!autosave.dirty()) return show(d);
     }
+  }
+
+  const newDraft = () => leaveFor(async () => null);
+
+  async function openDraft(id: number) {
+    await leaveFor(async () => (await api).openDraft(id));
   }
 
   function say(text: string, undo = false, log = false) {
@@ -144,7 +163,7 @@ export default function App() {
 
   /** Archive or trash the draft in the editor, then start a new one (Drafts' habit: the next thing is new). */
   async function moveCurrent(folder: "archive" | "trash") {
-    await flushNow();
+    if (!(await saved())) return;
     const d = draft();
     if (!d) return;
     const label = folder === "archive" ? "Archived" : "Trashed";
@@ -158,7 +177,7 @@ export default function App() {
   }
 
   async function flagCurrent() {
-    await flushNow();
+    if (!(await saved())) return;
     const d = draft();
     if (!d) return;
     const flagged = !d.flagged;
@@ -168,7 +187,7 @@ export default function App() {
   }
 
   async function startTagging() {
-    await flushNow();
+    if (!(await saved())) return;
     if (!draft()) {
       say("Type something first: an empty draft has nothing to tag.");
       return;
@@ -203,7 +222,7 @@ export default function App() {
       setListOpen(false);
       editor?.view.focus();
     } else {
-      flushNow();
+      void autosave.flush();
       setLogOpen(false);
       setListOpen(true);
     }
@@ -259,56 +278,53 @@ export default function App() {
       say(`${running()!.name} is still running. Esc stops it.`);
       return;
     }
-    await flushNow();
-    const id = draftId ?? draft()?.id;
-    if (id === undefined) {
-      say("Type something first: an action needs a draft.");
-      return;
-    }
-    const onEditor = id === draft()?.id;
+    const onEditor = draftId === undefined || draftId === draft()?.id;
+    const folder = draft()?.folder ?? "inbox";
     setRunning({ name: a.name, shown: false });
-    const slow = window.setTimeout(() => {
-      setRunning((r) => r && { ...r, shown: true });
-      if (onEditor) editor?.setReadOnly(true);
-    }, RUNNING_AFTER_MS);
-    let report: RunReport | null = null;
+    // From here until the result is shown, a key typed would be overwritten by the result or would overwrite it.
+    if (onEditor) editor?.setReadOnly(true);
+    const slow = window.setTimeout(() => setRunning((r) => r && { ...r, shown: true }), RUNNING_AFTER_MS);
     try {
-      report = await (await api).runAction(a.uuid, id, onEditor && editor ? editor.selection() : null, source);
+      if (!(await saved())) return;
+      const id = draftId ?? draft()?.id;
+      if (id === undefined) return say("Type something first: an action needs a draft.");
+      const report = await (await api).runAction(a.uuid, id, onEditor && editor ? editor.selection() : null, source);
+      await afterRun(report, onEditor, folder);
     } catch (e) {
       say(`${a.name}: ${String(e).replace(/^Error: /, "")}`);
     } finally {
       window.clearTimeout(slow);
       editor?.setReadOnly(false);
       setRunning(null);
+      if (logOpen()) actionLog?.reload();
     }
-    if (report) await afterRun(report, onEditor);
-    if (logOpen()) actionLog?.reload();
   }
 
-  async function afterRun(r: RunReport, onEditor: boolean) {
+  async function afterRun(r: RunReport, onEditor: boolean, folder: Folder) {
     const o = r.outcome;
     if (o.status === "failed") {
       say(`${r.action}: failed at step ${o.step}: ${o.message}`, false, true);
       return;
     }
     if (o.status === "cancelled") return say(`${r.action}: cancelled.`);
+    if (o.status === "conflict") return say(`${r.action}: not applied, ${o.message}.`, false, true);
     // Stopped is a clean exit (a dismissed prompt): nothing to say.
     if (o.status === "stopped") return;
     const unknown = r.unknownTags.length ? ` Unknown tags left as written: ${r.unknownTags.join(", ")}.` : "";
     const last = r.log.length ? ` ${r.log[r.log.length - 1]}` : "";
     say(`${r.action}: done.${last}${unknown}`, false, !!unknown);
     list?.reload();
-    if (r.openDraft !== null) return openDraft(r.openDraft);
-    if (!onEditor) return;
+    if (!onEditor) return r.openDraft !== null ? openDraft(r.openDraft) : undefined;
+    // The editor still holds the text the run started from (saved, and read-only since), while the stored draft
+    // may now be the action's result: show what is stored, never save the old text over it.
+    if (autosave.dirty()) return;
+    if (r.openDraft !== null) return show(await (await api).openDraft(r.openDraft));
     const fresh = await (await api).openDraft(r.draftId);
     // Drafts' habit: a draft the action filed away makes room for the next one.
-    if (r.newDraft || fresh.folder !== draft()?.folder) return newDraft();
-    setDraft(fresh);
-    if (r.changed) {
-      editor?.load(fresh.content, r.selection.head);
-      editor?.select(r.selection.anchor, r.selection.head);
-      countLater();
-    }
+    if (r.newDraft || fresh.folder !== folder) return show(null);
+    if (!r.changed) return setDraft(fresh);
+    show({ ...fresh, cursor: r.selection.head });
+    editor?.select(r.selection.anchor, r.selection.head);
   }
 
   async function runAgain(e: RunLogEntry) {
@@ -390,7 +406,7 @@ export default function App() {
   function away(hidden: boolean) {
     if (hidden) {
       awaySince ??= Date.now();
-      flushNow();
+      void autosave.flush();
       return;
     }
     const since = awaySince;
@@ -408,9 +424,17 @@ export default function App() {
     setInfo(await a.appInfo());
     window.addEventListener("blur", () => away(true));
     window.addEventListener("focus", () => away(false));
-    window.addEventListener("beforeunload", flushNow);
+    window.addEventListener("beforeunload", () => void autosave.flush());
     document.addEventListener("visibilitychange", () => away(document.hidden));
     window.addEventListener("keydown", onKey, true);
+    if ("__TAURI_INTERNALS__" in window) {
+      const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+      // Closing waits for the save: `beforeunload` can't wait for one.
+      await getCurrentWebviewWindow().onCloseRequested((e) => {
+        e.preventDefault();
+        void close();
+      });
+    }
     await a.listenHost({
       request: (r) => setRequests((q) => [...q, r]),
       closed: (id) => setRequests((q) => q.filter((x) => x.id !== id)),

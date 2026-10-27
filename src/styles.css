@@ -536,6 +536,9 @@ button.primary kbd {
 .status.s-failed {
   color: var(--danger);
 }
+.status.s-conflict {
+  color: var(--warn);
+}
 .tabs .meta {
   font-size: var(--t-sm);
   color: var(--fg-2);

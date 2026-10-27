@@ -58,6 +58,32 @@ pub fn save_draft(state: State<AppState>, id: i64, content: String, cursor: i64)
     with(&state, |s| s.save(id, &content, cursor))
 }
 
+/// Remembers where the cursor was in a draft whose text is already saved; not an edit.
+#[tauri::command]
+pub fn save_cursor(state: State<AppState>, id: i64, cursor: i64) -> R<()> {
+    with(&state, |s| s.save_cursor(id, cursor))
+}
+
+/// The last way out when the database will not take a save: the text goes to a file next to it
+/// (`rescued/unsaved-<ms>.md`), outside SQLite, so a window can close without losing it. Returns the file's path.
+#[tauri::command]
+pub fn rescue_text(state: State<AppState>, text: String) -> R<String> {
+    let dir = state.db_path.parent().map(|d| d.join("rescued")).ok_or("no data folder")?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis());
+    let path = dir.join(format!("unsaved-{ms}.md"));
+    std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))?;
+    log::warn!("rescued unsaved text to {}", path.display());
+    Ok(path.display().to_string())
+}
+
+/// Closes the calling window once its text is saved; the window's own close button is intercepted so it can't
+/// close first.
+#[tauri::command]
+pub fn close_window(window: tauri::WebviewWindow) {
+    let _ = window.destroy();
+}
+
 #[tauri::command]
 pub fn list_drafts(state: State<AppState>, query: ListQuery) -> R<ListPage> {
     with(&state, |s| s.list(&query))
