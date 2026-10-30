@@ -21,6 +21,7 @@ const STATUS: Record<RunLogEntry["status"], string> = {
   stopped: "stopped",
   cancelled: "cancelled",
   failed: "failed",
+  conflict: "not applied",
 };
 
 export default function ActionLog(props: Props) {
@@ -102,6 +103,10 @@ export default function ActionLog(props: Props) {
                 {r.draftTitle ?? "(no draft)"}
                 <Show when={r.status === "failed"}>
                   {" · "}step {r.step}: {r.message}
+                </Show>
+                <Show when={r.status === "conflict"}>
+                  {" · "}
+                  {r.message}
                 </Show>
                 <Show when={r.status === "ok" && r.message}>
                   {" · "}

@@ -130,7 +130,9 @@ export type RunOutcome =
   | { status: "ok" }
   | { status: "stopped" }
   | { status: "cancelled" }
-  | { status: "failed"; step: number; message: string };
+  | { status: "failed"; step: number; message: string }
+  /** The draft was saved while the steps ran: nothing committed, the action's text kept as a version. */
+  | { status: "conflict"; message: string };
 
 export interface RunReport {
   runId: number;
@@ -155,7 +157,7 @@ export interface RunLogEntry {
   draftTitle: string | null;
   startedAt: number;
   endedAt: number | null;
-  status: "ok" | "stopped" | "cancelled" | "failed";
+  status: RunOutcome["status"];
   step: number | null;
   message: string;
   source: string;
@@ -200,6 +202,12 @@ export interface Api {
   /** The draft as `openDraft` returns it, without marking it accessed (the list's preview). */
   peekDraft(id: number): Promise<Draft>;
   saveDraft(id: number, content: string, cursor: number): Promise<boolean>;
+  /** The cursor of a draft whose text is saved; not an edit. */
+  saveCursor(id: number, cursor: number): Promise<void>;
+  /** Writes text the database would not take to a file next to it. Returns the file's path. */
+  rescueText(text: string): Promise<string>;
+  /** Closes this window (its close button is intercepted until the text is saved). */
+  closeWindow(): Promise<void>;
   listDrafts(query: ListQuery): Promise<ListPage>;
   /** The search box: free words plus `tag:x`, `-tag:x`, `is:flagged`, `in:archive`, `"a phrase"`. */
   searchDrafts(query: string, limit: number): Promise<SearchHit[]>;
@@ -247,6 +255,9 @@ async function tauriApi(): Promise<Api> {
     openDraft: (id) => invoke("open_draft", { id }),
     peekDraft: (id) => invoke("peek_draft", { id }),
     saveDraft: (id, content, cursor) => invoke("save_draft", { id, content, cursor }),
+    saveCursor: (id, cursor) => invoke("save_cursor", { id, cursor }),
+    rescueText: (text) => invoke("rescue_text", { text }),
+    closeWindow: () => invoke("close_window"),
     listDrafts: (query) => invoke("list_drafts", { query }),
     searchDrafts: (query, limit) => invoke("search_drafts", { query, limit }),
     setTags: (id, tags) => invoke("set_tags", { id, tags }),
@@ -386,6 +397,15 @@ function fakeApi(): Api {
       Object.assign(d, { content, cursor, title: title(content), modifiedAt: now() });
       return true;
     },
+    saveCursor: async (id, cursor) => {
+      const d = drafts.get(id);
+      if (d) d.cursor = cursor;
+    },
+    rescueText: async (text) => {
+      console.warn("rescued:", text);
+      return "(the console, in the browser)";
+    },
+    closeWindow: async () => location.reload(),
     // The fake lists without paging and searches by substring; the real rules live in the engine's tests.
     listDrafts: async (q) => {
       const folders: Folder[] = q.folder === null ? ["inbox", "archive"] : [q.folder ?? "inbox"];

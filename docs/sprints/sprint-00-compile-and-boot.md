@@ -50,7 +50,7 @@ Package number is a stable ID, not a delivery week. [PLAN.md](../PLAN.md) define
 - [x] `tokens.css` copied from Tern; dark/light from the system.
 - [x] CodeMirror 6 editor with the Markdown language, soft wrap, placeholder. Measure the bundle (`npm run build`
       prints gzip sizes); record it in Results.
-- [x] Autosave: debounce 300 ms, flush on blur, on window close and on `visibilitychange`; the status strip
+- [x] Autosave: debounce 300 ms (since the review fix, 2026-10-27: at most 300 ms after the first unsaved key, so steady typing saves too), flush on blur, on window close and on `visibilitychange`; the status strip
       shows saved/saving. Built; the UI was tried against the fake store in `npm run dev` only (the agent's sandbox
       has no display). **Kill test:** `scripts/kill-test.sh` is written; the owner runs it on Omarchy (acceptance).
 - [x] Without Tauri (`npm run dev`), the UI runs against a fake store in memory with 50 drafts.

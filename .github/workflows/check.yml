@@ -46,6 +46,10 @@ jobs:
           npm ci
           npm run build
 
+      # The save controller under Node with a fake store and fake timers.
+      - name: Frontend tests
+        run: npm test
+
       - name: rustfmt
         if: runner.os == 'Linux'
         run: cargo fmt --all --check

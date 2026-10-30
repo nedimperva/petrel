@@ -122,7 +122,7 @@ signal update. `store_bench` fails CI on a missed target (with a slack factor on
 |---|---|
 | Packaged cold start to a focused, empty editor | < 300 ms; record the measured number, not `tauri dev` |
 | Capture window from the tray/hotkey while running | < 100 ms to first keystroke |
-| Autosave write (debounced 300 ms, immediate on blur/close) | < 2 ms store time at 50k drafts |
+| Autosave write (at most 300 ms after the first unsaved key, typing or not; immediate on blur/close) | < 2 ms store time at 50k drafts |
 | One list page (keyset paging) | < 1 ms |
 | FTS search across 50k drafts | < 10 ms engine; IPC and render reported separately |
 | Open a draft (content + tags + versions count) | < 5 ms |

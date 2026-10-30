@@ -78,7 +78,9 @@ Editor type: `--t-rd` by default (14/21), a setting for 13–18 px, and a monosp
   `--fg-0` 600 weight, no font-size changes (the first line is the title; it may or may not be a heading).
 - Placeholder in an empty new draft: "Type. It's saved. Act on it later." in `--fg-2`.
 - Autosave indicator in the status strip only: "saved" (`--fg-2`), "saving…" after 300 ms unsaved, "not saved —
-  retrying" in `--warn` on an I/O error (never a dialog).
+  retrying" in `--warn` on an I/O error (never a dialog). While a save fails, nothing replaces the text: opening
+  another draft, `Ctrl N`, archiving, running an action and closing the window all stop and say "Not saved". Closing
+  a second time within 10 s writes the text to `<data dir>/rescued/unsaved-<ms>.md` and closes.
 - Focus mode (`Ctrl Shift F`): hides both side columns and the strip, dims everything but the current paragraph.
 - Typewriter scrolling (setting). Link mode (`Ctrl Shift L`): clicks follow links instead of placing the cursor.
 - Selection and cursor survive switching drafts (stored `cursor`).

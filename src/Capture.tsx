@@ -6,7 +6,7 @@ import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { api, type Action, type Draft, type Folder, type HostRequest, type TagCount } from "./api";
 import { firstAction } from "./actions/ActionList";
 import HostDialog from "./actions/HostDialog";
-import { createAutosave, type SaveState } from "./editor/autosave";
+import { createAutosave, createCloser, type SaveState } from "./editor/autosave";
 import { createEditor, type EditorHandle } from "./editor/editor";
 
 export default function Capture() {
@@ -23,13 +23,12 @@ export default function Capture() {
   const [requests, setRequests] = createSignal<HostRequest[]>([]);
   const [running, setRunning] = createSignal<string | null>(null);
   const [note, setNote] = createSignal<string | null>(null);
-  let closing = false;
 
   // Nothing until the first save: an empty window has nothing to report.
   const saveLabel = () =>
     ({ saved: draft() ? "saved" : "", dirty: "…", saving: "saving…", error: "not saved — retrying" })[save()];
 
-  const autosave = createAutosave({ editor: () => editor, draft, setDraft, setSave });
+  const autosave = createAutosave({ store: () => api, editor: () => editor, draft, setDraft, setSave });
   const defaultAction = () => firstAction(actions());
 
   /** Folder and tags are chosen before the draft may exist, so they are applied when it is done. */
@@ -41,36 +40,40 @@ export default function Capture() {
     if (folder() !== "inbox") await a.moveDrafts([d.id], folder());
   }
 
-  async function finish() {
-    if (closing) return;
-    closing = true;
-    try {
-      await autosave.flushNow();
-      await applyChoices();
-    } catch (e) {
-      // The text is saved by now or retrying; a lost tag is not worth keeping the window open for.
-      console.error(e);
-    }
-    await (await api).closeCapture();
-  }
+  /** `Esc` and the close button: the window closes only once the text is saved (or, closing twice, in a file). */
+  const finish = createCloser({
+    autosave,
+    text: () => editor?.text() ?? "",
+    rescue: async (text) => (await api).rescueText(text),
+    close: async () => {
+      try {
+        await applyChoices();
+      } catch (e) {
+        // The text is saved; a lost tag is not worth keeping the window open for.
+        console.error(e);
+      }
+      await (await api).closeCapture();
+    },
+    say: setNote,
+  });
 
   async function runDefault() {
     const a = defaultAction();
-    await autosave.flushNow();
-    const d = draft();
     // Nothing typed, or nothing to run: Ctrl Enter is just "done".
-    if (!a || !d) return finish();
-    await applyChoices();
+    if (!a || (!draft() && !editor?.text())) return finish();
     setRunning(a.name);
     // Typing during the run would be lost: the action may rewrite the draft.
     editor?.setReadOnly(true);
     try {
+      if (!(await autosave.flush())) return setNote(`Not saved: ${autosave.error() ?? "unknown error"}.`);
+      const d = draft()!;
+      await applyChoices();
       const r = await (await api).runAction(a.uuid, d.id, editor?.selection() ?? null, "shortcut");
       const o = r.outcome;
       if (o.status === "failed") return setNote(`${a.name} failed at step ${o.step}: ${o.message}`);
       if (o.status === "cancelled") return setNote(`${a.name}: cancelled.`);
+      if (o.status === "conflict") return setNote(`${a.name}: not applied, ${o.message}.`);
       // Saved before the run, and the action may have changed the text since: close without saving again.
-      closing = true;
       await (await api).closeCapture();
     } catch (e) {
       setNote(`${a.name}: ${String(e).replace(/^Error: /, "")}`);
@@ -116,13 +119,13 @@ export default function Capture() {
     const a = await api;
     await a.showWindow();
     window.addEventListener("keydown", onKey, true);
-    window.addEventListener("beforeunload", () => void autosave.flushNow());
+    window.addEventListener("beforeunload", () => void autosave.flush());
     if ("__TAURI_INTERNALS__" in window) {
       const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
       // The close button saves like Esc does.
       await getCurrentWebviewWindow().onCloseRequested((e) => {
         e.preventDefault();
-        finish();
+        void finish();
       });
     }
     await a.listenHost({

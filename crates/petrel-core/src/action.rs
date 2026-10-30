@@ -19,6 +19,7 @@ use crate::host::{
     CancelToken, Command, Host, MessageKind, PromptField, PromptSpec, ScopeItem, Shell, WriteMode,
 };
 use crate::store::{Folder, Store};
+use crate::store_actions::Commit;
 use crate::template::{self, Encoding, TagSource};
 
 /// The default limits (actions.md "Run algorithm"); per-action settings later.
@@ -358,6 +359,11 @@ pub enum RunOutcome {
         step: usize,
         message: String,
     },
+    /// The draft's text was saved while the steps ran, so committing would overwrite it. Nothing is written; the
+    /// action's text is kept as a version instead.
+    Conflict {
+        message: String,
+    },
 }
 
 impl RunOutcome {
@@ -367,6 +373,7 @@ impl RunOutcome {
             RunOutcome::Stopped => "stopped",
             RunOutcome::Cancelled => "cancelled",
             RunOutcome::Failed { .. } => "failed",
+            RunOutcome::Conflict { .. } => "conflict",
         }
     }
 }
@@ -519,7 +526,7 @@ pub fn execute(
 }
 
 /// Phase three, under the store lock: commit (only on success), after-success, trust, the log row.
-pub fn finish(store: &mut Store, e: Executed) -> Result<RunReport> {
+pub fn finish(store: &mut Store, mut e: Executed) -> Result<RunReport> {
     for (uuid, hash) in &e.trusted {
         store.trust_action(uuid, hash)?;
     }
@@ -535,14 +542,30 @@ pub fn finish(store: &mut Store, e: Executed) -> Result<RunReport> {
             AfterSuccess::Nothing => {}
         }
         add_tags(&mut draft.tags, &e.action.add_tags);
-        store.commit_draft(&e.before, &draft)?;
-        changed = draft.content != e.before.content;
-        if let Some(t) = &e.open {
-            open_draft = store.resolve_open(t)?;
+        match store.commit_draft(&e.before, &draft)? {
+            Commit::Written(_) => {
+                changed = draft.content != e.before.content;
+                if let Some(t) = &e.open {
+                    open_draft = store.resolve_open(t)?;
+                }
+            }
+            Commit::Conflict => {
+                let now = store.clock_now();
+                store.add_version(
+                    draft.id,
+                    &draft.content,
+                    &format!("action_conflict:{}", e.action.uuid),
+                    now,
+                )?;
+                new_draft = false;
+                e.outcome = RunOutcome::Conflict {
+                    message: "the draft was edited while it ran; its result is kept as a version".into(),
+                };
+            }
         }
     }
     let message = match &e.outcome {
-        RunOutcome::Failed { message, .. } => message.clone(),
+        RunOutcome::Failed { message, .. } | RunOutcome::Conflict { message } => message.clone(),
         _ => tail(&e.log.join("\n"), LOG_MAX),
     };
     let step = match &e.outcome {
@@ -1229,6 +1252,48 @@ mod tests {
         assert!(matches!(h.calls.last(), Some(Call::Message(MessageKind::Error, m)) if m.contains("step 3")));
         let log = s.action_log(1).unwrap();
         assert_eq!((log[0].status.as_str(), log[0].step), ("failed", Some(3)));
+        drop(s);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Review finding D: a save between `prepare` and `finish` (autosave keeps working while steps run) was
+    /// overwritten by the action's text, and was not in any version either.
+    #[test]
+    fn a_save_during_the_run_is_never_overwritten() {
+        let (mut s, dir, id) = setup();
+        save(
+            &mut s,
+            Action {
+                after_success: AfterSuccess::Archive,
+                ..act("Shout", json!([{ "type": "insertText", "text": "SHOUT", "position": "replaceAll" }]))
+            },
+        );
+        let p = prepare(&s, "Shout", id, None, Source::Ui).unwrap();
+        s.save(id, "newer typing", 0).unwrap();
+        let e = execute(p, &mut RecordingHost::default(), &s, &Paths::for_store(&s), &CancelToken::default());
+        let r = finish(&mut s, e).unwrap();
+        assert!(matches!(r.outcome, RunOutcome::Conflict { .. }), "{:?}", r.outcome);
+        assert!(!r.changed && !r.new_draft);
+        let d = s.draft(id).unwrap();
+        assert_eq!(
+            (d.content.as_str(), d.folder),
+            ("newer typing", Folder::Inbox),
+            "the save wins; no archive"
+        );
+        let kept = s.versions(id).unwrap();
+        let v =
+            kept.iter().find(|v| v.reason.starts_with("action_conflict:")).expect("the result is a version");
+        assert_eq!(s.version_content(v.id).unwrap(), "SHOUT");
+        assert_eq!(s.action_log(1).unwrap()[0].status, "conflict");
+
+        // Folder, flag and tag changes don't touch the text, so they still apply.
+        save(&mut s, act("Flag", json!([{ "type": "setFlag", "flagged": true }])));
+        let p = prepare(&s, "Flag", id, None, Source::Ui).unwrap();
+        s.save(id, "newer still", 0).unwrap();
+        let e = execute(p, &mut RecordingHost::default(), &s, &Paths::for_store(&s), &CancelToken::default());
+        assert_eq!(finish(&mut s, e).unwrap().outcome, RunOutcome::Ok);
+        let d = s.draft(id).unwrap();
+        assert_eq!((d.content.as_str(), d.flagged), ("newer still", true));
         drop(s);
         std::fs::remove_dir_all(dir).unwrap();
     }

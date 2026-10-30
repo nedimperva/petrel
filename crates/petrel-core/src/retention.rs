@@ -113,7 +113,9 @@ pub fn versions_to_thin(versions: &[VersionAge], now: i64, r: &Retention) -> Vec
             draft = Some(v.draft_id);
             last_bucket = None;
         }
-        let protected = v.reason.starts_with("before_action") || v.reason == "restore";
+        let protected = v.reason.starts_with("before_action")
+            || v.reason.starts_with("action_conflict")
+            || v.reason == "restore";
         if v.created_at >= all_until || (protected && v.created_at >= protected_until) {
             continue;
         }
@@ -170,7 +172,7 @@ mod tests {
     }
 
     #[test]
-    fn before_action_and_restore_are_kept_for_90_days_first() {
+    fn before_action_conflict_and_restore_are_kept_for_90_days_first() {
         let vs = vec![
             v(1, "edit", 10 * DAY_MS),
             v(2, "before_action:abc", 10 * DAY_MS + 1000),
@@ -178,6 +180,7 @@ mod tests {
             v(4, "edit", 10 * DAY_MS + 3000),
             v(5, "before_action:old", 100 * DAY_MS),
             v(6, "edit", 100 * DAY_MS + 1000),
+            v(7, "action_conflict:abc", 10 * DAY_MS + 4000),
         ];
         assert_eq!(versions_to_thin(&vs, NOW, &Retention::default()), vec![4, 6]);
     }
