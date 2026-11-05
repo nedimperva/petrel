@@ -2,6 +2,7 @@
 
 mod cli;
 mod commands;
+mod desktop;
 mod host;
 mod tray;
 
@@ -14,8 +15,9 @@ use petrel_core::Store;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 pub struct AppState {
-    /// Launched as `petrel --capture`: the main window stays hidden until something asks for it.
-    pub capture_launch: AtomicBool,
+    /// Launched as `petrel --capture`, or `--hidden` at login: the main window stays hidden until something asks
+    /// for it.
+    pub stay_hidden: AtomicBool,
     pub store: Mutex<Store>,
     pub db_path: PathBuf,
     /// Dialogs an action is waiting on.
@@ -27,6 +29,8 @@ pub struct AppState {
     pub tray: AtomicBool,
     /// Quit was chosen: windows are saving and closing, and the last one to go ends the process.
     pub quitting: AtomicBool,
+    /// The global capture hotkey (package 07).
+    pub hotkey: Mutex<desktop::Hotkey>,
 }
 
 /// The login shell's `PATH` is cached here and refreshed off the start path (actions.md "Shell").
@@ -210,11 +214,21 @@ fn main() {
             if wants_capture(&args) {
                 return open_capture(app);
             }
+            // Start at login while Petrel already runs: it is already where it should be.
+            if desktop::wants_hidden(&args) {
+                return;
+            }
             if wants_new(&args) {
                 return show_new_draft(app);
             }
             show_main(app);
         }))
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, shortcut, event| desktop::on_shortcut(app, shortcut, event.state))
+                .build(),
+        )
+        .plugin(tauri_plugin_autostart::Builder::new().arg(desktop::HIDDEN_ARG).build())
         .plugin(tauri_plugin_opener::init())
         // The folder picker in the action editor.
         .plugin(tauri_plugin_dialog::init())
@@ -233,9 +247,10 @@ fn main() {
             }
             system::use_path(store.setting(PATH_SETTING).ok().flatten());
             log::info!("Petrel {} · {}", env!("CARGO_PKG_VERSION"), path.display());
-            let capture = wants_capture(&std::env::args().collect::<Vec<_>>());
+            let args: Vec<String> = std::env::args().collect();
+            let capture = wants_capture(&args);
             app.manage(AppState {
-                capture_launch: AtomicBool::new(capture),
+                stay_hidden: AtomicBool::new(capture),
                 store: Mutex::new(store),
                 db_path: path,
                 broker: host::Broker::default(),
@@ -243,6 +258,7 @@ fn main() {
                 running: Mutex::new(None),
                 tray: AtomicBool::new(false),
                 quitting: AtomicBool::new(false),
+                hotkey: Mutex::new(desktop::Hotkey::default()),
             });
             // Without a tray (no StatusNotifier host on Linux, say), closing the window quits, as before.
             // The Linux tray loads libayatana-appindicator at run time and panics if it is missing.
@@ -253,6 +269,11 @@ fn main() {
                     "no tray icon (is libayatana-appindicator installed?); closing the window will quit"
                 ),
             }
+            if desktop::start_hidden(app.handle(), &args) {
+                app.state::<AppState>().stay_hidden.store(true, Ordering::SeqCst);
+                log::info!("started hidden in the tray");
+            }
+            desktop::init(app.handle());
             // Petrel can stay open for weeks; the Trash and version policies still apply, and the login PATH
             // may change.
             let handle = app.handle().clone();
@@ -292,6 +313,9 @@ fn main() {
             commands::show_window,
             commands::close_capture,
             commands::open_capture_window,
+            commands::desktop_settings,
+            commands::set_hotkey,
+            commands::set_autostart,
             commands::list_actions,
             commands::save_action,
             commands::delete_action,

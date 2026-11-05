@@ -36,9 +36,17 @@ Text reaches Petrel from anywhere on the desktop in one gesture, and Petrel give
       `src-tauri/src/tray.rs`: New draft, Capture, Show, Quit; left click shows the window (Windows). Closing the
       main window hides it; closing a capture window leaves Petrel in the tray. Quit asks each window to save and
       close (`petrel-quit`), the last one ends the process; Quit again exits at once. Without a tray (no
-      appindicator library on Linux) closing quits, as before. Not yet: Pause hotkey (no hotkey yet), the setting.
-- [ ] Autostart plugin; "start hidden".
-- [ ] Global shortcut plugin on X11/Windows; on Wayland the setting shows the compositor instructions.
+      appindicator library on Linux) closing quits, as before. "Pause hotkey" pauses the capture hotkey until
+      resumed or restart (shown only where Petrel owns the hotkey). Not yet: the close-behaviour setting (owner
+      2026-11-05: closing hides to the tray).
+- [x] Autostart plugin; "start hidden". `tauri-plugin-autostart` launches `petrel --hidden`, which keeps the main
+      window hidden when there is a tray (`src-tauri/src/desktop.rs`). A checkbox in Settings (`Ctrl ,`), off by
+      default. A debug build registers the debug binary; untick it after trying.
+- [x] Global shortcut plugin on X11/Windows; on Wayland the setting shows the compositor instructions.
+      `tauri-plugin-global-shortcut`, default `Ctrl+Alt+Space` (Ctrl+Alt is AltGr on Windows, and AltGr+letter
+      types characters on Croatian/Bosnian layouts), setting `capture.hotkey` (empty = off). Settings records a new
+      one; it is registered before the old one is dropped, so a taken key keeps the working one. Wayland =
+      `WAYLAND_DISPLAY` set: no registration, and Settings shows the Hyprland `bind` line.
 - [ ] `.desktop` actions: New draft, Capture. Hyprland `bind` and float rule in the README.
 - [ ] Notifications (tauri-plugin-notification) for action results when no window is visible; quiet by default.
 
@@ -57,6 +65,11 @@ Text reaches Petrel from anywhere on the desktop in one gesture, and Petrel give
   logs a warning at start if the two ever disagree.
 
 ## Log
+
+- 2026-11-05 — Capture hotkey, start at login, Settings dialog (`src/settings/Settings.tsx`, `Ctrl ,` or the
+  command bar). Under Xvfb with the debug build: `--hidden` started with no window, `Ctrl+Alt+Space` opened capture,
+  text typed there was saved on `Esc`, recording `Ctrl+Shift+F9` in Settings replaced the old key (the old one no
+  longer opened capture), and the checkbox wrote `~/.config/autostart/Petrel.desktop` with `--hidden`.
 
 - 2026-11-05 — Tray, close-to-tray, Quit, `--new`, `--new TEXT`, `--stdin --tag`, `--help`, `docs/cli.md`, capture
   window always on top (package 02). Booted the debug build under Xvfb on Linux: the tray builds, a second

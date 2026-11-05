@@ -26,6 +26,7 @@ Usage:
   petrel --new               open Petrel on a new, empty draft
   petrel --new TEXT          save TEXT as a new draft in the Inbox, no window
   petrel --stdin             save what is piped in as a new draft, no window
+  petrel --hidden            start in the tray, no window (start at login uses this)
   petrel --help              this text
 
 Options for --new TEXT and --stdin:

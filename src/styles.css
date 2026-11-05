@@ -1119,3 +1119,44 @@ iframe.preview {
   font-size: var(--t-sm);
   color: var(--fg-2);
 }
+
+/* ---- package 07: settings (Ctrl ,) ------------------------------------------------------------------------ */
+
+.dialog.settings section {
+  padding: var(--s-3) 0;
+  border-top: 1px solid var(--line);
+}
+.dialog.settings h3 {
+  margin: 0 0 var(--s-1);
+  font-size: var(--t-md);
+  color: var(--fg-0);
+}
+.dialog.settings .hint {
+  margin: var(--s-1) 0;
+  font-size: var(--t-sm);
+  color: var(--fg-2);
+}
+.dialog.settings .hint.warn {
+  color: var(--warn-fg);
+}
+.dialog.settings code.block {
+  display: block;
+  margin-top: var(--s-1);
+  padding: var(--s-1) var(--s-2);
+  font-family: var(--font-mono);
+  background: var(--bg-2);
+  border-radius: var(--r-sm);
+  color: var(--fg-0);
+}
+.setting-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+.setting-row .keys {
+  display: flex;
+  gap: var(--s-1);
+}
+.setting-row .grow {
+  flex: 1;
+}

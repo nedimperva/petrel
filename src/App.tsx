@@ -14,6 +14,7 @@ import type { Command } from "./palette/CommandBar";
 const ActionEditor = lazy(() => import("./actions/ActionEditor"));
 const ActionLog = lazy(() => import("./actions/ActionLog"));
 const CommandBar = lazy(() => import("./palette/CommandBar"));
+const Settings = lazy(() => import("./settings/Settings"));
 
 /** Coming back after this long away opens a new draft (package 02 "open to new draft"; a setting later). */
 export const NEW_AFTER_AWAY_MS = 10 * 60 * 1000;
@@ -57,6 +58,7 @@ export default function App() {
   /** Where the list opens next (the command bar picks a tab or a tag). */
   const [listStart, setListStart] = createSignal<{ tab?: Tab; tag?: string } | undefined>(undefined);
   const [paletteOpen, setPaletteOpen] = createSignal(false);
+  const [settingsOpen, setSettingsOpen] = createSignal(false);
   const [tagging, setTagging] = createSignal(false);
   const [allTags, setAllTags] = createSignal<TagCount[]>([]);
   const [toast, setToast] = createSignal<{ text: string; undo: boolean; log?: boolean } | null>(null);
@@ -268,6 +270,7 @@ export default function App() {
       { id: "actions", name: "Show or hide actions", keys: "Ctrl 2", run: toggleActions },
       { id: "new-action", name: "New action", keys: "Ctrl Shift A", run: () => editAction(null) },
       { id: "log", name: "Action log", run: openLog },
+      { id: "settings", name: "Settings: capture hotkey, start at login", keys: "Ctrl ,", run: () => setSettingsOpen(true) },
     ];
     if (inTauri) {
       list.splice(2, 0, { id: "capture", name: "Open the capture window", run: async () => (await api).openCapture() });
@@ -400,10 +403,11 @@ export default function App() {
 
   function onKey(e: KeyboardEvent) {
     // A dialog, the action editor or the command bar takes every key.
-    if (requests().length || editing() || paletteOpen()) return;
+    if (requests().length || editing() || paletteOpen() || settingsOpen()) return;
     const k = e.key.toLowerCase();
     const ctrl = e.ctrlKey || e.metaKey;
     if (ctrl && !e.shiftKey && !e.altKey && k === "k") return stop(e, openPalette);
+    if (ctrl && !e.shiftKey && !e.altKey && e.key === ",") return stop(e, () => setSettingsOpen(true));
     if (e.key === "Escape" && running()) return stop(e, async () => (await api).cancelRun());
     if (ctrl && e.shiftKey && !e.altKey && k === "a") {
       const inside = !!document.activeElement?.closest("aside.actions");
@@ -603,6 +607,14 @@ export default function App() {
           onDraft={openDraft}
           onTag={(tag) => openList({ tag })}
           onClose={closePalette}
+        />
+      </Show>
+      <Show when={settingsOpen()}>
+        <Settings
+          onClose={() => {
+            setSettingsOpen(false);
+            editor?.view.focus();
+          }}
         />
       </Show>
       <Show when={requests()[0]}>

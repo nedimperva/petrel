@@ -103,6 +103,10 @@ Petrel keeps running in the tray: closing the window hides it, and the tray menu
 Quit. On Linux the tray needs `libayatana-appindicator` and a tray host (Waybar's `tray` module on Omarchy); without
 one, closing the window quits as before. On Windows a left click on the icon shows the window.
 
+`Ctrl Alt Space` opens the capture window from any app on Windows and X11 (change it or turn it off in Settings,
+`Ctrl ,`; pause it from the tray). On Wayland apps can't grab keys, so bind `petrel --capture` in the compositor as
+above. Settings also has "Start at login", which starts Petrel hidden in the tray.
+
 Text from the command line goes straight to the Inbox without a window ([docs/cli.md](docs/cli.md)):
 
 ```

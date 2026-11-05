@@ -155,8 +155,8 @@ pub fn sweep(state: State<AppState>) -> R<SweepReport> {
 /// The window starts hidden and the UI shows it once it has rendered, so there is no white flash.
 #[tauri::command]
 pub fn show_window(state: State<AppState>, window: tauri::WebviewWindow) {
-    // `petrel --capture` as the first launch: the main window loads but stays hidden until asked for.
-    if window.label() == "main" && state.capture_launch.swap(false, Ordering::SeqCst) {
+    // `petrel --capture` or `--hidden` as the first launch: the main window loads but stays hidden until asked for.
+    if window.label() == "main" && state.stay_hidden.swap(false, Ordering::SeqCst) {
         return;
     }
     let _ = window.show();
@@ -183,6 +183,25 @@ pub fn close_capture(state: State<AppState>, app: tauri::AppHandle) {
 #[tauri::command]
 pub fn open_capture_window(app: tauri::AppHandle) {
     crate::open_capture(&app);
+}
+
+/// The settings page's Desktop section: the capture hotkey and start at login.
+#[tauri::command]
+pub fn desktop_settings(app: tauri::AppHandle) -> crate::desktop::DesktopSettings {
+    crate::desktop::settings(&app)
+}
+
+/// `None` or empty turns the hotkey off. Refused (and the old one kept) when the key is taken or malformed.
+#[tauri::command]
+pub fn set_hotkey(app: tauri::AppHandle, hotkey: Option<String>) -> R<crate::desktop::DesktopSettings> {
+    crate::desktop::set_hotkey(&app, hotkey).map_err(|e| format!("{e:#}"))?;
+    Ok(crate::desktop::settings(&app))
+}
+
+#[tauri::command]
+pub fn set_autostart(app: tauri::AppHandle, on: bool) -> R<crate::desktop::DesktopSettings> {
+    crate::desktop::set_autostart(&app, on).map_err(|e| format!("{e:#}"))?;
+    Ok(crate::desktop::settings(&app))
 }
 
 // ---- actions (package 03) -----------------------------------------------------------------------------------

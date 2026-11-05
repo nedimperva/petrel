@@ -9,6 +9,7 @@ line shows in a running Petrel's list the next time the list loads.
 | `petrel --capture` | Opens the capture window, or focuses it. |
 | `petrel --new` | Opens Petrel on a new, empty draft (the open one is saved first). |
 | `petrel --new TEXT…` | Saves `TEXT` as a new Inbox draft and exits. No window. The words are joined with spaces. |
+| `petrel --hidden` | Starts in the tray without a window (start at login uses it). With no tray it shows the window. |
 | `petrel --stdin` | Saves what is piped in as a new Inbox draft and exits. No window. |
 | `--tag NAME`, `-t NAME` | With `--new TEXT` or `--stdin`: tags the new draft. Repeat it, or separate names with commas. |
 | `--` | Everything after it is text, even if it starts with `-`. |

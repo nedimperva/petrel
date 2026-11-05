@@ -4,7 +4,7 @@
 use std::sync::atomic::Ordering;
 
 use anyhow::{Context, Result};
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Emitter, Manager};
 
@@ -14,8 +14,15 @@ pub fn build(app: &tauri::App) -> Result<()> {
     let new = MenuItem::with_id(app, "new", "New draft", true, None::<&str>)?;
     let capture = MenuItem::with_id(app, "capture", "Capture…", true, None::<&str>)?;
     let show = MenuItem::with_id(app, "show", "Show Petrel", true, None::<&str>)?;
+    let pause = CheckMenuItem::with_id(app, "pause", "Pause hotkey", true, false, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Petrel", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&new, &capture, &show, &PredefinedMenuItem::separator(app)?, &quit])?;
+    let sep = PredefinedMenuItem::separator(app)?;
+    let menu = Menu::with_items(app, &[&new, &capture, &show, &sep, &quit])?;
+    // Only where the app owns the hotkey; on Wayland the compositor does.
+    if crate::desktop::hotkey_supported() {
+        menu.insert(&pause, 4)?;
+    }
+    let pause_item = pause.clone();
     let icon = app.default_window_icon().cloned().context("no app icon for the tray")?;
     TrayIconBuilder::with_id("petrel")
         .icon(icon)
@@ -23,10 +30,14 @@ pub fn build(app: &tauri::App) -> Result<()> {
         .menu(&menu)
         // Left click shows the window (Windows); the menu is on the right button. Linux trays only have the menu.
         .show_menu_on_left_click(false)
-        .on_menu_event(|app, event| match event.id.as_ref() {
+        .on_menu_event(move |app, event| match event.id.as_ref() {
             "new" => crate::show_new_draft(app),
             "capture" => crate::open_capture(app),
             "show" => crate::show_main(app),
+            "pause" => {
+                let paused = crate::desktop::toggle_pause(app);
+                let _ = pause_item.set_checked(paused);
+            }
             "quit" => self::quit(app),
             _ => {}
         })

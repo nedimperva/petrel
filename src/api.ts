@@ -195,6 +195,22 @@ export interface HostEvents {
   message(kind: "info" | "warning", text: string): void;
 }
 
+/** The capture hotkey and start at login (package 07). */
+export interface DesktopSettings {
+  /** `Ctrl+Alt+Space`; null when off. */
+  hotkey: string | null;
+  hotkeyDefault: string;
+  /** Registered and not paused from the tray. */
+  hotkeyActive: boolean;
+  hotkeyPaused: boolean;
+  /** Why the hotkey could not be registered at start (taken by another app, say). */
+  hotkeyError: string | null;
+  /** False on Wayland: the compositor binds keys there. */
+  hotkeySupported: boolean;
+  autostart: boolean;
+  autostartError: string | null;
+}
+
 export interface Api {
   appInfo(): Promise<AppInfo>;
   newDraft(content: string): Promise<Draft>;
@@ -246,6 +262,10 @@ export interface Api {
   listenApp(events: { newDraft(): void; quit(): void }): Promise<void>;
   /** Opens the capture window, or focuses it. */
   openCapture(): Promise<void>;
+  desktopSettings(): Promise<DesktopSettings>;
+  /** null turns it off. Rejects, keeping the old one, when the key is taken or can't be a hotkey. */
+  setHotkey(hotkey: string | null): Promise<DesktopSettings>;
+  setAutostart(on: boolean): Promise<DesktopSettings>;
   /** A folder from the system picker, or null when cancelled. */
   pickFolder(): Promise<string | null>;
 }
@@ -296,6 +316,9 @@ async function tauriApi(): Promise<Api> {
       await win.listen("petrel-quit", () => events.quit());
     },
     openCapture: () => invoke("open_capture_window"),
+    desktopSettings: () => invoke("desktop_settings"),
+    setHotkey: (hotkey) => invoke("set_hotkey", { hotkey }),
+    setAutostart: (on) => invoke("set_autostart", { on }),
     listenHost: async (events) => {
       // This window's events only: a run's dialogs go to the window that started it.
       const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
@@ -502,6 +525,16 @@ function fakeApi(): Api {
 /** Actions without the engine: a few step types are acted out, the rest are logged. Enough to work on the list,
  *  the editor, the dialogs and the log in a browser. */
 function fakeActions(draft: (id: number) => Draft | undefined) {
+  const desktop: DesktopSettings = {
+    hotkey: "Ctrl+Alt+Space",
+    hotkeyDefault: "Ctrl+Alt+Space",
+    hotkeyActive: true,
+    hotkeyPaused: false,
+    hotkeyError: null,
+    hotkeySupported: true,
+    autostart: false,
+    autostartError: null,
+  };
   const base = { description: "", hidden: false, disabled: false, confirm: false, addTags: [], afterSuccess: "nothing" as const };
   const make = (name: string, icon: string, color: string, steps: Step[], more: Partial<Action> = {}): Action => ({
     ...base,
@@ -664,6 +697,16 @@ function fakeActions(draft: (id: number) => Draft | undefined) {
       events = e;
     },
     listenApp: async () => {},
+    desktopSettings: async () => ({ ...desktop }),
+    setHotkey: async (hotkey: string | null) => {
+      if (hotkey && !/(Ctrl|Alt|Shift|Super)\+/.test(hotkey)) throw new Error("a hotkey needs Ctrl, Alt or Shift");
+      Object.assign(desktop, { hotkey, hotkeyActive: !!hotkey, hotkeyError: null });
+      return { ...desktop };
+    },
+    setAutostart: async (on: boolean) => {
+      desktop.autostart = on;
+      return { ...desktop };
+    },
     openCapture: async () => {
       window.open("?capture", "_blank");
     },
