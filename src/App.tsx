@@ -7,6 +7,7 @@ import { fromEvent, isChord, same } from "./actions/shortcut";
 import { countWords, createAutosave, createCloser, type SaveState } from "./editor/autosave";
 import { createEditor, type EditorHandle } from "./editor/editor";
 import { openSearchPanel } from "@codemirror/search";
+import { applyEditorPrefs, awayThreshold, parsePrefs, prefs, setPrefs } from "./settings/prefs";
 import DraftList, { type ListHandle, type Tab } from "./list/DraftList";
 import type { Command } from "./palette/CommandBar";
 
@@ -16,8 +17,6 @@ const ActionLog = lazy(() => import("./actions/ActionLog"));
 const CommandBar = lazy(() => import("./palette/CommandBar"));
 const Settings = lazy(() => import("./settings/Settings"));
 
-/** Coming back after this long away opens a new draft (package 02 "open to new draft"; a setting later). */
-export const NEW_AFTER_AWAY_MS = 10 * 60 * 1000;
 
 /** How long a toast stays in the strip. */
 const TOAST_MS = 5000;
@@ -59,6 +58,8 @@ export default function App() {
   const [listStart, setListStart] = createSignal<{ tab?: Tab; tag?: string } | undefined>(undefined);
   const [paletteOpen, setPaletteOpen] = createSignal(false);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
+  /** Focus mode (`Ctrl Shift D`): the text alone, the paragraph being written in full colour. */
+  const [focusMode, setFocusMode] = createSignal(false);
   const [tagging, setTagging] = createSignal(false);
   const [allTags, setAllTags] = createSignal<TagCount[]>([]);
   const [toast, setToast] = createSignal<{ text: string; undo: boolean; log?: boolean } | null>(null);
@@ -266,6 +267,7 @@ export default function App() {
       { id: "trash", name: "Move this draft to Trash", keys: "Ctrl #", run: () => moveCurrent("trash") },
       { id: "flag", name: "Flag or unflag this draft", keys: "Ctrl Shift F", run: flagCurrent },
       { id: "tags", name: "Tag this draft", keys: "Ctrl T", run: startTagging },
+      { id: "focus", name: "Focus mode", keys: "Ctrl Shift D", run: toggleFocus },
       { id: "undo", name: "Undo the last move, flag or tag", run: undo },
       { id: "actions", name: "Show or hide actions", keys: "Ctrl 2", run: toggleActions },
       { id: "new-action", name: "New action", keys: "Ctrl Shift A", run: () => editAction(null) },
@@ -426,6 +428,7 @@ export default function App() {
     }
     if (ctrl && e.shiftKey && !e.altKey && !listOpen()) {
       if (k === "f") return stop(e, flagCurrent);
+      if (k === "d") return stop(e, toggleFocus);
       // `Ctrl #` is Ctrl Shift 3 on most layouts; match the key and the physical key.
       if (e.key === "#" || e.code === "Digit3") return stop(e, () => moveCurrent("trash"));
     }
@@ -466,7 +469,15 @@ export default function App() {
     run();
   }
 
-  /** Back after `NEW_AFTER_AWAY_MS` with a draft open: start a new one, as Drafts does. The old one is saved. */
+  function toggleFocus() {
+    const on = !focusMode();
+    setFocusMode(on);
+    editor?.setFocusMode(on);
+    say(on ? "Focus mode. Ctrl Shift D to leave." : "Focus mode off.");
+  }
+
+  /** Back after the "open to a new draft" time with a draft open: start a new one, as Drafts does. The old one
+   * is saved. */
   function away(hidden: boolean) {
     if (hidden) {
       awaySince ??= Date.now();
@@ -475,7 +486,8 @@ export default function App() {
     }
     const since = awaySince;
     awaySince = null;
-    if (since !== null && Date.now() - since >= NEW_AFTER_AWAY_MS && draft() && !listOpen() && !tagging()) {
+    const after = awayThreshold(prefs());
+    if (since !== null && after !== null && Date.now() - since >= after && draft() && !listOpen() && !tagging()) {
       newDraft();
     }
   }
@@ -486,6 +498,15 @@ export default function App() {
     const a = await api;
     await a.showWindow();
     setInfo(await a.appInfo());
+    // After the window is up: preferences only change the type, never what is on screen first.
+    try {
+      const p = parsePrefs(await a.uiSettings());
+      setPrefs(p);
+      applyEditorPrefs(p);
+      editor.setTypewriter(p.typewriter);
+    } catch (e) {
+      console.error("preferences:", e);
+    }
     window.addEventListener("blur", () => away(true));
     window.addEventListener("focus", () => away(false));
     window.addEventListener("beforeunload", () => void autosave.flush());
@@ -517,7 +538,7 @@ export default function App() {
   onCleanup(() => editor?.destroy());
 
   return (
-    <div class="app">
+    <div class="app" classList={{ focus: focusMode() }}>
       <div class="work">
         <div class="center">
           <main class="editor" ref={editorEl} />
@@ -611,6 +632,7 @@ export default function App() {
       </Show>
       <Show when={settingsOpen()}>
         <Settings
+          onPrefs={(p) => editor?.setTypewriter(p.typewriter)}
           onClose={() => {
             setSettingsOpen(false);
             editor?.view.focus();

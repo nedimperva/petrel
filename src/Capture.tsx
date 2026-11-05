@@ -8,6 +8,7 @@ import { firstAction } from "./actions/ActionList";
 import HostDialog from "./actions/HostDialog";
 import { createAutosave, createCloser, type SaveState } from "./editor/autosave";
 import { createEditor, type EditorHandle } from "./editor/editor";
+import { applyEditorPrefs, parsePrefs } from "./settings/prefs";
 
 export default function Capture() {
   let editorEl!: HTMLDivElement;
@@ -118,6 +119,8 @@ export default function Capture() {
     editor.view.focus();
     const a = await api;
     await a.showWindow();
+    // The writer's type size and face, as in the main window.
+    a.uiSettings().then((m) => applyEditorPrefs(parsePrefs(m)), (e) => console.error("preferences:", e));
     window.addEventListener("keydown", onKey, true);
     window.addEventListener("beforeunload", () => void autosave.flush());
     if ("__TAURI_INTERNALS__" in window) {

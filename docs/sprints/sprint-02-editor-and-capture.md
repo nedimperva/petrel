@@ -26,12 +26,17 @@ type is kept, and the first line is the title. Everything else stays out of the 
       search came with it (`@codemirror/search`). Tried headless in `npm run dev`.
 - [ ] Cursor and selection persistence per draft (`cursor` column; selection in UI state only).
 - [ ] Font family/size settings; monospace option; measure `--editor-max`.
-- [ ] Focus mode (`Ctrl Shift D`) and typewriter scrolling (setting).
+      Settings → Editor: size 14–22 px, Sans/Serif/Monospace, stored as `ui.*` settings and applied through
+      `--editor-size`/`--editor-font` in both windows (`src/settings/prefs.ts`). Not yet: measuring `--editor-max`.
+- [x] Focus mode (`Ctrl Shift D`) and typewriter scrolling (setting).
+      Focus mode hides the action column and the strip's hints (save state and toasts stay) and dims visible lines
+      outside the cursor's paragraph. Typewriter scrolling centres the cursor's line after each edit or move.
+      Tried headless in `npm run dev`.
 - [ ] Paste: plain text always; a setting to convert pasted URLs to Markdown links when text is selected.
 
 ### Open-to-new-draft (M1)
-- [ ] Setting: always / after N minutes away (default 10) / never. "Away" = window hidden or unfocused.
-      The 10-minute behaviour is in (`NEW_AFTER_AWAY_MS` in `App.tsx`); the setting and its UI are not.
+- [x] Setting: always / after N minutes away (default 10) / never. "Away" = window hidden or unfocused.
+      Settings → New draft. "Every time" still waits 2 s away, so a dialog or a glance elsewhere doesn't start one.
 - [ ] An empty untouched new draft is **not** saved as a row; the row is created on the first keystroke. Closing
       with an empty new draft leaves nothing behind. Test in the store (no empty rows after N open/close cycles).
 - [ ] `Ctrl N` saves the current draft (flushes autosave) then creates the new one; the previous draft stays in Inbox.
@@ -77,6 +82,9 @@ type is kept, and the first line is the title. Everything else stays out of the 
 ## Decisions
 
 ## Log
+
+- 2026-11-05 — Settings for open-to-new, editor size and typeface, typewriter scrolling; focus mode. Engine:
+  `Store::settings_with_prefix` (literal prefix, tested). Tried headless against the fake store.
 
 - 2026-10-23 — Owner's design pass ("minimalist and focused writing"): the writing screen is the text alone (action
   column hidden by default, a quiet strip with save state and word count, 17 px type), the list gets a preview

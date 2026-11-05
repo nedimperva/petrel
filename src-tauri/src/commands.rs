@@ -185,6 +185,20 @@ pub fn open_capture_window(app: tauri::AppHandle) {
     crate::open_capture(&app);
 }
 
+/// The UI's own preferences (`ui.*`: open to new draft, editor type). Other keys belong to the engine.
+#[tauri::command]
+pub fn ui_settings(state: State<AppState>) -> R<std::collections::HashMap<String, String>> {
+    with(&state, |s| Ok(s.settings_with_prefix("ui.")?.into_iter().collect()))
+}
+
+#[tauri::command]
+pub fn set_ui_setting(state: State<AppState>, key: String, value: String) -> R<()> {
+    if !key.starts_with("ui.") || key.len() > 64 {
+        return Err(format!("{key} is not a UI setting"));
+    }
+    with(&state, |s| s.set_setting(&key, &value))
+}
+
 /// The settings page's Desktop section: the capture hotkey and start at login.
 #[tauri::command]
 pub fn desktop_settings(app: tauri::AppHandle) -> crate::desktop::DesktopSettings {

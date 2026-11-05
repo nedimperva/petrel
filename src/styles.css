@@ -1160,3 +1160,25 @@ iframe.preview {
 .setting-row .grow {
   flex: 1;
 }
+
+/* ---- package 02: focus mode (Ctrl Shift D) -------------------------------------------------------------- */
+
+/* The text alone. The save state and toasts stay: trusting that it's saved is part of focusing. */
+.app.focus .actions {
+  display: none;
+}
+.app.focus .strip .keys,
+.app.focus .strip .meta,
+.app.focus .strip .flag {
+  visibility: hidden;
+}
+.dialog.settings .label {
+  color: var(--fg-2);
+  font-size: var(--t-sm);
+}
+.dialog.settings .minutes {
+  width: 7ch;
+}
+.dialog.settings .setting-row + .setting-row {
+  margin-top: var(--s-2);
+}

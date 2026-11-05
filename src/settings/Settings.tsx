@@ -1,11 +1,14 @@
-// Settings (`Ctrl ,`, ui.md §4.7). For now one section, Desktop: the capture hotkey and start at login. Each
-// row says what it does and what state it is in, so nothing needs the docs.
+// Settings (`Ctrl ,`, ui.md §4.7): when a new draft opens, the editor's type, the capture hotkey and start at
+// login. Each row says what it does and what state it is in, so nothing needs the docs. Changes apply at once.
 
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { api, type DesktopSettings } from "../api";
+import { applyEditorPrefs, prefs, type Prefs, setPrefs, SIZES, storedValue } from "./prefs";
 
 interface Props {
   onClose(): void;
+  /** A preference changed; the window applies what CSS can't (typewriter scrolling). */
+  onPrefs(p: Prefs): void;
 }
 
 /** A key press as a hotkey the engine can register (`Ctrl+Alt+Space`), or null for a lone modifier. */
@@ -55,6 +58,18 @@ export default function Settings(props: Props) {
 
   onCleanup(() => window.removeEventListener("keydown", onKey));
 
+  async function setPref<K extends keyof Prefs>(key: K, value: Prefs[K]) {
+    const next = { ...prefs(), [key]: value };
+    setPrefs(next);
+    applyEditorPrefs(next);
+    props.onPrefs(next);
+    try {
+      await (await api).setUiSetting(...storedValue(key, value));
+    } catch (e) {
+      setError(`Not saved: ${e}`);
+    }
+  }
+
   const setHotkey = (h: string | null) => apply(async () => (await api).setHotkey(h));
 
   function onKey(e: KeyboardEvent) {
@@ -91,6 +106,60 @@ export default function Settings(props: Props) {
     <div class="scrim" onMouseDown={(e) => e.target === e.currentTarget && props.onClose()}>
       <div class="dialog settings" ref={dialog} tabindex="-1" role="dialog" aria-label="Settings">
         <h2>Settings</h2>
+        <section>
+          <h3>New draft</h3>
+          <p class="hint">Coming back to Petrel with a draft open starts a fresh one; the old one stays in the Inbox.</p>
+          <div class="setting-row">
+            <select
+              value={prefs().newDraft}
+              onChange={(e) => setPref("newDraft", e.currentTarget.value as Prefs["newDraft"])}
+            >
+              <option value="away">After some time away</option>
+              <option value="always">Every time</option>
+              <option value="never">Never: keep the last draft</option>
+            </select>
+            <Show when={prefs().newDraft === "away"}>
+              <input
+                type="number"
+                class="minutes"
+                min="1"
+                max="1440"
+                value={prefs().awayMinutes}
+                onChange={(e) => {
+                  const n = Math.round(Number(e.currentTarget.value));
+                  if (n >= 1 && n <= 1440) void setPref("awayMinutes", n);
+                  else e.currentTarget.value = String(prefs().awayMinutes);
+                }}
+              />
+              <span>minutes</span>
+            </Show>
+          </div>
+        </section>
+        <section>
+          <h3>Editor</h3>
+          <div class="setting-row">
+            <span class="label">Text size</span>
+            <select value={prefs().editorSize} onChange={(e) => setPref("editorSize", Number(e.currentTarget.value))}>
+              <For each={SIZES}>{(n) => <option value={n}>{n} px</option>}</For>
+            </select>
+            <span class="label">Typeface</span>
+            <select
+              value={prefs().editorFont}
+              onChange={(e) => setPref("editorFont", e.currentTarget.value as Prefs["editorFont"])}
+            >
+              <option value="sans">Sans</option>
+              <option value="serif">Serif</option>
+              <option value="mono">Monospace</option>
+            </select>
+          </div>
+          <label class="setting-row">
+            <input type="checkbox" checked={prefs().typewriter} onChange={(e) => setPref("typewriter", e.currentTarget.checked)} />
+            <span>Typewriter scrolling: the line you type stays in the middle of the window.</span>
+          </label>
+          <p class="hint">
+            <kbd>Ctrl Shift D</kbd> focus mode dims everything but the paragraph you're writing.
+          </p>
+        </section>
         <Show when={s()} fallback={<p>{error() ?? "Loading…"}</p>}>
           {(v) => (
             <>

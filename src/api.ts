@@ -263,6 +263,9 @@ export interface Api {
   /** Opens the capture window, or focuses it. */
   openCapture(): Promise<void>;
   desktopSettings(): Promise<DesktopSettings>;
+  /** The UI's `ui.*` preferences as stored strings. */
+  uiSettings(): Promise<Record<string, string>>;
+  setUiSetting(key: string, value: string): Promise<void>;
   /** null turns it off. Rejects, keeping the old one, when the key is taken or can't be a hotkey. */
   setHotkey(hotkey: string | null): Promise<DesktopSettings>;
   setAutostart(on: boolean): Promise<DesktopSettings>;
@@ -317,6 +320,8 @@ async function tauriApi(): Promise<Api> {
     },
     openCapture: () => invoke("open_capture_window"),
     desktopSettings: () => invoke("desktop_settings"),
+    uiSettings: () => invoke("ui_settings"),
+    setUiSetting: (key, value) => invoke("set_ui_setting", { key, value }),
     setHotkey: (hotkey) => invoke("set_hotkey", { hotkey }),
     setAutostart: (on) => invoke("set_autostart", { on }),
     listenHost: async (events) => {
@@ -525,6 +530,7 @@ function fakeApi(): Api {
 /** Actions without the engine: a few step types are acted out, the rest are logged. Enough to work on the list,
  *  the editor, the dialogs and the log in a browser. */
 function fakeActions(draft: (id: number) => Draft | undefined) {
+  const ui: Record<string, string> = {};
   const desktop: DesktopSettings = {
     hotkey: "Ctrl+Alt+Space",
     hotkeyDefault: "Ctrl+Alt+Space",
@@ -698,6 +704,10 @@ function fakeActions(draft: (id: number) => Draft | undefined) {
     },
     listenApp: async () => {},
     desktopSettings: async () => ({ ...desktop }),
+    uiSettings: async () => ({ ...ui }),
+    setUiSetting: async (key: string, value: string) => {
+      ui[key] = value;
+    },
     setHotkey: async (hotkey: string | null) => {
       if (hotkey && !/(Ctrl|Alt|Shift|Super)\+/.test(hotkey)) throw new Error("a hotkey needs Ctrl, Alt or Shift");
       Object.assign(desktop, { hotkey, hotkeyActive: !!hotkey, hotkeyError: null });

@@ -314,6 +314,8 @@ fn main() {
             commands::close_capture,
             commands::open_capture_window,
             commands::desktop_settings,
+            commands::ui_settings,
+            commands::set_ui_setting,
             commands::set_hotkey,
             commands::set_autostart,
             commands::list_actions,
