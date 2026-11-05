@@ -2644,6 +2644,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arboard",
+ "dirs",
  "env_logger",
  "log",
  "petrel-core",

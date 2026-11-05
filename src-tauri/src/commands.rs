@@ -78,9 +78,15 @@ pub fn rescue_text(state: State<AppState>, text: String) -> R<String> {
 }
 
 /// Closes the calling window once its text is saved; the window's own close button is intercepted so it can't
-/// close first.
+/// close first. With a tray the main window only hides, so it comes back instantly and keeps its state; Quit
+/// (or no tray) really closes it.
 #[tauri::command]
-pub fn close_window(window: tauri::WebviewWindow) {
+pub fn close_window(state: State<AppState>, window: tauri::WebviewWindow) {
+    let stays = state.tray.load(Ordering::SeqCst) && !state.quitting.load(Ordering::SeqCst);
+    if window.label() == "main" && stays {
+        let _ = window.hide();
+        return;
+    }
     let _ = window.destroy();
 }
 
@@ -157,17 +163,26 @@ pub fn show_window(state: State<AppState>, window: tauri::WebviewWindow) {
     let _ = window.set_focus();
 }
 
-/// The capture window saved its draft and is done. If the main window was never shown, nothing is left on
-/// screen; until the tray exists (package 07) that means quitting rather than lingering unseen.
+/// The capture window saved its draft and is done. With a tray Petrel keeps running there. Without one, if the
+/// main window was never shown, nothing would be left on screen, so Petrel quits rather than lingering unseen.
 #[tauri::command]
-pub fn close_capture(app: tauri::AppHandle) {
+pub fn close_capture(state: State<AppState>, app: tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("capture") {
         let _ = w.destroy();
+    }
+    if state.tray.load(Ordering::SeqCst) {
+        return;
     }
     let main_visible = app.get_webview_window("main").and_then(|w| w.is_visible().ok()).unwrap_or(false);
     if !main_visible {
         app.exit(0);
     }
+}
+
+/// The command bar's "Capture window".
+#[tauri::command]
+pub fn open_capture_window(app: tauri::AppHandle) {
+    crate::open_capture(&app);
 }
 
 // ---- actions (package 03) -----------------------------------------------------------------------------------

@@ -39,6 +39,11 @@ and keys; this file covers state and decisions that aren't visible from the code
   accessed), and the capture window (`petrel --capture`, `src/Capture.tsx`) has one footer line: folder, tags,
   save state, `Ctrl Enter`, `Esc`. Design canvas: https://claude.ai/artifact/9AifYKBNuTHiHk5rVYa6HC. On branch
   `sprint/02-quiet-ui-and-capture`; tried headless only.
+- **Command bar, tray and CLI capture (2026-11-05, on a PR):** `Ctrl K` (`src/palette/`, lazy-loaded), the tray
+  (`src-tauri/src/tray.rs`: closing the main window hides it, Quit saves every window first via `petrel-quit`),
+  `petrel --new TEXT` / `--stdin --tag` written from the calling process before Tauri starts (`src-tauri/src/cli.rs`,
+  `docs/cli.md`). The sandbox can now boot the debug build under `xvfb-run dbus-run-session` (with
+  `libwebkit2gtk-4.1-dev` and `libayatana-appindicator3-dev` installed) and drive it with `xdotool`.
 - **rquickjs is the scripting runtime** (owner decision 2026-10-22, package 03 Decisions); `bindgen` feature off.
   Newest-first search is accepted for M1; relevance ranking is a package 05 (M2) task.
   The spike is a standalone crate under `crates/petrel-core/examples/runtime_spike/`, not a workspace member.

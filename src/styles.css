@@ -1030,3 +1030,92 @@ iframe.preview {
 .capture-foot .save-error {
   color: var(--warn);
 }
+
+/* ---- package 05: the command bar (Ctrl K) ---------------------------------------------------------------- */
+
+/* Near the top, like a search box, so the rows grow down toward where the eye already is. */
+.palette-scrim {
+  align-items: flex-start;
+  padding-top: min(12vh, 96px);
+}
+.palette {
+  width: min(560px, calc(100vw - 32px));
+  max-height: min(480px, calc(100vh - 128px));
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-0);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.palette-input {
+  border: none;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  padding: var(--s-3) var(--s-4);
+  font: inherit;
+  font-size: var(--t-lg);
+  color: var(--fg-0);
+  background: var(--bg-0);
+  outline: none;
+}
+.palette-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--s-1) 0;
+}
+.palette-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  height: 34px;
+  padding: 0 var(--s-4);
+  font-size: var(--t-md);
+  color: var(--fg-1);
+  cursor: default;
+  user-select: none;
+}
+.palette-row.at {
+  background: var(--bg-2);
+  color: var(--fg-0);
+}
+.palette-row .name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 60%;
+}
+.palette-row .snippet {
+  color: var(--fg-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+.palette-row .grow {
+  flex: 1;
+}
+.palette-row .snippet + .grow {
+  flex: 0;
+}
+.palette-row .kind,
+.palette-row .n {
+  font-size: var(--t-sm);
+  color: var(--fg-2);
+  font-variant-numeric: tabular-nums;
+}
+.palette-empty {
+  padding: var(--s-3) var(--s-4);
+  font-size: var(--t-md);
+  color: var(--fg-2);
+}
+.palette-foot {
+  display: flex;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-4);
+  border-top: 1px solid var(--line);
+  font-size: var(--t-sm);
+  color: var(--fg-2);
+}

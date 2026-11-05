@@ -128,6 +128,8 @@ export default function Capture() {
         void finish();
       });
     }
+    // Tray "Quit": save and close like Esc, so the quit can finish.
+    await a.listenApp({ newDraft: () => {}, quit: () => void finish() });
     await a.listenHost({
       request: (r) => setRequests((q) => [...q, r]),
       closed: (id) => setRequests((q) => q.filter((x) => x.id !== id)),

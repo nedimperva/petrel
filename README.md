@@ -96,9 +96,19 @@ windowrulev2 = size 560 320, title:^(Petrel capture)$
 windowrulev2 = center, title:^(Petrel capture)$
 ```
 
-`Esc` saves and closes it, `Ctrl Enter` runs the default action and closes it. Until the tray arrives, closing a
-capture window that was opened on its own (Petrel not already running) quits Petrel. In `npm run dev` the capture
-window is [http://localhost:1420/?capture](http://localhost:1420/?capture).
+`Esc` saves and closes it, `Ctrl Enter` runs the default action and closes it. The capture window stays on top.
+In `npm run dev` the capture window is [http://localhost:1420/?capture](http://localhost:1420/?capture).
+
+Petrel keeps running in the tray: closing the window hides it, and the tray menu has New draft, Capture, Show and
+Quit. On Linux the tray needs `libayatana-appindicator` and a tray host (Waybar's `tray` module on Omarchy); without
+one, closing the window quits as before. On Windows a left click on the icon shows the window.
+
+Text from the command line goes straight to the Inbox without a window ([docs/cli.md](docs/cli.md)):
+
+```
+petrel --new "call the bank" --tag errand
+git log -1 | petrel --stdin --tag git
+```
 
 ## Project layout
 

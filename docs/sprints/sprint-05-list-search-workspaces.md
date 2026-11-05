@@ -39,6 +39,11 @@ Find any draft in two keystrokes and a word. Triage a week of captures in a minu
 
 ### Command bar (M1)
 - [ ] Tern's palette component: commands, actions, drafts (by title, FTS-backed), tags, workspaces; recents.
+      Built without Tern's component (the agent cannot read Tern's repository): `src/palette/CommandBar.tsx`,
+      ranking in `src/palette/match.ts` (prefix, word start, initials, substring, letters in order; tests in
+      `tests/palette.test.ts`). Commands with their keys, actions (run on the open draft), tags (open the list
+      filtered), drafts from `searchDrafts` (debounced 80 ms), the last 8 used first. Lazy-loaded (2.4 kB gz).
+      Workspaces wait for M2. Tried headless in `npm run dev` and in the debug build under Xvfb.
 
 ### Relevance ranking (M2, owner request 2026-10-22)
 - [ ] A ranked mode for search that keeps the 10 ms target: `bm25` only over a bounded window (the newest N matches,
@@ -58,6 +63,10 @@ Find any draft in two keystrokes and a word. Triage a week of captures in a minu
 ## Decisions
 
 ## Log
+
+- 2026-11-05 — Command bar (`Ctrl K`) on the package 07 PR while the owner is away. Tried headless against the fake
+  store and once in the real window (debug build under Xvfb on Linux: `Ctrl K`, "go to all", Enter opened the
+  list on All). Bundle 212.1 kB gz for the launch chunk (was 211.4), the bar itself 2.4 kB gz, loaded on first use.
 
 - 2026-10-22 — List panel (`src/list/DraftList.tsx`) on PR #2 while the owner is away: tabs, chips, live search,
   keyboard triage with undo, empty trash. Tried headless against the fake store (`npm run dev`, Chromium via

@@ -6,11 +6,14 @@ import HostDialog from "./actions/HostDialog";
 import { fromEvent, isChord, same } from "./actions/shortcut";
 import { countWords, createAutosave, createCloser, type SaveState } from "./editor/autosave";
 import { createEditor, type EditorHandle } from "./editor/editor";
-import DraftList, { type ListHandle } from "./list/DraftList";
+import { openSearchPanel } from "@codemirror/search";
+import DraftList, { type ListHandle, type Tab } from "./list/DraftList";
+import type { Command } from "./palette/CommandBar";
 
 // Not on the launch path: loaded the first time they open.
 const ActionEditor = lazy(() => import("./actions/ActionEditor"));
 const ActionLog = lazy(() => import("./actions/ActionLog"));
+const CommandBar = lazy(() => import("./palette/CommandBar"));
 
 /** Coming back after this long away opens a new draft (package 02 "open to new draft"; a setting later). */
 export const NEW_AFTER_AWAY_MS = 10 * 60 * 1000;
@@ -51,6 +54,9 @@ export default function App() {
   const [words, setWords] = createSignal(0);
   const [info, setInfo] = createSignal<AppInfo | null>(null);
   const [listOpen, setListOpen] = createSignal(false);
+  /** Where the list opens next (the command bar picks a tab or a tag). */
+  const [listStart, setListStart] = createSignal<{ tab?: Tab; tag?: string } | undefined>(undefined);
+  const [paletteOpen, setPaletteOpen] = createSignal(false);
   const [tagging, setTagging] = createSignal(false);
   const [allTags, setAllTags] = createSignal<TagCount[]>([]);
   const [toast, setToast] = createSignal<{ text: string; undo: boolean; log?: boolean } | null>(null);
@@ -222,10 +228,63 @@ export default function App() {
       setListOpen(false);
       editor?.view.focus();
     } else {
-      void autosave.flush();
-      setLogOpen(false);
-      setListOpen(true);
+      openList();
     }
+  }
+
+  /** Opens the list, fresh, on `start` (Inbox when not given). */
+  function openList(start?: { tab?: Tab; tag?: string }) {
+    void autosave.flush();
+    setLogOpen(false);
+    // The list reads where to start when it mounts, so an open one is remounted.
+    setListOpen(false);
+    setListStart(start);
+    setListOpen(true);
+  }
+
+  // ---- command bar (package 05) ----------------------------------------------------------------------------
+
+  const TAB_NAMES: [Tab, string][] = [
+    ["inbox", "Inbox"],
+    ["flagged", "Flagged"],
+    ["archive", "Archive"],
+    ["trash", "Trash"],
+    ["all", "All drafts"],
+  ];
+
+  /** Every command the bar offers, with the key that does the same, so the bar teaches the keys. */
+  function commands(): Command[] {
+    const inTauri = "__TAURI_INTERNALS__" in window;
+    const list: Command[] = [
+      { id: "new", name: "New draft", keys: "Ctrl N", run: newDraft },
+      { id: "drafts", name: "Show drafts", keys: "Ctrl L", run: () => openList() },
+      ...TAB_NAMES.map(([tab, name]): Command => ({ id: `tab:${tab}`, name: `Go to ${name}`, run: () => openList({ tab }) })),
+      { id: "find", name: "Find in this draft", keys: "Ctrl F", run: () => editor && openSearchPanel(editor.view) },
+      { id: "archive", name: "Archive this draft", keys: "Ctrl E", run: () => moveCurrent("archive") },
+      { id: "trash", name: "Move this draft to Trash", keys: "Ctrl #", run: () => moveCurrent("trash") },
+      { id: "flag", name: "Flag or unflag this draft", keys: "Ctrl Shift F", run: flagCurrent },
+      { id: "tags", name: "Tag this draft", keys: "Ctrl T", run: startTagging },
+      { id: "undo", name: "Undo the last move, flag or tag", run: undo },
+      { id: "actions", name: "Show or hide actions", keys: "Ctrl 2", run: toggleActions },
+      { id: "new-action", name: "New action", keys: "Ctrl Shift A", run: () => editAction(null) },
+      { id: "log", name: "Action log", run: openLog },
+    ];
+    if (inTauri) {
+      list.splice(2, 0, { id: "capture", name: "Open the capture window", run: async () => (await api).openCapture() });
+    }
+    return list;
+  }
+
+  function closePalette() {
+    setPaletteOpen(false);
+    editor?.view.focus();
+  }
+
+  function openPalette() {
+    setTagging(false);
+    setPaletteOpen(true);
+    // The actions may have changed in the editor since they were loaded; the bar shows what is there now.
+    void loadActions();
   }
 
   // ---- actions ------------------------------------------------------------------------------------------------
@@ -340,10 +399,11 @@ export default function App() {
   }
 
   function onKey(e: KeyboardEvent) {
-    // A dialog or the action editor takes every key.
-    if (requests().length || editing()) return;
+    // A dialog, the action editor or the command bar takes every key.
+    if (requests().length || editing() || paletteOpen()) return;
     const k = e.key.toLowerCase();
     const ctrl = e.ctrlKey || e.metaKey;
+    if (ctrl && !e.shiftKey && !e.altKey && k === "k") return stop(e, openPalette);
     if (e.key === "Escape" && running()) return stop(e, async () => (await api).cancelRun());
     if (ctrl && e.shiftKey && !e.altKey && k === "a") {
       const inside = !!document.activeElement?.closest("aside.actions");
@@ -440,6 +500,14 @@ export default function App() {
       closed: (id) => setRequests((q) => q.filter((x) => x.id !== id)),
       message: (_kind, text) => say(text),
     });
+    await a.listenApp({
+      // Tray "New draft" or `petrel --new`: the window is already being shown.
+      newDraft: async () => {
+        await newDraft();
+        editor?.view.focus();
+      },
+      quit: () => void close(),
+    });
     loadActions();
   });
   onCleanup(() => editor?.destroy());
@@ -452,6 +520,7 @@ export default function App() {
           <Show when={listOpen()}>
             <DraftList
               ref={(h) => (list = h)}
+              start={listStart()}
               openId={draft()?.id ?? null}
               onOpen={openDraft}
               onClose={toggleList}
@@ -526,6 +595,16 @@ export default function App() {
           />
         </Show>
       </div>
+      <Show when={paletteOpen()}>
+        <CommandBar
+          commands={commands()}
+          actions={actions()}
+          onAction={(a) => runAction(a, "ui")}
+          onDraft={openDraft}
+          onTag={(tag) => openList({ tag })}
+          onClose={closePalette}
+        />
+      </Show>
       <Show when={requests()[0]}>
         {(r) => <HostDialog request={r()} onAnswer={(v) => answer(r(), v)} />}
       </Show>
@@ -583,6 +662,9 @@ export default function App() {
           when={listOpen()}
           fallback={
             <span class="meta keys">
+              <span>
+                <kbd>Ctrl K</kbd> commands
+              </span>
               <span>
                 <kbd>Ctrl L</kbd> drafts
               </span>

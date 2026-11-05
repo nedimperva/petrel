@@ -39,10 +39,12 @@ type is kept, and the first line is the title. Everything else stays out of the 
 ### Capture window (M1)
 - [ ] Separate Tauri window `capture`, class `petrel-capture`, 560×320, always-on-top (setting), remembers size.
       The window is in (`open_capture` in `main.rs`, `src/Capture.tsx`), 560×320, titled `Petrel capture`: Wayland
-      gives every Petrel window the same app id, so rules match the title. Not yet: always-on-top, remembered size.
+      gives every Petrel window the same app id, so rules match the title. Always on top since 2026-11-05 (no setting
+      yet). Not yet: remembered size.
 - [ ] `petrel --capture` and the tray "New draft" open it (or focus it) via the single-instance plugin.
       `--capture` works on first launch (the main window loads hidden) and from a second launch. The tray is
-      package 07; until then, closing a capture window opened on its own quits Petrel.
+      package 07: since 2026-11-05 its "Capture…" item opens this window, and closing a capture window leaves Petrel
+      in the tray.
 - [x] `Ctrl Enter` runs the active group's default action; `Esc` saves and closes; close button saves.
       Plus a folder (Inbox/Archive) and tags in the footer, applied on close. Action dialogs go only to the window
       that started the run (`emit_to`). Tried headless in `npm run dev` (`?capture`); not yet in the real window.

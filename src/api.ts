@@ -241,6 +241,11 @@ export interface Api {
   cancelRun(): Promise<boolean>;
   hostReply(id: number, value: unknown): Promise<boolean>;
   listenHost(events: HostEvents): Promise<void>;
+  /** The tray and a second launch: `newDraft` (tray "New draft", `petrel --new`) and `quit` (tray "Quit": save,
+   * then close this window). No-op outside Tauri. */
+  listenApp(events: { newDraft(): void; quit(): void }): Promise<void>;
+  /** Opens the capture window, or focuses it. */
+  openCapture(): Promise<void>;
   /** A folder from the system picker, or null when cancelled. */
   pickFolder(): Promise<string | null>;
 }
@@ -284,6 +289,13 @@ async function tauriApi(): Promise<Api> {
       const picked = await open({ directory: true, title: "Choose a folder" });
       return typeof picked === "string" ? picked : null;
     },
+    listenApp: async (events) => {
+      const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+      const win = getCurrentWebviewWindow();
+      await win.listen("petrel-new", () => events.newDraft());
+      await win.listen("petrel-quit", () => events.quit());
+    },
+    openCapture: () => invoke("open_capture_window"),
     listenHost: async (events) => {
       // This window's events only: a run's dialogs go to the window that started it.
       const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
@@ -650,6 +662,10 @@ function fakeActions(draft: (id: number) => Draft | undefined) {
     },
     listenHost: async (e: HostEvents) => {
       events = e;
+    },
+    listenApp: async () => {},
+    openCapture: async () => {
+      window.open("?capture", "_blank");
     },
     pickFolder: async () => "/home/you/Notes",
   };
