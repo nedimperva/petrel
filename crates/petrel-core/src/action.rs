@@ -510,6 +510,8 @@ pub fn execute(
         stack: Vec::new(),
         open: None,
         trusted: Vec::new(),
+        checking: Vec::new(),
+        allowed: Vec::new(),
         unknown: Vec::new(),
         log: Vec::new(),
     };
@@ -683,6 +685,11 @@ struct Ctx<'a> {
     stack: Vec<String>,
     open: Option<OpenTarget>,
     trusted: Vec<(String, String)>,
+    /// Uuids of the actions that were untrusted when this run reached them. Their commands and out-of-scope
+    /// paths are checked again at the call, because a prompt or an earlier step can change what they render to.
+    checking: Vec<String>,
+    /// What the person allowed in this run.
+    allowed: Vec<ScopeItem>,
     unknown: Vec<String>,
     log: Vec<String>,
 }
@@ -745,7 +752,7 @@ impl Ctx<'_> {
                     let limit = RUN_LIMIT.as_secs();
                     return Err((i + 1, StepError::Failed(format!("the run took longer than {limit} s"))));
                 }
-                match self.step(step) {
+                match self.step(action, step) {
                     Ok(Flow::Continue) => {}
                     Ok(Flow::Stop) => return Err((i + 1, StepError::Stopped)),
                     // A host error during a cancel is the cancel.
@@ -759,10 +766,16 @@ impl Ctx<'_> {
         result
     }
 
-    /// An untrusted action shows every rendered command and every path outside the Petrel folder once, before
+    /// An untrusted action shows every rendered command and every path outside `files/` once, before
     /// its first step (actions.md "Trust").
     fn check_trust(&mut self, action: &Action) -> Result<(), StepError> {
-        if action.trusted || self.trusted.iter().any(|(u, _)| u == &action.uuid) {
+        if action.trusted {
+            return Ok(());
+        }
+        if !self.checking.contains(&action.uuid) {
+            self.checking.push(action.uuid.clone());
+        }
+        if self.trusted.iter().any(|(u, _)| u == &action.uuid) {
             return Ok(());
         }
         let mut items = Vec::new();
@@ -781,12 +794,35 @@ impl Ctx<'_> {
                 _ => {}
             }
         }
+        let mut seen = Vec::new();
+        items.retain(|i| {
+            !self.allowed.contains(i) && !seen.contains(i) && {
+                seen.push(i.clone());
+                true
+            }
+        });
         if items.is_empty() {
             return Ok(());
         }
+        self.confirm_scope(action, items)
+    }
+
+    /// The check at the call: a command or path of an untrusted action that the person has not seen in this
+    /// run asks again, so a value from a prompt or a command never reaches the shell or the disk unseen.
+    fn check_call(&mut self, action: &Action, item: ScopeItem) -> Result<(), StepError> {
+        if !self.checking.contains(&action.uuid) || self.allowed.contains(&item) {
+            return Ok(());
+        }
+        self.confirm_scope(action, vec![item])
+    }
+
+    fn confirm_scope(&mut self, action: &Action, items: Vec<ScopeItem>) -> Result<(), StepError> {
         match self.asking(|h| h.confirm_scope(&action.name, &items)) {
             Ok(true) => {
-                self.trusted.push((action.uuid.clone(), action.steps_hash()));
+                if !self.trusted.iter().any(|(u, _)| u == &action.uuid) {
+                    self.trusted.push((action.uuid.clone(), action.steps_hash()));
+                }
+                self.allowed.extend(items);
                 Ok(())
             }
             Ok(false) => Err(StepError::Cancelled),
@@ -794,8 +830,10 @@ impl Ctx<'_> {
         }
     }
 
+    /// Only `<data dir>/files/` is in scope: the database, the action mirror and the templates sit beside it.
+    /// `p` comes from `resolve_path`, so `..` is already gone.
     fn in_scope(&self, p: &Path) -> bool {
-        self.paths.data_dir.as_deref().is_some_and(|d| p.starts_with(d))
+        self.paths.data_dir.as_deref().is_some_and(|d| p.starts_with(normalize(&d.join("files"))))
     }
 
     fn render(&mut self, input: &str, encoding: Encoding) -> String {
@@ -846,15 +884,15 @@ impl Ctx<'_> {
         let expanded = expand_vars(raw.trim());
         let p = PathBuf::from(&expanded);
         if p.is_absolute() {
-            return p;
+            return normalize(&p);
         }
         match &self.paths.data_dir {
-            Some(d) => d.join("files").join(p),
-            None => p,
+            Some(d) => normalize(&d.join("files").join(p)),
+            None => normalize(&p),
         }
     }
 
-    fn step(&mut self, step: &Step) -> Result<Flow, StepError> {
+    fn step(&mut self, action: &Action, step: &Step) -> Result<Flow, StepError> {
         match step {
             Step::InsertText { text, position, move_cursor } => {
                 let text = self.render(text, Encoding::Raw);
@@ -885,12 +923,16 @@ impl Ctx<'_> {
             Step::File { path, text, mode, create_dirs } => {
                 let rendered = self.render(path, Encoding::Raw);
                 let path = self.resolve_path(&rendered);
+                if !self.in_scope(&path) {
+                    self.check_call(action, ScopeItem::Path(path.display().to_string()))?;
+                }
                 let text = self.render(text, Encoding::Raw);
                 self.host.write_file(&path, &text, *mode, *create_dirs)?;
                 self.log.push(format!("saved to {}", path.display()));
             }
             Step::RunCommand { command, stdin, shell, timeout_secs, output, cwd } => {
                 let command = self.render(command, Encoding::Raw);
+                self.check_call(action, ScopeItem::Command(command.clone()))?;
                 let stdin = self.render(stdin, Encoding::Raw);
                 let left = self.deadline.saturating_duration_since(Instant::now());
                 let timeout = timeout_secs.map_or(COMMAND_LIMIT, Duration::from_secs).min(left);
@@ -1121,6 +1163,32 @@ fn byte_at(s: &str, units: usize) -> usize {
         n += c.len_utf16();
     }
     s.len()
+}
+
+/// `.` and `..` resolved without touching the disk, so `files/../../x` is checked as the place it writes to.
+/// `..` above the root stays at the root, as the system does.
+fn normalize(p: &Path) -> PathBuf {
+    use std::path::Component;
+    // A path without them is kept as written, so the dialog shows the separators the action used.
+    if !p.components().any(|c| matches!(c, Component::CurDir | Component::ParentDir)) {
+        return p.to_path_buf();
+    }
+    let mut out = PathBuf::new();
+    for c in p.components() {
+        match c {
+            Component::CurDir => {}
+            Component::ParentDir => match out.components().next_back() {
+                Some(Component::Normal(_)) => {
+                    out.pop();
+                }
+                // Above the root is the root.
+                Some(Component::RootDir | Component::Prefix(_)) => {}
+                _ => out.push(".."),
+            },
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 /// `~/x`, `$VAR/x`, `${VAR}/x`; an unset variable expands to nothing, as in a shell.
@@ -1461,6 +1529,8 @@ mod tests {
             stack: vec![],
             open: None,
             trusted: vec![],
+            checking: vec![],
+            allowed: vec![],
             unknown: vec![],
             log: vec![],
         }

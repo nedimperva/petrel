@@ -463,11 +463,62 @@ pub mod system {
                 return Err(e);
             }
         };
+        // The shell is gone, but something it started in the background (`cmd &`) can still hold the pipes, and
+        // the readers end only when the pipes close. The limit covers that wait too.
+        let pending = || {
+            !feeder.is_finished()
+                || out.as_ref().is_some_and(|t| !t.is_finished())
+                || err.as_ref().is_some_and(|t| !t.is_finished())
+        };
+        while pending() {
+            let why = if cancel.is_cancelled() {
+                anyhow!("cancelled")
+            } else if started.elapsed() >= command.timeout {
+                anyhow!(
+                    "timed out after {} s: a background process kept the output open (redirect its output, \
+                     for example `> /dev/null 2>&1 &`)",
+                    command.timeout.as_secs()
+                )
+            } else {
+                std::thread::sleep(Duration::from_millis(5));
+                continue;
+            };
+            kill_left(child.id(), &pending);
+            // Readers still blocked are left to end with the pipes; the run does not wait for them.
+            return Err(why);
+        }
         let _ = feeder.join();
         let stdout = out.and_then(|t| t.join().ok()).unwrap_or_default();
         let stderr = err.and_then(|t| t.join().ok()).unwrap_or_default();
         Ok(CommandOutput { status: status.code().unwrap_or(-1), stdout, stderr })
     }
+
+    /// What is left of the command's process group after the shell exited: TERM, then KILL if the pipes are
+    /// still open half a second later.
+    #[cfg(unix)]
+    fn kill_left(pid: u32, pending: &dyn Fn() -> bool) {
+        let group = -(pid as i32);
+        // SAFETY: plain signal calls. The group id was the shell's pid, and a pid is not reused while a process
+        // in its group (the one holding the pipes) is alive.
+        unsafe {
+            libc::kill(group, libc::SIGTERM);
+        }
+        let until = Instant::now() + Duration::from_millis(500);
+        while Instant::now() < until {
+            if !pending() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        unsafe {
+            libc::kill(group, libc::SIGKILL);
+        }
+    }
+
+    /// Windows has no process group to signal once the shell is gone; the run stops waiting and the background
+    /// process keeps running.
+    #[cfg(windows)]
+    fn kill_left(_pid: u32, _pending: &dyn Fn() -> bool) {}
 
     #[cfg(unix)]
     fn kill(child: &mut std::process::Child) {
@@ -537,6 +588,21 @@ mod tests {
         });
         let err = run_command(&sh("sleep 30", "", 60), &cancel).unwrap_err();
         assert_eq!(err.to_string(), "cancelled");
+    }
+
+    #[test]
+    fn a_background_process_holding_the_output_does_not_outlive_the_limit() {
+        let t = std::time::Instant::now();
+        let err = run_command(&sh("sleep 30 &", "", 1), &CancelToken::default()).unwrap_err();
+        assert!(err.to_string().contains("background process"), "{err}");
+        assert!(t.elapsed() < Duration::from_secs(5), "{:?}", t.elapsed());
+
+        let out = run_command(&sh("sleep 2 > /dev/null 2>&1 & echo started", "", 5), &CancelToken::default());
+        assert_eq!(
+            out.unwrap().stdout.trim(),
+            "started",
+            "a redirected background process does not hold the run"
+        );
     }
 
     #[test]
