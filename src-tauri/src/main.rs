@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod cli;
+mod cli_host;
 mod commands;
 mod desktop;
 mod host;
@@ -110,6 +111,9 @@ fn run_cli() -> Option<i32> {
             return Some(0);
         }
         cli::Command::Write { text, tags } => (text, tags),
+        cli::Command::Run { action, draft, tags } => {
+            return Some(run_from_cli(&action, draft.as_deref(), &tags))
+        }
     };
     let saved = (|| {
         let text = match text {
@@ -126,6 +130,34 @@ fn run_cli() -> Option<i32> {
         Err(e) => {
             eprintln!("petrel: {e:#}");
             Some(1)
+        }
+    }
+}
+
+/// `petrel run`: the draft's uuid on stdout when it worked, the reason on stderr when it did not. Commands get
+/// the terminal's own `PATH`, not the login shell's that the app caches.
+fn run_from_cli(action: &str, draft: Option<&str>, tags: &[String]) -> i32 {
+    let ran = (|| {
+        let text = if draft.is_none() { Some(cli::read_stdin()?) } else { None };
+        let mut host = cli_host::CliHost::new();
+        cli::run_action(&cli::db_path()?, action, draft, text.as_deref(), tags, &mut host)
+    })();
+    match ran {
+        Ok((cli::RunEnd::Ok, uuid)) => {
+            println!("{uuid}");
+            0
+        }
+        Ok((end, message)) => {
+            eprintln!("petrel: {message}");
+            if end == cli::RunEnd::Stopped {
+                cli::RUN_STOPPED
+            } else {
+                cli::RUN_FAILED
+            }
+        }
+        Err(e) => {
+            eprintln!("petrel: {e:#}");
+            cli::RUN_FAILED
         }
     }
 }

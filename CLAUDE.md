@@ -33,7 +33,7 @@ and keys; this file covers state and decisions that aren't visible from the code
   group). The window side is on the same PR: `src-tauri/src/host.rs` (`TauriHost`; dialogs are `host-request`
   events answered by `host_reply`), `run_action` in `spawn_blocking` (one run at a time, `cancel_run` on `Esc`), the
   login shell's `PATH` cached in `settings`, and `src/actions/` (column `Ctrl 2`, editor `Ctrl Shift A`, log `g l`,
-  dialogs). Tried headless against the fake store only. Not yet: `CliHost`, dry-run "Test" (M2).
+  dialogs). Tried headless against the fake store only. `CliHost` (`src-tauri/src/cli_host.rs`) runs `petrel run` (2026-11-06). Not yet: dry-run "Test" (M2).
 - **The owner's UI direction (2026-10-23): minimalist, focused writing.** The launch screen is the text alone
   (action column hidden until `Ctrl 2`, a quiet strip), the list has a preview pane (`peek_draft` never marks
   accessed), and the capture window (`petrel --capture`, `src/Capture.tsx`) has one footer line: folder, tags,

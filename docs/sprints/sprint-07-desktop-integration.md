@@ -23,7 +23,7 @@ Text reaches Petrel from anywhere on the desktop in one gesture, and Petrel give
       `export` work headless against the store with `CliHost`.
       Done: `petrel`, `--capture`, `--new` (a new draft in the running window), `--new TEXT` and `--stdin` with
       `--tag` (`src-tauri/src/cli.rs`). These two write the draft from the calling process, before Tauri starts,
-      and exit: no window, nothing to forward. Not yet: `open`, `run`, `list`, `export`, `log` (`run` needs `CliHost`).
+      and exit: no window, nothing to forward. `petrel run ACTION --draft UUID | --stdin` (2026-11-06, `src-tauri/src/cli_host.rs`: terminal questions, no trust without a terminal, `wl-copy`/`xclip` on Linux). Not yet: `open`, `list`, `export`, `log`.
 - [x] `--help` and a `docs/cli.md` page.
 
 ### URI scheme

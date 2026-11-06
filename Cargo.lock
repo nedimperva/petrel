@@ -2818,6 +2818,7 @@ dependencies = [
  "dirs 7.0.0",
  "env_logger",
  "log",
+ "open",
  "petrel-core",
  "serde",
  "serde_json",
