@@ -1,8 +1,18 @@
 // CodeMirror 6 setup for the draft editor. One function makes a view; the caller owns it. Everything that is
 // a product decision (what keys do, what Markdown looks like) lives here, not in App.tsx.
 
-import { EditorState, Compartment } from "@codemirror/state";
-import { EditorView, keymap, placeholder, drawSelection, highlightActiveLine } from "@codemirror/view";
+import { EditorState, Compartment, RangeSetBuilder } from "@codemirror/state";
+import {
+  Decoration,
+  type DecorationSet,
+  EditorView,
+  keymap,
+  placeholder,
+  drawSelection,
+  highlightActiveLine,
+  ViewPlugin,
+  type ViewUpdate,
+} from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { search, searchKeymap } from "@codemirror/search";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
@@ -21,8 +31,62 @@ export interface EditorHandle {
   select(anchor: number, head: number): void;
   /** While an action that may change the text runs, typing would be lost when its result loads. */
   setReadOnly(on: boolean): void;
+  /** Focus mode: everything but the paragraph being written is dimmed. */
+  setFocusMode(on: boolean): void;
+  /** Typewriter scrolling: the line being typed stays in the middle of the window. */
+  setTypewriter(on: boolean): void;
   destroy(): void;
 }
+
+const dim = Decoration.line({ class: "cm-dim" });
+
+/** The lines of the paragraph around `pos`: up and down to the nearest blank line. */
+export function paragraphAt(state: EditorState, pos: number): { from: number; to: number } {
+  const doc = state.doc;
+  const here = doc.lineAt(pos);
+  if (!here.text.trim()) return { from: here.number, to: here.number };
+  let from = here.number;
+  let to = here.number;
+  while (from > 1 && doc.line(from - 1).text.trim()) from--;
+  while (to < doc.lines && doc.line(to + 1).text.trim()) to++;
+  return { from, to };
+}
+
+/** Dims the visible lines outside the cursor's paragraph. Only visible lines, so a long draft costs nothing. */
+const focusDim = ViewPlugin.fromClass(
+  class {
+    decorations: DecorationSet;
+    constructor(view: EditorView) {
+      this.decorations = this.build(view);
+    }
+    update(u: ViewUpdate) {
+      if (u.docChanged || u.selectionSet || u.viewportChanged) this.decorations = this.build(u.view);
+    }
+    build(view: EditorView): DecorationSet {
+      const b = new RangeSetBuilder<Decoration>();
+      const { from, to } = paragraphAt(view.state, view.state.selection.main.head);
+      for (const r of view.visibleRanges) {
+        for (let pos = r.from; pos <= r.to; ) {
+          const line = view.state.doc.lineAt(pos);
+          if (line.number < from || line.number > to) b.add(line.from, line.from, dim);
+          pos = line.to + 1;
+        }
+      }
+      return b.finish();
+    }
+  },
+  { decorations: (v) => v.decorations },
+);
+
+/** After each edit or move, scroll so the cursor's line sits mid-window. Next frame: not inside an update. */
+const typewriterScroll = EditorView.updateListener.of((u) => {
+  if (!u.docChanged && !u.selectionSet) return;
+  const view = u.view;
+  requestAnimationFrame(() => {
+    if (!view.dom.isConnected) return;
+    view.dispatch({ effects: EditorView.scrollIntoView(view.state.selection.main.head, { y: "center" }) });
+  });
+});
 
 // Headings are heavier, not bigger: the first line is the title whether or not it starts with '#'.
 const markdownHighlight = HighlightStyle.define([
@@ -63,11 +127,15 @@ const theme = EditorView.theme({
   ".cm-searchMatch": { backgroundColor: "var(--warn-soft)" },
   ".cm-searchMatch-selected": { backgroundColor: "var(--accent-soft)" },
   ".cm-textfield, .cm-button": { font: "inherit", fontSize: "12px" },
+  ".cm-dim": { opacity: "0.35", transition: "opacity var(--d-base) var(--ease)" },
 });
 
 export function createEditor(parent: HTMLElement, onChange: () => void): EditorHandle {
   const wrap = new Compartment();
   const readOnly = new Compartment();
+  const focus = new Compartment();
+  const typewriter = new Compartment();
+  const modes = { focus: false, typewriter: false };
   const state = EditorState.create({
     doc: "",
     extensions: [
@@ -76,6 +144,8 @@ export function createEditor(parent: HTMLElement, onChange: () => void): EditorH
       highlightActiveLine(),
       wrap.of(EditorView.lineWrapping),
       readOnly.of(EditorState.readOnly.of(false)),
+      focus.of([]),
+      typewriter.of([]),
       markdown({ base: markdownLanguage }),
       syntaxHighlighting(markdownHighlight),
       placeholder("Type. It's saved. Act on it later."),
@@ -104,6 +174,10 @@ export function createEditor(parent: HTMLElement, onChange: () => void): EditorH
       // A fresh state from the original (empty) one keeps the extensions and empties the undo history, so
       // undo can't walk back into the previous draft.
       view.setState(state.update({ changes: { from: 0, to: 0, insert: text }, selection: { anchor: pos } }).state);
+      // The fresh state has the starting configuration; keep the modes the person turned on.
+      view.dispatch({
+        effects: [focus.reconfigure(modes.focus ? focusDim : []), typewriter.reconfigure(modes.typewriter ? typewriterScroll : [])],
+      });
       view.focus();
     },
     text: () => view.state.doc.toString(),
@@ -115,6 +189,14 @@ export function createEditor(parent: HTMLElement, onChange: () => void): EditorH
       view.dispatch({ selection: { anchor: clamp(anchor), head: clamp(head) }, scrollIntoView: true });
     },
     setReadOnly: (on) => view.dispatch({ effects: readOnly.reconfigure(EditorState.readOnly.of(on)) }),
+    setFocusMode(on) {
+      modes.focus = on;
+      view.dispatch({ effects: focus.reconfigure(on ? focusDim : []) });
+    },
+    setTypewriter(on) {
+      modes.typewriter = on;
+      view.dispatch({ effects: typewriter.reconfigure(on ? typewriterScroll : []) });
+    },
     destroy: () => view.destroy(),
   };
 }

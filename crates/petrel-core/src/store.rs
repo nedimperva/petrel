@@ -1462,6 +1462,17 @@ impl Store {
         Ok(())
     }
 
+    /// Every setting whose key starts with `prefix` (the UI reads its `ui.` settings in one call at start).
+    pub fn settings_with_prefix(&self, prefix: &str) -> Result<Vec<(String, String)>> {
+        // `>=` and `<` instead of LIKE, so `_` and `%` in a prefix are not wildcards.
+        let mut end = prefix.to_string();
+        end.push(char::MAX);
+        let mut st =
+            self.conn.prepare("SELECT key, value FROM settings WHERE key >= ?1 AND key < ?2 ORDER BY key")?;
+        let rows = st.query_map(params![prefix, end], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
     /// For benchmarks and tests only: run arbitrary SQL.
     #[doc(hidden)]
     pub fn raw(&self) -> &Connection {
@@ -2462,5 +2473,17 @@ mod tests {
         s.set_setting("x", "1").unwrap();
         s.set_setting("x", "2").unwrap();
         assert_eq!(s.setting("x").unwrap().as_deref(), Some("2"));
+    }
+
+    #[test]
+    fn settings_by_prefix_are_literal() {
+        let s = store();
+        for (k, v) in [("ui.a", "1"), ("ui.b", "2"), ("uiX", "no"), ("ui_c", "no"), ("u", "no"), ("ui", "no")]
+        {
+            s.set_setting(k, v).unwrap();
+        }
+        let got = s.settings_with_prefix("ui.").unwrap();
+        assert_eq!(got, vec![("ui.a".to_string(), "1".to_string()), ("ui.b".to_string(), "2".to_string())]);
+        assert!(s.settings_with_prefix("nope.").unwrap().is_empty());
     }
 }

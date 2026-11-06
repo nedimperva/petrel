@@ -78,9 +78,15 @@ pub fn rescue_text(state: State<AppState>, text: String) -> R<String> {
 }
 
 /// Closes the calling window once its text is saved; the window's own close button is intercepted so it can't
-/// close first.
+/// close first. With a tray the main window only hides, so it comes back instantly and keeps its state; Quit
+/// (or no tray) really closes it.
 #[tauri::command]
-pub fn close_window(window: tauri::WebviewWindow) {
+pub fn close_window(state: State<AppState>, window: tauri::WebviewWindow) {
+    let stays = state.tray.load(Ordering::SeqCst) && !state.quitting.load(Ordering::SeqCst);
+    if window.label() == "main" && stays {
+        let _ = window.hide();
+        return;
+    }
     let _ = window.destroy();
 }
 
@@ -149,25 +155,67 @@ pub fn sweep(state: State<AppState>) -> R<SweepReport> {
 /// The window starts hidden and the UI shows it once it has rendered, so there is no white flash.
 #[tauri::command]
 pub fn show_window(state: State<AppState>, window: tauri::WebviewWindow) {
-    // `petrel --capture` as the first launch: the main window loads but stays hidden until asked for.
-    if window.label() == "main" && state.capture_launch.swap(false, Ordering::SeqCst) {
+    // `petrel --capture` or `--hidden` as the first launch: the main window loads but stays hidden until asked for.
+    if window.label() == "main" && state.stay_hidden.swap(false, Ordering::SeqCst) {
         return;
     }
     let _ = window.show();
     let _ = window.set_focus();
 }
 
-/// The capture window saved its draft and is done. If the main window was never shown, nothing is left on
-/// screen; until the tray exists (package 07) that means quitting rather than lingering unseen.
+/// The capture window saved its draft and is done. With a tray Petrel keeps running there. Without one, if the
+/// main window was never shown, nothing would be left on screen, so Petrel quits rather than lingering unseen.
 #[tauri::command]
-pub fn close_capture(app: tauri::AppHandle) {
+pub fn close_capture(state: State<AppState>, app: tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("capture") {
         let _ = w.destroy();
+    }
+    if state.tray.load(Ordering::SeqCst) {
+        return;
     }
     let main_visible = app.get_webview_window("main").and_then(|w| w.is_visible().ok()).unwrap_or(false);
     if !main_visible {
         app.exit(0);
     }
+}
+
+/// The command bar's "Capture window".
+#[tauri::command]
+pub fn open_capture_window(app: tauri::AppHandle) {
+    crate::open_capture(&app);
+}
+
+/// The UI's own preferences (`ui.*`: open to new draft, editor type). Other keys belong to the engine.
+#[tauri::command]
+pub fn ui_settings(state: State<AppState>) -> R<std::collections::HashMap<String, String>> {
+    with(&state, |s| Ok(s.settings_with_prefix("ui.")?.into_iter().collect()))
+}
+
+#[tauri::command]
+pub fn set_ui_setting(state: State<AppState>, key: String, value: String) -> R<()> {
+    if !key.starts_with("ui.") || key.len() > 64 {
+        return Err(format!("{key} is not a UI setting"));
+    }
+    with(&state, |s| s.set_setting(&key, &value))
+}
+
+/// The settings page's Desktop section: the capture hotkey and start at login.
+#[tauri::command]
+pub fn desktop_settings(app: tauri::AppHandle) -> crate::desktop::DesktopSettings {
+    crate::desktop::settings(&app)
+}
+
+/// `None` or empty turns the hotkey off. Refused (and the old one kept) when the key is taken or malformed.
+#[tauri::command]
+pub fn set_hotkey(app: tauri::AppHandle, hotkey: Option<String>) -> R<crate::desktop::DesktopSettings> {
+    crate::desktop::set_hotkey(&app, hotkey).map_err(|e| format!("{e:#}"))?;
+    Ok(crate::desktop::settings(&app))
+}
+
+#[tauri::command]
+pub fn set_autostart(app: tauri::AppHandle, on: bool) -> R<crate::desktop::DesktopSettings> {
+    crate::desktop::set_autostart(&app, on).map_err(|e| format!("{e:#}"))?;
+    Ok(crate::desktop::settings(&app))
 }
 
 // ---- actions (package 03) -----------------------------------------------------------------------------------

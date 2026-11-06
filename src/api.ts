@@ -195,6 +195,22 @@ export interface HostEvents {
   message(kind: "info" | "warning", text: string): void;
 }
 
+/** The capture hotkey and start at login (package 07). */
+export interface DesktopSettings {
+  /** `Ctrl+Alt+Space`; null when off. */
+  hotkey: string | null;
+  hotkeyDefault: string;
+  /** Registered and not paused from the tray. */
+  hotkeyActive: boolean;
+  hotkeyPaused: boolean;
+  /** Why the hotkey could not be registered at start (taken by another app, say). */
+  hotkeyError: string | null;
+  /** False on Wayland: the compositor binds keys there. */
+  hotkeySupported: boolean;
+  autostart: boolean;
+  autostartError: string | null;
+}
+
 export interface Api {
   appInfo(): Promise<AppInfo>;
   newDraft(content: string): Promise<Draft>;
@@ -241,6 +257,18 @@ export interface Api {
   cancelRun(): Promise<boolean>;
   hostReply(id: number, value: unknown): Promise<boolean>;
   listenHost(events: HostEvents): Promise<void>;
+  /** The tray and a second launch: `newDraft` (tray "New draft", `petrel --new`) and `quit` (tray "Quit": save,
+   * then close this window). No-op outside Tauri. */
+  listenApp(events: { newDraft(): void; quit(): void }): Promise<void>;
+  /** Opens the capture window, or focuses it. */
+  openCapture(): Promise<void>;
+  desktopSettings(): Promise<DesktopSettings>;
+  /** The UI's `ui.*` preferences as stored strings. */
+  uiSettings(): Promise<Record<string, string>>;
+  setUiSetting(key: string, value: string): Promise<void>;
+  /** null turns it off. Rejects, keeping the old one, when the key is taken or can't be a hotkey. */
+  setHotkey(hotkey: string | null): Promise<DesktopSettings>;
+  setAutostart(on: boolean): Promise<DesktopSettings>;
   /** A folder from the system picker, or null when cancelled. */
   pickFolder(): Promise<string | null>;
 }
@@ -284,6 +312,18 @@ async function tauriApi(): Promise<Api> {
       const picked = await open({ directory: true, title: "Choose a folder" });
       return typeof picked === "string" ? picked : null;
     },
+    listenApp: async (events) => {
+      const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+      const win = getCurrentWebviewWindow();
+      await win.listen("petrel-new", () => events.newDraft());
+      await win.listen("petrel-quit", () => events.quit());
+    },
+    openCapture: () => invoke("open_capture_window"),
+    desktopSettings: () => invoke("desktop_settings"),
+    uiSettings: () => invoke("ui_settings"),
+    setUiSetting: (key, value) => invoke("set_ui_setting", { key, value }),
+    setHotkey: (hotkey) => invoke("set_hotkey", { hotkey }),
+    setAutostart: (on) => invoke("set_autostart", { on }),
     listenHost: async (events) => {
       // This window's events only: a run's dialogs go to the window that started it.
       const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
@@ -490,6 +530,17 @@ function fakeApi(): Api {
 /** Actions without the engine: a few step types are acted out, the rest are logged. Enough to work on the list,
  *  the editor, the dialogs and the log in a browser. */
 function fakeActions(draft: (id: number) => Draft | undefined) {
+  const ui: Record<string, string> = {};
+  const desktop: DesktopSettings = {
+    hotkey: "Ctrl+Alt+Space",
+    hotkeyDefault: "Ctrl+Alt+Space",
+    hotkeyActive: true,
+    hotkeyPaused: false,
+    hotkeyError: null,
+    hotkeySupported: true,
+    autostart: false,
+    autostartError: null,
+  };
   const base = { description: "", hidden: false, disabled: false, confirm: false, addTags: [], afterSuccess: "nothing" as const };
   const make = (name: string, icon: string, color: string, steps: Step[], more: Partial<Action> = {}): Action => ({
     ...base,
@@ -650,6 +701,24 @@ function fakeActions(draft: (id: number) => Draft | undefined) {
     },
     listenHost: async (e: HostEvents) => {
       events = e;
+    },
+    listenApp: async () => {},
+    desktopSettings: async () => ({ ...desktop }),
+    uiSettings: async () => ({ ...ui }),
+    setUiSetting: async (key: string, value: string) => {
+      ui[key] = value;
+    },
+    setHotkey: async (hotkey: string | null) => {
+      if (hotkey && !/(Ctrl|Alt|Shift|Super)\+/.test(hotkey)) throw new Error("a hotkey needs Ctrl, Alt or Shift");
+      Object.assign(desktop, { hotkey, hotkeyActive: !!hotkey, hotkeyError: null });
+      return { ...desktop };
+    },
+    setAutostart: async (on: boolean) => {
+      desktop.autostart = on;
+      return { ...desktop };
+    },
+    openCapture: async () => {
+      window.open("?capture", "_blank");
     },
     pickFolder: async () => "/home/you/Notes",
   };

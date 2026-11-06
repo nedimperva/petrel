@@ -1,19 +1,23 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod cli;
 mod commands;
+mod desktop;
 mod host;
+mod tray;
 
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use petrel_core::host::{system, CancelToken};
 use petrel_core::Store;
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 pub struct AppState {
-    /// Launched as `petrel --capture`: the main window stays hidden until something asks for it.
-    pub capture_launch: AtomicBool,
+    /// Launched as `petrel --capture`, or `--hidden` at login: the main window stays hidden until something asks
+    /// for it.
+    pub stay_hidden: AtomicBool,
     pub store: Mutex<Store>,
     pub db_path: PathBuf,
     /// Dialogs an action is waiting on.
@@ -21,6 +25,12 @@ pub struct AppState {
     pub clipboard: Mutex<Option<arboard::Clipboard>>,
     /// The running action's token, for `Esc`.
     pub running: Mutex<Option<CancelToken>>,
+    /// The tray icon is up, so closing the last window keeps Petrel running (package 07).
+    pub tray: AtomicBool,
+    /// Quit was chosen: windows are saving and closing, and the last one to go ends the process.
+    pub quitting: AtomicBool,
+    /// The global capture hotkey (package 07).
+    pub hotkey: Mutex<desktop::Hotkey>,
 }
 
 /// The login shell's `PATH` is cached here and refreshed off the start path (actions.md "Shell").
@@ -48,17 +58,79 @@ fn db_path(app: &tauri::App) -> anyhow::Result<PathBuf> {
         return Ok(PathBuf::from(p));
     }
     let dir = app.path().app_data_dir()?;
-    Ok(if cfg!(debug_assertions) { dir.join("dev").join("petrel.db") } else { dir.join("petrel.db") })
+    let path = if cfg!(debug_assertions) { dir.join("dev").join("petrel.db") } else { dir.join("petrel.db") };
+    // `petrel --stdin` finds the database without starting Tauri; the two must never disagree.
+    match cli::db_path() {
+        Ok(p) if p == path => {}
+        other => log::warn!("the command line would use {other:?}, the app uses {}", path.display()),
+    }
+    Ok(path)
 }
 
 fn wants_capture(args: &[String]) -> bool {
     args.iter().skip(1).any(|a| a == "--capture")
 }
 
+fn wants_new(args: &[String]) -> bool {
+    args.iter().skip(1).any(|a| a == "--new" || a == "-n")
+}
+
+/// Shows the main window and brings it to the front.
+pub fn show_main(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+}
+
+/// Shows the main window on a new draft: the UI saves the open one first.
+pub fn show_new_draft(app: &tauri::AppHandle) {
+    show_main(app);
+    let _ = app.emit_to("main", "petrel-new", ());
+}
+
+/// Handles `--new TEXT`, `--stdin` and `--help` without a window. `None` means start the app.
+fn run_cli() -> Option<i32> {
+    let args: Vec<String> = std::env::args().collect();
+    let command = match cli::parse(&args) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("petrel: {e:#}\n\n{}", cli::HELP);
+            return Some(2);
+        }
+    };
+    let (text, tags) = match command {
+        cli::Command::App => return None,
+        cli::Command::Help => {
+            println!("{}", cli::HELP);
+            return Some(0);
+        }
+        cli::Command::Write { text, tags } => (text, tags),
+    };
+    let saved = (|| {
+        let text = match text {
+            Some(t) => t,
+            None => cli::read_stdin()?,
+        };
+        cli::write_draft(&cli::db_path()?, &text, &tags)
+    })();
+    match saved {
+        Ok(uuid) => {
+            println!("{uuid}");
+            Some(0)
+        }
+        Err(e) => {
+            eprintln!("petrel: {e:#}");
+            Some(1)
+        }
+    }
+}
+
 /// Opens the capture window, or focuses it if it is open (ui.md §3). It starts hidden and shows itself once the
 /// editor has rendered, like the main window. The title is what a Hyprland float rule matches on: on Wayland
 /// every Petrel window shares the app id.
-fn open_capture(app: &tauri::AppHandle) {
+pub fn open_capture(app: &tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("capture") {
         let _ = w.show();
         let _ = w.set_focus();
@@ -68,6 +140,8 @@ fn open_capture(app: &tauri::AppHandle) {
         .title("Petrel capture")
         .inner_size(560.0, 320.0)
         .min_inner_size(360.0, 160.0)
+        // A quick note over whatever you were doing; it closes itself when you're done.
+        .always_on_top(true)
         .visible(false)
         .initialization_script("window.__PETREL_CAPTURE__ = true;")
         .build();
@@ -122,6 +196,10 @@ impl std::io::Write for Tee {
 }
 
 fn main() {
+    if let Some(code) = run_cli() {
+        std::process::exit(code);
+    }
+
     // WebKitGTK's DMA-BUF renderer leaves the window blank or crashes on some Wayland setups (NVIDIA among
     // them). Off unless the user says otherwise. Same as Tern.
     #[cfg(target_os = "linux")]
@@ -131,15 +209,26 @@ fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            // A second launch focuses the running one, or opens capture. `--new "text"` arrives with package 07.
+            // A second launch focuses the running one, opens capture, or starts a new draft. `--new TEXT` and
+            // `--stdin` never get here: they write the draft and exit before Tauri starts.
             if wants_capture(&args) {
                 return open_capture(app);
             }
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.show();
-                let _ = w.set_focus();
+            // Start at login while Petrel already runs: it is already where it should be.
+            if desktop::wants_hidden(&args) {
+                return;
             }
+            if wants_new(&args) {
+                return show_new_draft(app);
+            }
+            show_main(app);
         }))
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, shortcut, event| desktop::on_shortcut(app, shortcut, event.state))
+                .build(),
+        )
+        .plugin(tauri_plugin_autostart::Builder::new().arg(desktop::HIDDEN_ARG).build())
         .plugin(tauri_plugin_opener::init())
         // The folder picker in the action editor.
         .plugin(tauri_plugin_dialog::init())
@@ -158,15 +247,33 @@ fn main() {
             }
             system::use_path(store.setting(PATH_SETTING).ok().flatten());
             log::info!("Petrel {} · {}", env!("CARGO_PKG_VERSION"), path.display());
-            let capture = wants_capture(&std::env::args().collect::<Vec<_>>());
+            let args: Vec<String> = std::env::args().collect();
+            let capture = wants_capture(&args);
             app.manage(AppState {
-                capture_launch: AtomicBool::new(capture),
+                stay_hidden: AtomicBool::new(capture),
                 store: Mutex::new(store),
                 db_path: path,
                 broker: host::Broker::default(),
                 clipboard: Mutex::new(None),
                 running: Mutex::new(None),
+                tray: AtomicBool::new(false),
+                quitting: AtomicBool::new(false),
+                hotkey: Mutex::new(desktop::Hotkey::default()),
             });
+            // Without a tray (no StatusNotifier host on Linux, say), closing the window quits, as before.
+            // The Linux tray loads libayatana-appindicator at run time and panics if it is missing.
+            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| tray::build(app))) {
+                Ok(Ok(())) => app.state::<AppState>().tray.store(true, Ordering::SeqCst),
+                Ok(Err(e)) => log::warn!("no tray icon, closing the window will quit: {e:#}"),
+                Err(_) => log::warn!(
+                    "no tray icon (is libayatana-appindicator installed?); closing the window will quit"
+                ),
+            }
+            if desktop::start_hidden(app.handle(), &args) {
+                app.state::<AppState>().stay_hidden.store(true, Ordering::SeqCst);
+                log::info!("started hidden in the tray");
+            }
+            desktop::init(app.handle());
             // Petrel can stay open for weeks; the Trash and version policies still apply, and the login PATH
             // may change.
             let handle = app.handle().clone();
@@ -205,6 +312,12 @@ fn main() {
             commands::sweep,
             commands::show_window,
             commands::close_capture,
+            commands::open_capture_window,
+            commands::desktop_settings,
+            commands::ui_settings,
+            commands::set_ui_setting,
+            commands::set_hotkey,
+            commands::set_autostart,
             commands::list_actions,
             commands::save_action,
             commands::delete_action,
@@ -213,6 +326,15 @@ fn main() {
             commands::cancel_run,
             commands::host_reply,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Petrel");
+        .build(tauri::generate_context!())
+        .expect("error while building Petrel")
+        .run(|app, event| {
+            // The last window closed: keep running in the tray unless Quit was chosen. `app.exit` (a code) passes.
+            if let tauri::RunEvent::ExitRequested { code: None, api, .. } = event {
+                let Some(state) = app.try_state::<AppState>() else { return };
+                if state.tray.load(Ordering::SeqCst) && !state.quitting.load(Ordering::SeqCst) {
+                    api.prevent_exit();
+                }
+            }
+        });
 }
