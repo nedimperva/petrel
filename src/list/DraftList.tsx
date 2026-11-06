@@ -44,7 +44,7 @@ interface Props {
   onLog(): void;
   ref(h: ListHandle): void;
   /** Where the list opens: the command bar opens it on a tab or a tag. Inbox otherwise. */
-  start?: { tab?: Tab; tag?: string };
+  start?: { tab?: Tab; tag?: string; query?: string };
 }
 
 const PAGE = 100;
@@ -118,7 +118,7 @@ export default function DraftList(props: Props) {
   let body!: HTMLDivElement;
   const [tab, setTab] = createSignal<Tab>(props.start?.tab ?? (props.start?.tag ? "all" : "inbox"));
   const [tag, setTag] = createSignal<string | null>(props.start?.tag ?? null);
-  const [query, setQuery] = createSignal("");
+  const [query, setQuery] = createSignal(props.start?.query ?? "");
   const [rows, setRows] = createSignal<Row[]>([]);
   const [next, setNext] = createSignal<Cursor | null>(null);
   const [at, setAt] = createSignal(0);

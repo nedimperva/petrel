@@ -24,3 +24,6 @@ tauri-plugin-dialog = "2"
 dirs = "7"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-autostart = "2"
+tauri-plugin-deep-link = "2"
+# Opens URLs for `petrel run`, which has no Tauri app; already in the tree through tauri-plugin-opener.
+open = "5"
