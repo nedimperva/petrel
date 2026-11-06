@@ -2,6 +2,7 @@
 // Without Tauri (`npm run dev` in a browser) a fake in-memory store with a few drafts stands in, so the UI
 // can be worked on without a Rust toolchain.
 
+
 export type Folder = "inbox" | "archive" | "trash";
 
 export interface Draft {
@@ -18,6 +19,8 @@ export interface Draft {
   accessedAt: number;
   tags: string[];
   versionCount: number;
+  /** The note this draft became (promoted, or added to one). */
+  promoted?: Promotion | null;
 }
 
 export interface DraftSummary {
@@ -229,7 +232,137 @@ export type Link =
   | { kind: "search"; query: string }
   | { kind: "unknown"; url: string; why: string };
 
-export interface Api {
+// ---- notes (docs/design/notes.md) ---------------------------------------------------------------------------
+
+export interface Promotion {
+  notePath: string;
+  noteTitle: string;
+  /** While the note's file is in the notes folder. */
+  noteId: number | null;
+  kind: "promote" | "append";
+  at: number;
+}
+
+export interface Note {
+  id: number;
+  /** Relative to the notes folder, `/` between parts. */
+  path: string;
+  /** `""` for the top of the notes folder. */
+  folder: string;
+  title: string;
+  /** The text without front matter. */
+  body: string;
+  tags: string[];
+  pinned: boolean;
+  /** Pass back to `saveNote` so edits made in another app are kept, not overwritten. */
+  hash: string;
+  createdAt: number;
+  modifiedAt: number;
+  versionCount: number;
+}
+
+export interface NoteSummary {
+  id: number;
+  path: string;
+  folder: string;
+  title: string;
+  preview: string;
+  tags: string[];
+  pinned: boolean;
+  modifiedAt: number;
+}
+
+export interface NoteFolder {
+  path: string;
+  name: string;
+  depth: number;
+  count: number;
+}
+
+export interface SavedNote {
+  hash: string;
+  modifiedAt: number;
+  /** The file had changed on disk: the other text was kept at this path. */
+  conflict: string | null;
+}
+
+export interface ScanReport {
+  added: number;
+  changed: number;
+  removed: number;
+  skipped: number;
+  root: string;
+}
+
+export interface NoteChange {
+  note: Note;
+  token: UndoToken;
+  /** Other notes and drafts whose links were rewritten. */
+  relinked: number;
+}
+
+export interface LinkTarget {
+  kind: "note" | "draft";
+  id: number;
+  title: string;
+  /** A note's folder, or a draft's (`inbox`, `archive`). */
+  folder: string;
+  uuid: string | null;
+  modifiedAt: number;
+}
+
+export type Resolved =
+  | { kind: "note"; id: number }
+  | { kind: "draft"; id: number }
+  | { kind: "missing"; title: string; folder: string | null; draft: boolean };
+
+export interface BackRef {
+  kind: "note" | "draft";
+  id: number;
+  title: string;
+  line: string;
+}
+
+export interface Backlinks {
+  linked: BackRef[];
+  mentioned: BackRef[];
+}
+
+export interface NoteQuery {
+  folder?: string | null;
+  pinned?: boolean | null;
+  limit?: number;
+}
+
+export interface NotesApi {
+  notesInfo(): Promise<{ root: string }>;
+  setNotesRoot(root: string): Promise<ScanReport>;
+  /** Brings the index up to date with the folder (new, changed and removed files). */
+  scanNotes(): Promise<ScanReport>;
+  listNotes(query: NoteQuery): Promise<NoteSummary[]>;
+  /** By title, for `Ctrl P`. */
+  findNotes(text: string, limit: number): Promise<NoteSummary[]>;
+  /** By the words in the text, for `Ctrl K`. */
+  searchNotes(text: string, limit: number): Promise<NoteSummary[]>;
+  noteFolders(): Promise<NoteFolder[]>;
+  openNote(id: number): Promise<Note>;
+  peekNote(id: number): Promise<Note>;
+  createNote(folder: string, title: string, body: string, tags: string[]): Promise<Note>;
+  saveNote(id: number, body: string, baseHash: string): Promise<SavedNote>;
+  renameNote(id: number, title: string): Promise<NoteChange>;
+  pinNote(id: number, pinned: boolean): Promise<Note>;
+  setNoteTags(id: number, tags: string[]): Promise<Note>;
+  trashNote(id: number): Promise<UndoToken>;
+  promoteDraft(draftId: number, folder: string, title: string, keepTags: boolean): Promise<NoteChange>;
+  appendToNote(draftId: number, noteId: number, keepTags: boolean): Promise<NoteChange>;
+  linkTargets(text: string, limit: number): Promise<LinkTarget[]>;
+  /** What is inside `[[…]]`. */
+  resolveLink(inner: string): Promise<Resolved>;
+  backlinks(id: number): Promise<Backlinks>;
+  linkMention(noteId: number, kind: "note" | "draft", id: number): Promise<UndoToken>;
+}
+
+export interface Api extends NotesApi {
   appInfo(): Promise<AppInfo>;
   newDraft(content: string): Promise<Draft>;
   openDraft(id: number): Promise<Draft>;
@@ -333,6 +466,27 @@ async function tauriApi(): Promise<Api> {
     runAction: (key, draftId, editor, source) => invoke("run_action", { key, draftId, editor, source }),
     cancelRun: () => invoke("cancel_run"),
     hostReply: (id, value) => invoke("host_reply", { id, value }),
+    notesInfo: () => invoke("notes_info"),
+    setNotesRoot: (root) => invoke("set_notes_root", { root }),
+    scanNotes: () => invoke("scan_notes"),
+    listNotes: (query) => invoke("list_notes", { query }),
+    findNotes: (text, limit) => invoke("find_notes", { text, limit }),
+    searchNotes: (text, limit) => invoke("search_notes", { text, limit }),
+    noteFolders: () => invoke("note_folders"),
+    openNote: (id) => invoke("open_note", { id }),
+    peekNote: (id) => invoke("peek_note", { id }),
+    createNote: (folder, title, body, tags) => invoke("create_note", { folder, title, body, tags }),
+    saveNote: (id, body, baseHash) => invoke("save_note", { id, body, baseHash }),
+    renameNote: (id, title) => invoke("rename_note", { id, title }),
+    pinNote: (id, pinned) => invoke("pin_note", { id, pinned }),
+    setNoteTags: (id, tags) => invoke("set_note_tags", { id, tags }),
+    trashNote: (id) => invoke("trash_note", { id }),
+    promoteDraft: (draftId, folder, title, keepTags) => invoke("promote_draft", { draftId, folder, title, keepTags }),
+    appendToNote: (draftId, noteId, keepTags) => invoke("append_to_note", { draftId, noteId, keepTags }),
+    linkTargets: (text, limit) => invoke("link_targets", { text, limit }),
+    resolveLink: (inner) => invoke("resolve_link", { inner }),
+    backlinks: (id) => invoke("backlinks", { id }),
+    linkMention: (noteId, kind, id) => invoke("link_mention", { noteId, kind, id }),
     pickFolder: async () => {
       const { open } = await import("@tauri-apps/plugin-dialog");
       const picked = await open({ directory: true, title: "Choose a folder" });
@@ -369,7 +523,7 @@ async function tauriApi(): Promise<Api> {
   };
 }
 
-function fakeApi(): Api {
+function fakeApi(fakeNotes: typeof import("./notes/fake").fakeNotes): Api {
   const drafts = new Map<number, Draft>();
   let nextId = 1;
   const now = () => Date.now();
@@ -587,6 +741,7 @@ function fakeApi(): Api {
     // A browser tab cannot close itself; a fresh capture is the nearest thing.
     closeCapture: async () => location.reload(),
     ...fakeActions((id) => drafts.get(id)),
+    ...fakeNotes({ drafts, make, move: (ids, folder) => batch(ids, "folder", folder), undos }),
   };
 }
 
@@ -810,4 +965,7 @@ function fakeActions(draft: (id: number) => Draft | undefined) {
   };
 }
 
-export const api: Promise<Api> = inTauri ? tauriApi() : Promise.resolve(fakeApi());
+export const api: Promise<Api> = inTauri
+  ? tauriApi()
+  : // The notes fake is its own chunk, so it stays out of the real build's first load.
+    import("./notes/fake").then((m) => fakeApi(m.fakeNotes));

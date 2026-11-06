@@ -12,11 +12,16 @@ import DraftList, { type ListHandle, type Tab } from "./list/DraftList";
 // Not lazy: they take keys the moment they open, and keys typed while a chunk loads would be lost (5 kB gz).
 import CommandBar, { type Command } from "./palette/CommandBar";
 import Versions, { type VersionsHandle } from "./versions/Versions";
+import type { NotesHandle, NotesStart } from "./notes/NotesView";
+import type { Extension } from "@codemirror/state";
 
 // Not on the launch path: loaded the first time they open.
 const ActionEditor = lazy(() => import("./actions/ActionEditor"));
 const ActionLog = lazy(() => import("./actions/ActionLog"));
 const Settings = lazy(() => import("./settings/Settings"));
+const NotesView = lazy(() => import("./notes/NotesView"));
+const Promote = lazy(() => import("./notes/Promote"));
+const NoteFinder = lazy(() => import("./notes/NoteFinder"));
 
 
 /** How long a toast stays in the strip. */
@@ -62,6 +67,16 @@ export default function App() {
   /** The history panel (`Ctrl H`) for the open draft. */
   const [historyOpen, setHistoryOpen] = createSignal(false);
   let history: VersionsHandle | undefined;
+  /** Notes (`Ctrl 3`): the home of cards or a note page, over the draft editor. */
+  const [notesOpen, setNotesOpen] = createSignal(false);
+  const [notesStart, setNotesStart] = createSignal<NotesStart>({ kind: "home" });
+  let notes: NotesHandle | undefined;
+  /** `Ctrl P`. */
+  const [finderOpen, setFinderOpen] = createSignal(false);
+  /** `Ctrl Shift N`: the promote dialog, on a new note or adding to one. */
+  const [promoting, setPromoting] = createSignal<"new" | "append" | null>(null);
+  /** The `[[link]]` extension, loaded after the first paint and shared with the note editor. */
+  const [links, setLinks] = createSignal<Extension | undefined>(undefined);
   /** Focus mode (`Ctrl Shift D`): the text alone, the paragraph being written in full colour. */
   const [focusMode, setFocusMode] = createSignal(false);
   const [tagging, setTagging] = createSignal(false);
@@ -82,13 +97,22 @@ export default function App() {
   let gPending = false;
 
   const autosave = createAutosave({ store: () => api, editor: () => editor, draft, setDraft, setSave });
-  const close = createCloser({
+  const closeDraft = createCloser({
     autosave,
     text: () => editor?.text() ?? "",
     rescue: async (text) => (await api).rescueText(text),
     close: async () => (await api).closeWindow(),
     say,
   });
+
+  /** Both editors are saved before the window goes: a note page that will not save keeps the window open. */
+  async function close() {
+    if (notes && !(await notes.flush())) {
+      say("A note is not saved yet. The text stays here until it is.");
+      return;
+    }
+    await closeDraft();
+  }
 
   function countLater() {
     window.clearTimeout(wordsTimer);
@@ -164,6 +188,7 @@ export default function App() {
       if (u.reopen && !draft() && editor?.text() === "") await openDraft(u.reopen);
       else if (draft()) refreshDraft();
       list?.reload();
+      if (notesOpen()) void notes?.rescan();
     } catch (e) {
       say(String(e).replace(/^Error: /, ""));
     }
@@ -277,7 +302,13 @@ export default function App() {
       { id: "actions", name: "Show or hide actions", keys: "Ctrl 2", run: toggleActions },
       { id: "new-action", name: "New action", keys: "Ctrl Shift A", run: () => editAction(null) },
       { id: "log", name: "Action log", run: openLog },
-      { id: "settings", name: "Settings: capture hotkey, start at login", keys: "Ctrl ,", run: () => setSettingsOpen(true) },
+      { id: "settings", name: "Settings: capture hotkey, start at login, notes folder", keys: "Ctrl ,", run: () => setSettingsOpen(true) },
+      { id: "notes", name: "Notes home", keys: "Ctrl 3", run: () => openNotes({ kind: "home" }) },
+      { id: "find-note", name: "Find a note", keys: "Ctrl P", run: () => setFinderOpen(true) },
+      { id: "new-note", name: "New note", run: () => openNotes({ kind: "new" }) },
+      { id: "promote", name: "Promote this draft to a note", keys: "Ctrl Shift N", run: () => startPromote("new") },
+      { id: "append-note", name: "Add this draft to the end of a note", run: () => startPromote("append") },
+      { id: "pin-note", name: "Pin or unpin this note", run: () => (notesOpen() ? notes?.pin() : say("Open a note first: Ctrl P finds one.")) },
     ];
     if (inTauri) {
       list.splice(2, 0, { id: "capture", name: "Open the capture window", run: async () => (await api).openCapture() });
@@ -288,6 +319,102 @@ export default function App() {
   function closePalette() {
     setPaletteOpen(false);
     editor?.view.focus();
+  }
+
+  // ---- notes (docs/design/notes.md) -------------------------------------------------------------------------
+
+  /** Shows the notes view on `start`, saving the draft first. */
+  async function openNotes(start: NotesStart) {
+    if (!(await saved())) return;
+    setListOpen(false);
+    setHistoryOpen(false);
+    setLogOpen(false);
+    setTagging(false);
+    leaveEditor();
+    if (notesOpen() && notes) return notes.show(start);
+    setNotesStart(start);
+    setNotesOpen(true);
+  }
+
+  /** Back to the draft editor, once the note is saved. */
+  async function closeNotes(): Promise<boolean> {
+    if (notes && !(await notes.flush())) {
+      say("The note is not saved yet. The text stays here until it is.");
+      return false;
+    }
+    setNotesOpen(false);
+    notes = undefined;
+    editor?.view.focus();
+    return true;
+  }
+
+  async function startPromote(mode: "new" | "append") {
+    if (notesOpen()) return say("That is a note already. Promote works on a draft (Esc goes back to drafts).");
+    if (!(await saved())) return;
+    if (!draft()) return say("Type something first: an empty draft has nothing to keep.");
+    leaveEditor();
+    setPromoting(mode);
+  }
+
+  async function promoted(c: import("./api").NoteChange, mode: "new" | "append") {
+    setPromoting(null);
+    const links = c.relinked ? ` Links in ${c.relinked} ${c.relinked === 1 ? "text" : "texts"} now go to the note.` : "";
+    // Drafts' habit: the draft is filed away, the editor is ready for the next one.
+    await newDraft();
+    list?.reload();
+    remember({ label: `${mode === "new" ? "Promoted to" : "Added to"} “${c.note.title}”.${links}`, token: c.token.token }, Math.max(1, c.token.count));
+  }
+
+  /** Follows `[[inner]]` from either editor. A note that is not there yet is made, in the open note's folder. */
+  async function followWikiLink(inner: string) {
+    const a = await api;
+    let r: import("./api").Resolved;
+    try {
+      r = await a.resolveLink(inner);
+    } catch (e) {
+      return say(String(e).replace(/^Error: /, ""));
+    }
+    if (r.kind === "note") return openNotes({ kind: "note", id: r.id });
+    if (r.kind === "draft") {
+      if (notesOpen() && !(await closeNotes())) return;
+      return openDraft(r.id);
+    }
+    if (r.draft) return say(`No draft called “${r.title}”.`);
+    try {
+      if (notesOpen() && notes && !(await notes.flush())) return;
+      const n = await a.createNote(r.folder ?? notes?.folder() ?? "", r.title, "", []);
+      say(`New note “${n.title}”.`);
+      await openNotes({ kind: "note", id: n.id });
+    } catch (e) {
+      say(String(e).replace(/^Error: /, ""));
+    }
+  }
+
+  async function loadLinks() {
+    const m = await import("./notes/links");
+    const ext = m.linkExtensions({
+      open: (inner) => void followWikiLink(inner),
+      resolve: async (inner) => (await api).resolveLink(inner),
+      preview: async (r) => {
+        const a = await api;
+        if (r.kind === "note") {
+          const n = await a.peekNote(r.id);
+          return { title: n.title, where: n.folder ? `Note · ${n.folder}` : "Note", text: n.body.replace(/\s+/g, " ").trim().slice(0, 180) };
+        }
+        if (r.kind === "draft") {
+          const d = await a.peekDraft(r.id);
+          return { title: d.title || "untitled", where: `Draft · ${d.folder}`, text: d.content.split("\n").slice(1).join(" ").trim().slice(0, 180) };
+        }
+        return null;
+      },
+      targets: async (text) => (await api).linkTargets(text, 8),
+      create: async (title) => {
+        const n = await (await api).createNote(notes?.folder() ?? "", title, "", []);
+        say(`New note “${n.title}”.`);
+      },
+    });
+    editor?.setExtra(ext);
+    setLinks(ext);
   }
 
   // ---- petrel:// links (package 07) ------------------------------------------------------------------------
@@ -463,11 +590,17 @@ export default function App() {
 
   function onKey(e: KeyboardEvent) {
     // A dialog, the action editor or the command bar takes every key.
-    if (requests().length || editing() || paletteOpen() || settingsOpen()) return;
+    if (requests().length || editing() || paletteOpen() || settingsOpen() || finderOpen() || promoting()) return;
     const k = e.key.toLowerCase();
     const ctrl = e.ctrlKey || e.metaKey;
     if (ctrl && !e.shiftKey && !e.altKey && k === "k") return stop(e, openPalette);
     if (ctrl && !e.shiftKey && !e.altKey && e.key === ",") return stop(e, () => setSettingsOpen(true));
+    if (ctrl && !e.shiftKey && !e.altKey && k === "p") return stop(e, () => (leaveEditor(), setFinderOpen(true)));
+    if (ctrl && !e.shiftKey && !e.altKey && e.key === "3") {
+      return stop(e, () => (notesOpen() && !notes?.current() ? closeNotes() : openNotes({ kind: "home" })));
+    }
+    if (notesOpen()) return notesKey(e, k, ctrl);
+    if (ctrl && e.shiftKey && !e.altKey && k === "n") return stop(e, () => startPromote("new"));
     if (ctrl && !e.shiftKey && !e.altKey && k === "h") return stop(e, openHistory);
     if (e.key === "Escape" && running()) return stop(e, async () => (await api).cancelRun());
     if (ctrl && e.shiftKey && !e.altKey && k === "a") {
@@ -526,6 +659,28 @@ export default function App() {
     }
   }
 
+  /** Keys while the notes view is up. Draft keys that make no sense on a note say so instead of acting on the
+   * draft hidden behind it. */
+  function notesKey(e: KeyboardEvent, k: string, ctrl: boolean) {
+    if (ctrl && !e.altKey && !e.shiftKey) {
+      if (k === "n") return stop(e, () => notes?.show({ kind: "new" }));
+      if (k === "l") return stop(e, async () => (await closeNotes()) && openList());
+      if (k === "t") return stop(e, () => notes?.tag());
+      if (k === "h") return stop(e, () => say("Notes keep their versions; a History panel for notes comes next."));
+      if (k === "e" || k === "enter" || k === "2") return stop(e, () => say("That works on drafts. Esc goes back to them."));
+    }
+    if (ctrl && e.shiftKey && !e.altKey) {
+      if (e.key === "#" || e.code === "Digit3") return stop(e, () => notes?.trash());
+      if (k === "f" || k === "n") return stop(e, () => say("That works on drafts. Esc goes back to them."));
+    }
+    // A completion list or the search panel takes its own Escape.
+    if (e.key === "Escape" && document.querySelector(".notes .cm-tooltip-autocomplete, .notes .cm-panels")) return;
+    if (notes?.key(e)) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }
+
   function stop(e: KeyboardEvent, run: () => unknown) {
     e.preventDefault();
     e.stopPropagation();
@@ -573,12 +728,14 @@ export default function App() {
     if (hidden) {
       awaySince ??= Date.now();
       void autosave.flush();
+      void notes?.flush();
       return;
     }
+    if (notesOpen()) void notes?.rescan();
     const since = awaySince;
     awaySince = null;
     const after = awayThreshold(prefs());
-    if (since !== null && after !== null && Date.now() - since >= after && draft() && !listOpen() && !tagging()) {
+    if (since !== null && after !== null && Date.now() - since >= after && draft() && !listOpen() && !tagging() && !notesOpen()) {
       newDraft();
     }
   }
@@ -628,6 +785,8 @@ export default function App() {
     // Links that started Petrel, or came before the window listened.
     void takeLinks();
     loadActions();
+    // After everything on the way to the first keystroke: `[[links]]` in the editor.
+    void loadLinks().catch((e) => console.error("links:", e));
   });
   onCleanup(() => editor?.destroy());
 
@@ -636,6 +795,34 @@ export default function App() {
       <div class="work">
         <div class="center">
           <main class="editor" ref={editorEl} />
+          <Show when={!notesOpen() && !listOpen() && draft()?.promoted}>
+            {(p) => (
+              <div class="promoted" role="status">
+                <span>
+                  {p().kind === "append" ? "Added to" : "Promoted to"} <b>{p().noteTitle}</b> on{" "}
+                  {new Date(p().at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}. Edits
+                  here stay in this draft.
+                </span>
+                <button
+                  class="primary"
+                  onClick={() => (p().noteId !== null ? openNotes({ kind: "note", id: p().noteId! }) : say("That note's file is no longer in the notes folder."))}
+                >
+                  Open note
+                </button>
+              </div>
+            )}
+          </Show>
+          <Show when={notesOpen()}>
+            <NotesView
+              ref={(h) => (notes = h)}
+              start={notesStart()}
+              links={links()}
+              onClose={closeNotes}
+              onOpenDraft={async (id) => (await closeNotes()) && openDraft(id)}
+              onUndoable={(label, t) => remember({ label, token: t.token }, Math.max(1, t.count))}
+              say={say}
+            />
+          </Show>
           <Show when={listOpen()}>
             <DraftList
               ref={(h) => (list = h)}
@@ -732,7 +919,8 @@ export default function App() {
           commands={commands()}
           actions={actions()}
           onAction={(a) => runAction(a, "ui")}
-          onDraft={openDraft}
+          onDraft={async (id) => (!notesOpen() || (await closeNotes())) && openDraft(id)}
+          onNote={(id) => openNotes({ kind: "note", id })}
           onTag={(tag) => openList({ tag })}
           onClose={closePalette}
         />
@@ -745,6 +933,36 @@ export default function App() {
             editor?.view.focus();
           }}
         />
+      </Show>
+      <Show when={finderOpen()}>
+        <NoteFinder
+          onOpen={(id) => {
+            setFinderOpen(false);
+            void openNotes({ kind: "note", id });
+          }}
+          onCreate={(title) => {
+            setFinderOpen(false);
+            void openNotes({ kind: "new", title, folder: notes?.folder() ?? "" });
+          }}
+          onClose={() => {
+            setFinderOpen(false);
+            if (notesOpen()) notes?.editor()?.view.focus();
+            else editor?.view.focus();
+          }}
+        />
+      </Show>
+      <Show when={promoting() && draft()}>
+        {(d) => (
+          <Promote
+            draft={d()}
+            mode={promoting()!}
+            onDone={promoted}
+            onClose={() => {
+              setPromoting(null);
+              editor?.view.focus();
+            }}
+          />
+        )}
       </Show>
       <Show when={requests()[0]}>
         {(r) => <HostDialog request={r()} onAnswer={(v) => answer(r(), v)} />}
@@ -799,8 +1017,24 @@ export default function App() {
             {running()!.name} running · <kbd>Esc</kbd> stop
           </span>
         </Show>
+        <Show when={notesOpen()}>
+          <span class="meta keys">
+            <span>
+              <kbd>Ctrl P</kbd> find
+            </span>
+            <span>
+              <kbd>Ctrl N</kbd> new note
+            </span>
+            <span>
+              <kbd>[[</kbd> link
+            </span>
+            <span>
+              <kbd>Esc</kbd> back
+            </span>
+          </span>
+        </Show>
         <Show
-          when={listOpen()}
+          when={listOpen() || notesOpen()}
           fallback={
             <span class="meta keys">
               <span>
@@ -812,9 +1046,13 @@ export default function App() {
               <span>
                 <kbd>Ctrl 2</kbd> actions
               </span>
+              <span>
+                <kbd>Ctrl 3</kbd> notes
+              </span>
             </span>
           }
         >
+          <Show when={listOpen()}>
           <span class="meta keys">
             <span>
               <kbd>j k</kbd> move
@@ -838,6 +1076,7 @@ export default function App() {
               <kbd>Esc</kbd> back
             </span>
           </span>
+          </Show>
         </Show>
         <Show when={info()?.debug}>
           <span class="meta" title={info()?.dbPath}>

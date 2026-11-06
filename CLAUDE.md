@@ -48,6 +48,10 @@ and keys; this file covers state and decisions that aren't visible from the code
 - **History panel and links (2026-11-06, on a PR after #6/#7 merged):** `Ctrl H` (`src/versions/`, word diff in
   `diff.ts`, restore via `restore_version`) and `petrel://` links (`src-tauri/src/uri.rs`, deep-link plugin; no
   `run` link on purpose, see package 07 Decisions).
+- **Notes (M2 start, 2026-11-06, on a PR):** plain `.md` files in a folder the owner picks; SQLite (schema v5) only
+  indexes them. `crates/petrel-core/src/notes.rs` and `links.rs`, `src-tauri/src/notes.rs`, `src/notes/` (lazy).
+  `Ctrl 3` home, `Ctrl P` finder, `Ctrl Shift N` promote, `[[links]]` in drafts and notes. Rules in
+  `docs/design/notes.md`. Tried in a browser against the fake store only.
 - **rquickjs is the scripting runtime** (owner decision 2026-10-22, package 03 Decisions); `bindgen` feature off.
   Newest-first search is accepted for M1; relevance ranking is a package 05 (M2) task.
   The spike is a standalone crate under `crates/petrel-core/examples/runtime_spike/`, not a workspace member.

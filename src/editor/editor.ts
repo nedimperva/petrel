@@ -1,7 +1,7 @@
 // CodeMirror 6 setup for the draft editor. One function makes a view; the caller owns it. Everything that is
 // a product decision (what keys do, what Markdown looks like) lives here, not in App.tsx.
 
-import { EditorState, Compartment, RangeSetBuilder } from "@codemirror/state";
+import { EditorState, Compartment, type Extension, RangeSetBuilder } from "@codemirror/state";
 import {
   Decoration,
   type DecorationSet,
@@ -37,6 +37,8 @@ export interface EditorHandle {
   setFocusMode(on: boolean): void;
   /** Typewriter scrolling: the line being typed stays in the middle of the window. */
   setTypewriter(on: boolean): void;
+  /** Extensions loaded after the editor is up (links), so they cost nothing on the way to the first keystroke. */
+  setExtra(ext: Extension): void;
   destroy(): void;
 }
 
@@ -132,8 +134,14 @@ const theme = EditorView.theme({
   ".cm-dim": { opacity: "0.35", transition: "opacity var(--d-base) var(--ease)" },
 });
 
-export function createEditor(parent: HTMLElement, onChange: () => void): EditorHandle {
+export function createEditor(
+  parent: HTMLElement,
+  onChange: () => void,
+  o: { placeholder?: string } = {},
+): EditorHandle {
   const wrap = new Compartment();
+  const extra = new Compartment();
+  let extraExt: Extension = [];
   const readOnly = new Compartment();
   const focus = new Compartment();
   const typewriter = new Compartment();
@@ -148,9 +156,10 @@ export function createEditor(parent: HTMLElement, onChange: () => void): EditorH
       readOnly.of(EditorState.readOnly.of(false)),
       focus.of([]),
       typewriter.of([]),
+      extra.of([]),
       markdown({ base: markdownLanguage }),
       syntaxHighlighting(markdownHighlight),
-      placeholder("Type. It's saved. Act on it later."),
+      placeholder(o.placeholder ?? "Type. It's saved. Act on it later."),
       search({ top: true }),
       // Petrel's own keys first. Alt ↑/↓ (move line), Shift Alt ↓ (duplicate line) and Enter continuing lists
       // come with the defaults and the Markdown language.
@@ -178,7 +187,11 @@ export function createEditor(parent: HTMLElement, onChange: () => void): EditorH
       view.setState(state.update({ changes: { from: 0, to: 0, insert: text }, selection: { anchor: pos } }).state);
       // The fresh state has the starting configuration; keep the modes the person turned on.
       view.dispatch({
-        effects: [focus.reconfigure(modes.focus ? focusDim : []), typewriter.reconfigure(modes.typewriter ? typewriterScroll : [])],
+        effects: [
+          focus.reconfigure(modes.focus ? focusDim : []),
+          typewriter.reconfigure(modes.typewriter ? typewriterScroll : []),
+          extra.reconfigure(extraExt),
+        ],
       });
       view.focus();
     },
@@ -206,6 +219,10 @@ export function createEditor(parent: HTMLElement, onChange: () => void): EditorH
     setTypewriter(on) {
       modes.typewriter = on;
       view.dispatch({ effects: typewriter.reconfigure(on ? typewriterScroll : []) });
+    },
+    setExtra(ext) {
+      extraExt = ext;
+      view.dispatch({ effects: extra.reconfigure(ext) });
     },
     destroy: () => view.destroy(),
   };

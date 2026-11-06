@@ -1,9 +1,9 @@
-// The command bar (`Ctrl K`, package 05): one box for commands, actions, drafts and tags. Empty, it shows what
+// The command bar (`Ctrl K`, package 05): one box for commands, actions, drafts, notes and tags. Empty, it shows what
 // you used last, then every command. Typing ranks names (match.ts); drafts come from full-text search, so a
 // word inside a draft finds it too. `Enter` runs the highlighted row, `Esc` goes back to the text.
 
 import { createEffect, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
-import { api, type Action, type SearchHit, type TagCount } from "../api";
+import { api, type Action, type NoteSummary, type SearchHit, type TagCount } from "../api";
 import { pushRecent, rank } from "./match";
 
 export interface Command {
@@ -18,13 +18,16 @@ type Item =
   | { kind: "command"; key: string; name: string; keys?: string; command: Command }
   | { kind: "action"; key: string; name: string; keys?: string; action: Action }
   | { kind: "tag"; key: string; name: string; count: number }
-  | { kind: "draft"; key: string; name: string; hit: SearchHit };
+  | { kind: "draft"; key: string; name: string; hit: SearchHit }
+  | { kind: "note"; key: string; name: string; note: NoteSummary };
 
 interface Props {
   commands: Command[];
   actions: Action[];
   onAction(a: Action): void;
   onDraft(id: number): void;
+  /** Opens a note on the note page. */
+  onNote?(id: number): void;
   /** Opens the list filtered by the tag. */
   onTag(name: string): void;
   onClose(): void;
@@ -34,6 +37,7 @@ const RECENT_KEY = "petrel.palette.recent";
 /** Typing stops this long before drafts are searched (package 05: live, debounced 80 ms). */
 const SEARCH_MS = 80;
 const DRAFTS_SHOWN = 8;
+const NOTES_SHOWN = 6;
 const SHOWN = 40;
 
 function loadRecent(): string[] {
@@ -53,7 +57,7 @@ function saveRecent(keys: string[]) {
   }
 }
 
-const LABEL: Record<Item["kind"], string> = { command: "", action: "action", tag: "tag", draft: "draft" };
+const LABEL: Record<Item["kind"], string> = { command: "", action: "action", tag: "tag", draft: "draft", note: "note" };
 
 export default function CommandBar(props: Props) {
   let input!: HTMLInputElement;
@@ -62,6 +66,7 @@ export default function CommandBar(props: Props) {
   const [at, setAt] = createSignal(0);
   const [tags, setTags] = createSignal<TagCount[]>([]);
   const [hits, setHits] = createSignal<SearchHit[]>([]);
+  const [noteHits, setNoteHits] = createSignal<NoteSummary[]>([]);
   const [recent, setRecent] = createSignal(loadRecent());
   let timer: number | undefined;
   let generation = 0;
@@ -89,7 +94,8 @@ export default function CommandBar(props: Props) {
     const drafts = hits()
       .map((h): Item => ({ kind: "draft", key: `draft:${h.id}`, name: h.title || "untitled", hit: h }))
       .filter((i) => !seen.has(i.key));
-    return [...named.slice(0, SHOWN - drafts.length), ...drafts];
+    const notes = noteHits().map((n): Item => ({ kind: "note", key: `note:${n.id}`, name: n.title, note: n }));
+    return [...named.slice(0, SHOWN - drafts.length - notes.length), ...notes, ...drafts];
   };
 
   createEffect(
@@ -98,8 +104,21 @@ export default function CommandBar(props: Props) {
       window.clearTimeout(timer);
       const mine = ++generation;
       // A command name is two letters away; drafts need a little more to be worth a search.
-      if (q.trim().length < 2) return setHits([]);
+      if (q.trim().length < 2) {
+        setNoteHits([]);
+        return setHits([]);
+      }
       timer = window.setTimeout(async () => {
+        if (props.onNote) {
+          void (async () => {
+            const a = await api;
+            const byTitle = await a.findNotes(q.trim(), NOTES_SHOWN).catch(() => [] as NoteSummary[]);
+            const byText = await a.searchNotes(q.trim(), NOTES_SHOWN).catch(() => [] as NoteSummary[]);
+            const seen = new Set<number>();
+            const all = [...byTitle, ...byText].filter((n) => !seen.has(n.id) && seen.add(n.id)).slice(0, NOTES_SHOWN);
+            if (mine === generation) setNoteHits(all);
+          })();
+        }
         try {
           const found = await (await api).searchDrafts(q.trim(), DRAFTS_SHOWN);
           if (mine === generation) setHits(found);
@@ -130,6 +149,7 @@ export default function CommandBar(props: Props) {
     if (i.kind === "command") i.command.run();
     else if (i.kind === "action") props.onAction(i.action);
     else if (i.kind === "tag") props.onTag(i.name.slice(1));
+    else if (i.kind === "note") props.onNote?.(i.note.id);
     else props.onDraft(i.hit.id);
   }
 
@@ -169,7 +189,7 @@ export default function CommandBar(props: Props) {
         <input
           ref={input}
           class="palette-input"
-          placeholder="Command, action, draft or #tag"
+          placeholder="Command, action, draft, note or #tag"
           spellcheck={false}
           value={query()}
           onInput={(e) => setQuery(e.currentTarget.value)}
@@ -194,6 +214,9 @@ export default function CommandBar(props: Props) {
                 <span class="name">{i.name}</span>
                 <Show when={i.kind === "draft" && i.hit.snippet}>
                   <span class="snippet">{snippet(i.kind === "draft" ? i.hit.snippet : "")}</span>
+                </Show>
+                <Show when={i.kind === "note" && (i.note.folder || i.note.preview)}>
+                  <span class="snippet">{i.kind === "note" ? i.note.folder || i.note.preview : ""}</span>
                 </Show>
                 <span class="grow" />
                 <Show when={i.kind === "tag"}>

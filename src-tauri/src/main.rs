@@ -5,6 +5,7 @@ mod cli_host;
 mod commands;
 mod desktop;
 mod host;
+mod notes;
 mod tray;
 mod uri;
 
@@ -385,6 +386,27 @@ fn main() {
             commands::run_action,
             commands::cancel_run,
             commands::host_reply,
+            notes::notes_info,
+            notes::set_notes_root,
+            notes::scan_notes,
+            notes::list_notes,
+            notes::find_notes,
+            notes::search_notes,
+            notes::note_folders,
+            notes::open_note,
+            notes::peek_note,
+            notes::create_note,
+            notes::save_note,
+            notes::rename_note,
+            notes::pin_note,
+            notes::set_note_tags,
+            notes::trash_note,
+            notes::promote_draft,
+            notes::append_to_note,
+            notes::link_targets,
+            notes::resolve_link,
+            notes::backlinks,
+            notes::link_mention,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Petrel")

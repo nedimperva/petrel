@@ -26,7 +26,7 @@ use crate::retention::{self, Retention, VersionAge, DAY_MS, HOUR_MS};
 use crate::title;
 
 /// The schema version this build writes. A database with a higher `meta.schema_version` is refused.
-pub const SCHEMA_VERSION: i64 = 4;
+pub const SCHEMA_VERSION: i64 = 5;
 
 /// How many backups `backup_before_migrate` keeps.
 const BACKUPS_KEPT: usize = 5;
@@ -312,6 +312,9 @@ pub struct Draft {
     pub accessed_at: i64,
     pub tags: Vec<String>,
     pub version_count: i64,
+    /// The note this draft became, when it was promoted or added to one.
+    #[serde(default)]
+    pub promoted: Option<crate::notes::Promotion>,
 }
 
 /// One row of the list: never the content.
@@ -498,6 +501,8 @@ pub struct Store {
     clock: Box<dyn Fn() -> i64 + Send>,
     /// Newest last.
     undo: VecDeque<UndoBatch>,
+    /// Renames, promotions and trashed notes, newest last (`notes.rs`).
+    pub(crate) notes_undo: VecDeque<crate::notes::NotesUndo>,
 }
 
 fn system_now() -> i64 {
@@ -517,6 +522,7 @@ impl Store {
             path: Some(path.to_path_buf()),
             clock: Box::new(system_now),
             undo: VecDeque::new(),
+            notes_undo: VecDeque::new(),
         };
         store.init()?;
         // After `init`, so the checkpointer never sees a database mid-migration.
@@ -534,6 +540,7 @@ impl Store {
             path: None,
             clock: Box::new(system_now),
             undo: VecDeque::new(),
+            notes_undo: VecDeque::new(),
         };
         store.init()?;
         Ok(store)
@@ -604,6 +611,7 @@ impl Store {
                 2 => tx.execute_batch(SCHEMA_V2)?,
                 3 => tx.execute_batch(SCHEMA_V3)?,
                 4 => tx.execute_batch(SCHEMA_V4)?,
+                5 => tx.execute_batch(crate::notes::SCHEMA_V5)?,
                 _ => unreachable!("no migration step for v{next}"),
             }
             tx.execute(
@@ -725,12 +733,14 @@ impl Store {
                         accessed_at: r.get(10)?,
                         tags: Vec::new(),
                         version_count: r.get(11)?,
+                        promoted: None,
                     })
                 },
             )
             .optional()?
             .ok_or_else(|| anyhow!("draft {id} does not exist"))?;
         draft.tags = self.tags_of(id)?;
+        draft.promoted = self.promotion(id)?;
         Ok(draft)
     }
 
@@ -843,6 +853,9 @@ impl Store {
     /// Puts a batch back. Returns how many drafts changed. A token works once; an unknown one (too old, already
     /// used, or from before a restart) is an error the UI can show as "nothing to undo".
     pub fn undo(&mut self, token: &str) -> Result<usize> {
+        if token.starts_with(crate::notes::TOKEN_PREFIX) {
+            return self.undo_notes(token);
+        }
         let Some(pos) = self.undo.iter().position(|b| b.token == token) else {
             bail!("nothing to undo: that change is too old or was already undone");
         };
