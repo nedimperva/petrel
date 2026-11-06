@@ -9,6 +9,7 @@ Icon={{icon}}
 Terminal=false
 Categories=Utility;TextEditor;Office;
 Keywords=notes;drafts;capture;text;markdown;actions;
+MimeType=x-scheme-handler/petrel;
 Actions=new;
 
 [Desktop Action new]

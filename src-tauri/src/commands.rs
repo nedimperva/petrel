@@ -4,6 +4,7 @@
 use petrel_core::action::{self, Action, EditorState, Paths, RunReport, Source};
 use petrel_core::host::CancelToken;
 use petrel_core::store::SweepReport;
+use petrel_core::store::Version;
 use petrel_core::store_actions::RunLogEntry;
 use petrel_core::{Draft, Folder, ListPage, ListQuery, SearchHit, Store, TagCount, UndoToken};
 use std::sync::atomic::Ordering;
@@ -183,6 +184,41 @@ pub fn close_capture(state: State<AppState>, app: tauri::AppHandle) {
 #[tauri::command]
 pub fn open_capture_window(app: tauri::AppHandle) {
     crate::open_capture(&app);
+}
+
+/// A draft's id from its uuid (links carry uuids; ids are this database's own).
+#[tauri::command]
+pub fn find_draft(state: State<AppState>, uuid: String) -> R<Option<i64>> {
+    with(&state, |s| s.find_by_uuid(&uuid))
+}
+
+/// The `petrel://` links that arrived since the last call (main.rs queues them).
+#[tauri::command]
+pub fn take_links(state: State<AppState>) -> Vec<crate::uri::Link> {
+    state.links.lock().map(|mut q| std::mem::take(&mut *q)).unwrap_or_default()
+}
+
+/// A draft's versions, newest first (the history panel, `Ctrl H`).
+#[tauri::command]
+pub fn list_versions(state: State<AppState>, draft_id: i64) -> R<Vec<Version>> {
+    with(&state, |s| s.versions(draft_id))
+}
+
+#[tauri::command]
+pub fn version_text(state: State<AppState>, version_id: i64) -> R<String> {
+    with(&state, |s| s.version_content(version_id))
+}
+
+/// Puts a version's text back; the current text is kept as a `restore` version first. `draft_id` is the draft
+/// the panel shows, so a stale panel can never restore into another draft.
+#[tauri::command]
+pub fn restore_version(state: State<AppState>, draft_id: i64, version_id: i64) -> R<Draft> {
+    with(&state, |s| {
+        if !s.versions(draft_id)?.iter().any(|v| v.id == version_id) {
+            anyhow::bail!("that version is not one of this draft's");
+        }
+        s.restore(version_id)
+    })
 }
 
 /// The UI's own preferences (`ui.*`: open to new draft, editor type). Other keys belong to the engine.

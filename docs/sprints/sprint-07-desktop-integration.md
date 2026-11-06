@@ -27,9 +27,14 @@ Text reaches Petrel from anywhere on the desktop in one gesture, and Petrel give
 - [x] `--help` and a `docs/cli.md` page.
 
 ### URI scheme
-- [ ] `petrel://create?text=&tag=&action=`, `open?uuid=`, `append?uuid=&text=`, `prepend`, `search?query=`,
-      `run?action=&text=`, `workspace?name=`. No x-callback (`x-success` ignored with a log line).
-- [ ] Deep-link plugin registration on Linux (`.desktop` MimeType) and Windows (registry via the installer).
+- [x] `petrel://create?text=&tag=`, `open?uuid=`, `append?uuid=&text=`, `prepend`, `search?query=`. No
+      x-callback (`x-success` ignored with a log line). `src-tauri/src/uri.rs` parses; the main window takes the
+      queue (`take_links`) because it owns the open draft. Appending to the open draft goes through the editor, so
+      autosave keeps it. An unknown or refused link shows a toast. Not yet: `create&action=`, `workspace?name=`.
+      No `run` link (Decisions).
+- [x] Deep-link plugin registration on Linux (`.desktop` MimeType) and Windows. `tauri-plugin-deep-link`; the
+      installer registers the scheme, and a debug build calls `register_all()` at start (on Windows that points
+      `petrel://` at the debug exe until a release build is installed).
 
 ### Tray and lifecycle
 - [ ] Tray: New draft, Capture, Show, Pause hotkey, Quit; closing the window keeps the tray (setting).
@@ -57,6 +62,10 @@ Text reaches Petrel from anywhere on the desktop in one gesture, and Petrel give
 
 ## Decisions
 
+- 2026-11-06 — No `petrel://run` link. Any web page can open a link, so a run link would let a page run an
+  action's shell steps for whoever wrote the page. Links only add text or show things. `run` comes back through the
+  CLI (`petrel run`), which only the person at the machine can type.
+
 - 2026-11-05 — The CLI is parsed by hand, not with `clap`: six flags do not earn a dependency on the launch path.
   Revisit when `run`/`list`/`export` arrive with subcommands.
 - 2026-11-05 — `--new TEXT` and `--stdin` open the database from the calling process (SQLite WAL, 5 s busy
@@ -65,6 +74,10 @@ Text reaches Petrel from anywhere on the desktop in one gesture, and Petrel give
   logs a warning at start if the two ever disagree.
 
 ## Log
+
+- 2026-11-06 — `petrel://` links. Under Xvfb with the debug build: `append?uuid=` on the open draft saved
+  "Open draft line\nappended by link", `create?text=…&tag=web` made a tagged draft and opened it, and
+  `run?action=Copy` was refused with a toast. The deep-link plugin wrote its `.desktop` file in the sandbox.
 
 - 2026-11-05 — Capture hotkey, start at login, Settings dialog (`src/settings/Settings.tsx`, `Ctrl ,` or the
   command bar). Under Xvfb with the debug build: `--hidden` started with no window, `Ctrl+Alt+Space` opened capture,

@@ -24,5 +24,20 @@ build `<app data>/petrel.db`, where `<app data>` is `~/.local/share/io.github.ne
 On Windows a release build has no console, so the uuid and messages are not printed there; the exit code still
 says what happened. A debug build (`npm run tauri dev`) prints them.
 
-Not yet (package 07): `petrel open UUID`, `petrel run ACTION`, `petrel list`, `petrel export`, `petrel log`, and
-the `petrel://` URI scheme.
+## Links
+
+Petrel registers the `petrel://` scheme, so a link in a browser, a note or a script opens Petrel:
+
+| Link | What it does |
+| --- | --- |
+| `petrel://create?text=TEXT&tag=a&tag=b` | A new Inbox draft with that text and tags, opened in the window. |
+| `petrel://open?uuid=UUID` | Opens that draft. |
+| `petrel://append?uuid=UUID&text=TEXT` | Adds the text to the end of that draft (`prepend` adds it to the start). |
+| `petrel://search?query=QUERY` | Opens the list with that search, e.g. `tag:work milk`. |
+
+Text is URL-encoded (`%20` for a space, `%0A` for a new line), up to 1 MB. `x-success` and `x-error` are
+ignored. There is no `run` link: any web page can open a link, and an action can run shell commands. A link
+Petrel doesn't know shows a message instead of doing nothing. On Linux try one with
+`xdg-open "petrel://create?text=hi"`; on Windows, `start petrel://create?text=hi`.
+
+Not yet (package 07): `petrel open UUID`, `petrel run ACTION`, `petrel list`, `petrel export`, `petrel log`.

@@ -1,5 +1,5 @@
 import { createSignal, For, lazy, onCleanup, onMount, Show } from "solid-js";
-import { api, type Action, type AppInfo, type Draft, type Folder, type HostRequest, type RunLogEntry, type RunReport, type TagCount, type UndoToken } from "./api";
+import { api, type Link, type Action, type AppInfo, type Draft, type Folder, type HostRequest, type RunLogEntry, type RunReport, type TagCount, type UndoToken } from "./api";
 import ActionList, { firstAction, type ActionListHandle } from "./actions/ActionList";
 import type { LogHandle } from "./actions/ActionLog";
 import HostDialog from "./actions/HostDialog";
@@ -9,12 +9,13 @@ import { createEditor, type EditorHandle } from "./editor/editor";
 import { openSearchPanel } from "@codemirror/search";
 import { applyEditorPrefs, awayThreshold, parsePrefs, prefs, setPrefs } from "./settings/prefs";
 import DraftList, { type ListHandle, type Tab } from "./list/DraftList";
-import type { Command } from "./palette/CommandBar";
+// Not lazy: they take keys the moment they open, and keys typed while a chunk loads would be lost (5 kB gz).
+import CommandBar, { type Command } from "./palette/CommandBar";
+import Versions, { type VersionsHandle } from "./versions/Versions";
 
 // Not on the launch path: loaded the first time they open.
 const ActionEditor = lazy(() => import("./actions/ActionEditor"));
 const ActionLog = lazy(() => import("./actions/ActionLog"));
-const CommandBar = lazy(() => import("./palette/CommandBar"));
 const Settings = lazy(() => import("./settings/Settings"));
 
 
@@ -55,9 +56,12 @@ export default function App() {
   const [info, setInfo] = createSignal<AppInfo | null>(null);
   const [listOpen, setListOpen] = createSignal(false);
   /** Where the list opens next (the command bar picks a tab or a tag). */
-  const [listStart, setListStart] = createSignal<{ tab?: Tab; tag?: string } | undefined>(undefined);
+  const [listStart, setListStart] = createSignal<{ tab?: Tab; tag?: string; query?: string } | undefined>(undefined);
   const [paletteOpen, setPaletteOpen] = createSignal(false);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
+  /** The history panel (`Ctrl H`) for the open draft. */
+  const [historyOpen, setHistoryOpen] = createSignal(false);
+  let history: VersionsHandle | undefined;
   /** Focus mode (`Ctrl Shift D`): the text alone, the paragraph being written in full colour. */
   const [focusMode, setFocusMode] = createSignal(false);
   const [tagging, setTagging] = createSignal(false);
@@ -236,7 +240,7 @@ export default function App() {
   }
 
   /** Opens the list, fresh, on `start` (Inbox when not given). */
-  function openList(start?: { tab?: Tab; tag?: string }) {
+  function openList(start?: { tab?: Tab; tag?: string; query?: string }) {
     void autosave.flush();
     setLogOpen(false);
     // The list reads where to start when it mounts, so an open one is remounted.
@@ -268,6 +272,7 @@ export default function App() {
       { id: "flag", name: "Flag or unflag this draft", keys: "Ctrl Shift F", run: flagCurrent },
       { id: "tags", name: "Tag this draft", keys: "Ctrl T", run: startTagging },
       { id: "focus", name: "Focus mode", keys: "Ctrl Shift D", run: toggleFocus },
+      { id: "history", name: "History of this draft: see and restore older text", keys: "Ctrl H", run: openHistory },
       { id: "undo", name: "Undo the last move, flag or tag", run: undo },
       { id: "actions", name: "Show or hide actions", keys: "Ctrl 2", run: toggleActions },
       { id: "new-action", name: "New action", keys: "Ctrl Shift A", run: () => editAction(null) },
@@ -285,7 +290,60 @@ export default function App() {
     editor?.view.focus();
   }
 
+  // ---- petrel:// links (package 07) ------------------------------------------------------------------------
+
+  /** Runs the links that arrived. One at a time, in order: each may switch the open draft. */
+  async function takeLinks() {
+    let links: Link[];
+    try {
+      links = await (await api).takeLinks();
+    } catch (e) {
+      return say(`Links cannot be read: ${e}`);
+    }
+    for (const l of links) {
+      try {
+        await followLink(l);
+      } catch (e) {
+        say(`Link failed: ${String(e).replace(/^Error: /, "")}`);
+      }
+    }
+  }
+
+  async function followLink(l: Link) {
+    const a = await api;
+    if (l.kind === "unknown") return say(`Link not followed: ${l.why}.`);
+    if (l.kind === "search") return openList({ tab: "all", query: l.query });
+    if (l.kind === "create") {
+      if (!l.text.trim()) return newDraft();
+      if (!(await saved())) return;
+      const d = await a.newDraft(l.text);
+      if (l.tags.length) await a.setTags(d.id, l.tags);
+      await openDraft(d.id);
+      return say("New draft from a link.");
+    }
+    const id = await a.findDraft(l.uuid);
+    if (id === null) return say("That link's draft is not in this Petrel.");
+    if (l.kind === "open") return openDraft(id);
+    // The open draft is changed in the editor, so the next autosave keeps the addition instead of overwriting it.
+    if (id === draft()?.id && editor) {
+      editor.insert(l.text, l.prepend);
+      return say(l.prepend ? "Added at the top from a link." : "Added at the end from a link.");
+    }
+    const d = await a.peekDraft(id);
+    const glue = (x: string, y: string) => (!x ? y : !y ? x : x.endsWith("\n") ? x + y : `${x}\n${y}`);
+    const content = l.prepend ? glue(l.text, d.content) : glue(d.content, l.text);
+    if (!(await a.saveDraft(id, content, d.cursor))) return say("That link's draft is in the Trash or gone.");
+    list?.reload();
+    say(`Added to “${d.title || "untitled"}” from a link.`);
+  }
+
+  /** Panels that take keys: until one has loaded and focused itself, keys must not land in the text. */
+  function leaveEditor() {
+    editor?.view.contentDOM.blur();
+  }
+
   function openPalette() {
+    leaveEditor();
     setTagging(false);
     setPaletteOpen(true);
     // The actions may have changed in the editor since they were loaded; the bar shows what is there now.
@@ -410,6 +468,7 @@ export default function App() {
     const ctrl = e.ctrlKey || e.metaKey;
     if (ctrl && !e.shiftKey && !e.altKey && k === "k") return stop(e, openPalette);
     if (ctrl && !e.shiftKey && !e.altKey && e.key === ",") return stop(e, () => setSettingsOpen(true));
+    if (ctrl && !e.shiftKey && !e.altKey && k === "h") return stop(e, openHistory);
     if (e.key === "Escape" && running()) return stop(e, async () => (await api).cancelRun());
     if (ctrl && e.shiftKey && !e.altKey && k === "a") {
       const inside = !!document.activeElement?.closest("aside.actions");
@@ -445,6 +504,10 @@ export default function App() {
       if (actionLog?.key(e)) e.preventDefault();
       return;
     }
+    if (historyOpen()) {
+      if (history?.key(e)) e.preventDefault();
+      return;
+    }
     if (listOpen()) {
       if (list?.key(e)) e.preventDefault();
       return;
@@ -467,6 +530,34 @@ export default function App() {
     e.preventDefault();
     e.stopPropagation();
     run();
+  }
+
+  async function openHistory() {
+    if (historyOpen()) return closeHistory();
+    if (!(await saved())) return;
+    if (!draft()) return say("Type something first: a new draft has no history.");
+    setListOpen(false);
+    setLogOpen(false);
+    leaveEditor();
+    setHistoryOpen(true);
+  }
+
+  function closeHistory() {
+    setHistoryOpen(false);
+    editor?.view.focus();
+  }
+
+  async function restoreVersion(versionId: number) {
+    const d = draft();
+    if (!d || !(await saved())) return;
+    try {
+      const restored = await (await api).restoreVersion(d.id, versionId);
+      setHistoryOpen(false);
+      show(restored);
+      say("Restored. The text it replaced is kept in History (Ctrl H).");
+    } catch (e) {
+      say(`Restore failed: ${String(e).replace(/^Error: /, "")}`);
+    }
   }
 
   function toggleFocus() {
@@ -532,7 +623,10 @@ export default function App() {
         editor?.view.focus();
       },
       quit: () => void close(),
+      links: () => void takeLinks(),
     });
+    // Links that started Petrel, or came before the window listened.
+    void takeLinks();
     loadActions();
   });
   onCleanup(() => editor?.destroy());
@@ -554,6 +648,19 @@ export default function App() {
               onToast={say}
               onLog={openLog}
             />
+          </Show>
+          <Show when={historyOpen() && draft()}>
+            {(d) => (
+              <Versions
+                ref={(h) => (history = h)}
+                draftId={d().id}
+                title={d().title}
+                current={() => editor?.text() ?? ""}
+                actions={actions()}
+                onRestore={restoreVersion}
+                onClose={closeHistory}
+              />
+            )}
           </Show>
           <Show when={logOpen()}>
             <ActionLog

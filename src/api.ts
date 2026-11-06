@@ -211,6 +211,24 @@ export interface DesktopSettings {
   autostartError: string | null;
 }
 
+export interface Version {
+  id: number;
+  uuid: string;
+  /** `edit`, `restore`, `before_action:<uuid>`, `action_conflict:<uuid>`. */
+  reason: string;
+  createdAt: number;
+  /** Characters (SQLite `length`). */
+  length: number;
+}
+
+/** A `petrel://` link, parsed by the shell (src-tauri/src/uri.rs). */
+export type Link =
+  | { kind: "create"; text: string; tags: string[] }
+  | { kind: "open"; uuid: string }
+  | { kind: "append"; uuid: string; text: string; prepend: boolean }
+  | { kind: "search"; query: string }
+  | { kind: "unknown"; url: string; why: string };
+
 export interface Api {
   appInfo(): Promise<AppInfo>;
   newDraft(content: string): Promise<Draft>;
@@ -259,12 +277,20 @@ export interface Api {
   listenHost(events: HostEvents): Promise<void>;
   /** The tray and a second launch: `newDraft` (tray "New draft", `petrel --new`) and `quit` (tray "Quit": save,
    * then close this window). No-op outside Tauri. */
-  listenApp(events: { newDraft(): void; quit(): void }): Promise<void>;
+  listenApp(events: { newDraft(): void; quit(): void; links(): void }): Promise<void>;
+  /** Links that arrived since the last call. */
+  takeLinks(): Promise<Link[]>;
+  findDraft(uuid: string): Promise<number | null>;
   /** Opens the capture window, or focuses it. */
   openCapture(): Promise<void>;
   desktopSettings(): Promise<DesktopSettings>;
   /** The UI's `ui.*` preferences as stored strings. */
   uiSettings(): Promise<Record<string, string>>;
+  /** Newest first. */
+  listVersions(draftId: number): Promise<Version[]>;
+  versionText(versionId: number): Promise<string>;
+  /** The current text becomes a version first. Returns the draft as it now is. */
+  restoreVersion(draftId: number, versionId: number): Promise<Draft>;
   setUiSetting(key: string, value: string): Promise<void>;
   /** null turns it off. Rejects, keeping the old one, when the key is taken or can't be a hotkey. */
   setHotkey(hotkey: string | null): Promise<DesktopSettings>;
@@ -317,10 +343,16 @@ async function tauriApi(): Promise<Api> {
       const win = getCurrentWebviewWindow();
       await win.listen("petrel-new", () => events.newDraft());
       await win.listen("petrel-quit", () => events.quit());
+      await win.listen("petrel-links", () => events.links());
     },
     openCapture: () => invoke("open_capture_window"),
+    takeLinks: () => invoke("take_links"),
+    findDraft: (uuid) => invoke("find_draft", { uuid }),
     desktopSettings: () => invoke("desktop_settings"),
     uiSettings: () => invoke("ui_settings"),
+    listVersions: (draftId) => invoke("list_versions", { draftId }),
+    versionText: (versionId) => invoke("version_text", { versionId }),
+    restoreVersion: (draftId, versionId) => invoke("restore_version", { draftId, versionId }),
     setUiSetting: (key, value) => invoke("set_ui_setting", { key, value }),
     setHotkey: (hotkey) => invoke("set_hotkey", { hotkey }),
     setAutostart: (on) => invoke("set_autostart", { on }),
@@ -394,6 +426,15 @@ function fakeApi(): Api {
     modifiedAt: d.modifiedAt,
   });
   const undos = new Map<string, () => number>();
+  const versions = new Map<number, Version & { draftId: number; content: string }>();
+  let nextVersion = 1;
+  function addVersion(draftId: number, content: string, reason: string, at = now()) {
+    if (!content) return;
+    const id = nextVersion++;
+    versions.set(id, { id, uuid: crypto.randomUUID(), reason, createdAt: at, length: content.length, draftId, content });
+  }
+  addVersion(2, "Groceries\n\n- [ ] milk\n- [ ] bread", "edit", Date.now() - 3 * 3_600_000);
+  addVersion(2, "Groceries\n\n- [ ] milk\n- [ ] eggs\n- [ ] bread", "before_action:fake", Date.now() - 40 * 60_000);
   function batch<K extends "folder" | "flagged">(ids: number[], key: K, value: Draft[K]): UndoToken {
     const changed = ids.map((id) => drafts.get(id)).filter((d): d is Draft => !!d && d[key] !== value);
     const before = changed.map((d) => [d, d[key], d.modifiedAt] as const);
@@ -426,6 +467,25 @@ function fakeApi(): Api {
       if (!d) throw new Error(`draft ${id} does not exist`);
       return d;
     },
+    listVersions: async (draftId) =>
+      [...versions.values()]
+        .filter((v) => v.draftId === draftId)
+        .sort((a, b) => b.createdAt - a.createdAt || b.id - a.id)
+        .map(({ id, uuid, reason, createdAt, length }) => ({ id, uuid, reason, createdAt, length })),
+    versionText: async (versionId) => {
+      const v = versions.get(versionId);
+      if (!v) throw new Error("no such version");
+      return v.content;
+    },
+    restoreVersion: async (draftId, versionId) => {
+      const v = versions.get(versionId);
+      const d = drafts.get(draftId);
+      if (!v || !d || v.draftId !== draftId) throw new Error("that version is not one of this draft's");
+      addVersion(draftId, d.content, "restore");
+      Object.assign(d, { content: v.content, title: title(v.content), modifiedAt: now() });
+      return { ...d };
+    },
+    findDraft: async (uuid) => [...drafts.values()].find((d) => d.uuid === uuid)?.id ?? null,
     peekDraft: async (id) => {
       const d = drafts.get(id);
       if (!d) throw new Error(`draft ${id} does not exist`);
@@ -434,6 +494,9 @@ function fakeApi(): Api {
     saveDraft: async (id, content, cursor) => {
       const d = drafts.get(id);
       if (!d) return false;
+      // The engine keeps one every 5 minutes; the fake every 20 s, so the history panel fills while trying it.
+      const last = [...versions.values()].filter((v) => v.draftId === id).at(-1);
+      if (!last || now() - last.createdAt > 20_000) addVersion(id, d.content, "edit");
       Object.assign(d, { content, cursor, title: title(content), modifiedAt: now() });
       return true;
     },
@@ -529,6 +592,24 @@ function fakeApi(): Api {
 
 /** Actions without the engine: a few step types are acted out, the rest are logged. Enough to work on the list,
  *  the editor, the dialogs and the log in a browser. */
+/** The fake's link parser: the real one is in Rust, with tests; this one is enough to try the UI. */
+function fakeLink(raw: string): Link {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return { kind: "unknown", url: raw, why: "not a link" };
+  }
+  const verb = (u.host || u.pathname.replace(/^\/+/, "")).toLowerCase();
+  const p = u.searchParams;
+  if (verb === "create") return { kind: "create", text: p.get("text") ?? "", tags: p.getAll("tag") };
+  if (verb === "open") return { kind: "open", uuid: p.get("uuid") ?? "" };
+  if (verb === "append" || verb === "prepend")
+    return { kind: "append", uuid: p.get("uuid") ?? "", text: p.get("text") ?? "", prepend: verb === "prepend" };
+  if (verb === "search") return { kind: "search", query: p.get("query") ?? "" };
+  return { kind: "unknown", url: raw, why: `Petrel has no "${verb}" link` };
+}
+
 function fakeActions(draft: (id: number) => Draft | undefined) {
   const ui: Record<string, string> = {};
   const desktop: DesktopSettings = {
@@ -702,7 +783,12 @@ function fakeActions(draft: (id: number) => Draft | undefined) {
     listenHost: async (e: HostEvents) => {
       events = e;
     },
+    // `?link=petrel://…` stands in for the OS handing Petrel a link.
     listenApp: async () => {},
+    takeLinks: async () => {
+      const raw = new URLSearchParams(location.search).get("link");
+      return raw ? [fakeLink(raw)] : [];
+    },
     desktopSettings: async () => ({ ...desktop }),
     uiSettings: async () => ({ ...ui }),
     setUiSetting: async (key: string, value: string) => {

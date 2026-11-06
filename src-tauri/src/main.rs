@@ -5,6 +5,7 @@ mod commands;
 mod desktop;
 mod host;
 mod tray;
+mod uri;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -31,6 +32,8 @@ pub struct AppState {
     pub quitting: AtomicBool,
     /// The global capture hotkey (package 07).
     pub hotkey: Mutex<desktop::Hotkey>,
+    /// `petrel://` links waiting for the main window to take them.
+    pub links: Mutex<Vec<uri::Link>>,
 }
 
 /// The login shell's `PATH` is cached here and refreshed off the start path (actions.md "Shell").
@@ -211,6 +214,15 @@ fn main() {
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             // A second launch focuses the running one, opens capture, or starts a new draft. `--new TEXT` and
             // `--stdin` never get here: they write the draft and exit before Tauri starts.
+            let links = uri::from_args(&args);
+            if !links.is_empty() {
+                if let Some(state) = app.try_state::<AppState>() {
+                    state.links.lock().map(|mut q| q.extend(links)).ok();
+                }
+                show_main(app);
+                let _ = app.emit_to("main", "petrel-links", ());
+                return;
+            }
             if wants_capture(&args) {
                 return open_capture(app);
             }
@@ -229,6 +241,8 @@ fn main() {
                 .build(),
         )
         .plugin(tauri_plugin_autostart::Builder::new().arg(desktop::HIDDEN_ARG).build())
+        // Registers `petrel://` with the OS (the bundles declare it too); links arrive as arguments.
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         // The folder picker in the action editor.
         .plugin(tauri_plugin_dialog::init())
@@ -259,7 +273,16 @@ fn main() {
                 tray: AtomicBool::new(false),
                 quitting: AtomicBool::new(false),
                 hotkey: Mutex::new(desktop::Hotkey::default()),
+                links: Mutex::new(uri::from_args(&args)),
             });
+            // A debug build registers itself so links can be tried from `tauri dev`; installers register a release.
+            #[cfg(all(debug_assertions, any(windows, target_os = "linux")))]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                if let Err(e) = app.deep_link().register_all() {
+                    log::warn!("registering petrel:// links: {e}");
+                }
+            }
             // Without a tray (no StatusNotifier host on Linux, say), closing the window quits, as before.
             // The Linux tray loads libayatana-appindicator at run time and panics if it is missing.
             match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| tray::build(app))) {
@@ -269,7 +292,7 @@ fn main() {
                     "no tray icon (is libayatana-appindicator installed?); closing the window will quit"
                 ),
             }
-            if desktop::start_hidden(app.handle(), &args) {
+            if desktop::start_hidden(app.handle(), &args) && uri::from_args(&args).is_empty() {
                 app.state::<AppState>().stay_hidden.store(true, Ordering::SeqCst);
                 log::info!("started hidden in the tray");
             }
@@ -315,6 +338,11 @@ fn main() {
             commands::open_capture_window,
             commands::desktop_settings,
             commands::ui_settings,
+            commands::list_versions,
+            commands::take_links,
+            commands::find_draft,
+            commands::version_text,
+            commands::restore_version,
             commands::set_ui_setting,
             commands::set_hotkey,
             commands::set_autostart,

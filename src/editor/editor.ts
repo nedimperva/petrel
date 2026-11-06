@@ -31,6 +31,8 @@ export interface EditorHandle {
   select(anchor: number, head: number): void;
   /** While an action that may change the text runs, typing would be lost when its result loads. */
   setReadOnly(on: boolean): void;
+  /** Adds text at the end (or start) as an edit: undoable, and saved like typing. */
+  insert(text: string, atStart: boolean): void;
   /** Focus mode: everything but the paragraph being written is dimmed. */
   setFocusMode(on: boolean): void;
   /** Typewriter scrolling: the line being typed stays in the middle of the window. */
@@ -189,6 +191,14 @@ export function createEditor(parent: HTMLElement, onChange: () => void): EditorH
       view.dispatch({ selection: { anchor: clamp(anchor), head: clamp(head) }, scrollIntoView: true });
     },
     setReadOnly: (on) => view.dispatch({ effects: readOnly.reconfigure(EditorState.readOnly.of(on)) }),
+    insert(text, atStart) {
+      const doc = view.state.doc;
+      const at = atStart ? 0 : doc.length;
+      // One newline between the old text and the new, unless there is one already.
+      const glue = doc.length === 0 ? "" : atStart ? (text.endsWith("\n") ? "" : "\n") : doc.sliceString(at - 1, at) === "\n" ? "" : "\n";
+      const insert = atStart ? text + glue : glue + text;
+      view.dispatch({ changes: { from: at, insert }, selection: { anchor: at + (atStart ? 0 : insert.length) }, scrollIntoView: true });
+    },
     setFocusMode(on) {
       modes.focus = on;
       view.dispatch({ effects: focus.reconfigure(on ? focusDim : []) });

@@ -1182,3 +1182,94 @@ iframe.preview {
 .dialog.settings .setting-row + .setting-row {
   margin-top: var(--s-2);
 }
+
+/* ---- package 02: history (Ctrl H) ----------------------------------------------------------------------- */
+
+:root {
+  --danger-soft: #fbe9e8;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --danger-soft: #3a1d1c;
+  }
+}
+
+.history-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-4);
+}
+.history-head .title {
+  font-size: var(--t-md);
+  font-weight: 600;
+  color: var(--fg-0);
+}
+.history-head .hint {
+  font-size: var(--t-sm);
+  color: var(--fg-2);
+}
+.history-head .grow,
+.history-bar .grow {
+  flex: 1;
+}
+.history-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(200px, 280px) 1fr;
+}
+.history-list {
+  border-right: 1px solid var(--line);
+}
+.history .row {
+  grid-template-columns: 1fr auto auto;
+}
+.history-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.history-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-4);
+  border-bottom: 1px solid var(--line);
+  font-size: var(--t-sm);
+}
+.history-bar .del,
+.history-diff del {
+  background: var(--danger-soft);
+  color: var(--fg-0);
+}
+.history-bar .add,
+.history-diff ins {
+  background: var(--ok-soft);
+  color: var(--fg-0);
+}
+.history-diff {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--s-4) var(--s-5);
+  white-space: pre-wrap;
+  font-family: var(--editor-font, var(--font-ui));
+  font-size: var(--t-read);
+  line-height: 1.6;
+  color: var(--fg-1);
+}
+.history-diff del {
+  text-decoration: line-through;
+  text-decoration-color: var(--danger);
+}
+.history-diff ins {
+  text-decoration: none;
+}
+.keys-foot {
+  gap: var(--s-3);
+  font-size: var(--t-sm);
+  color: var(--fg-2);
+}
+.history > .empty {
+  flex: 1;
+}

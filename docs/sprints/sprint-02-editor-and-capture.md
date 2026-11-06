@@ -83,6 +83,11 @@ type is kept, and the first line is the title. Everything else stays out of the 
 
 ## Log
 
+- 2026-11-06 — History panel (`Ctrl H`, `src/versions/`): the open draft's versions, newest first, with a word diff
+  against the text now ("Restoring brings back N words and removes M"). `Enter` restores; the replaced text
+  becomes a "Before a restore" version, so a restore can be undone from the same list. Commands `list_versions`,
+  `version_text`, `restore_version` (checks the version belongs to the draft). Tried headless and under Xvfb.
+
 - 2026-11-05 — Settings for open-to-new, editor size and typeface, typewriter scrolling; focus mode. Engine:
   `Store::settings_with_prefix` (literal prefix, tested). Tried headless against the fake store.
 

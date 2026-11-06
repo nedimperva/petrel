@@ -45,6 +45,9 @@ and keys; this file covers state and decisions that aren't visible from the code
   `docs/cli.md`). Then the capture hotkey (`Ctrl+Alt+Space`, not on Wayland), start at login (`--hidden`) and a
   Settings dialog (`Ctrl ,`, `src/settings/`), in `src-tauri/src/desktop.rs`. The sandbox can now boot the debug build under `xvfb-run dbus-run-session` (with
   `libwebkit2gtk-4.1-dev` and `libayatana-appindicator3-dev` installed) and drive it with `xdotool`.
+- **History panel and links (2026-11-06, on a PR after #6/#7 merged):** `Ctrl H` (`src/versions/`, word diff in
+  `diff.ts`, restore via `restore_version`) and `petrel://` links (`src-tauri/src/uri.rs`, deep-link plugin; no
+  `run` link on purpose, see package 07 Decisions).
 - **rquickjs is the scripting runtime** (owner decision 2026-10-22, package 03 Decisions); `bindgen` feature off.
   Newest-first search is accepted for M1; relevance ranking is a package 05 (M2) task.
   The spike is a standalone crate under `crates/petrel-core/examples/runtime_spike/`, not a workspace member.
