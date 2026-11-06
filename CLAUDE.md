@@ -18,7 +18,7 @@ and keys; this file covers state and decisions that aren't visible from the code
   all/none, text, four sorts, flagged-top, keyset `Cursor { key, id, flagged }`), `search` with `tag:`/`-tag:`/
   `is:flagged`/`in:`/phrases parsed in `query.rs`, `tag_counts`/`rename_tag`/`merge_tags`, `move_drafts`/
   `flag_drafts` → `UndoToken` → `undo`, version thinning in `sweep()` (`retention.rs`, settings with floors). A text
-  filter in `list` is the newest 2,000 matches; filters on ≤ 2,000 drafts become `rarray` id sets. v3 (after the
+  filter in `list` is the newest 2,000 matches unless another filter is that narrow (then exact, finding G); filters on ≤ 2,000 drafts become `rarray` id sets. v3 (after the
   owner's Windows bench, 2026-10-23): trigger-kept `folder_counts`/`tag_counts`, only `drafts_list` leads with the
   folder, and a checkpointer thread (`Checkpointer` in `store.rs`) so no write does a WAL checkpoint inline. v4:
   `move_drafts`/`undo` keep the counts per batch (`count_move`, `count_ctl.manual`) instead of per row. Open

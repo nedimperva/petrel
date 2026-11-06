@@ -989,29 +989,54 @@ impl Store {
             }
         }
         let fts = fts_query(&q.fts);
-        if !fts.is_empty() {
-            let ids: Vec<i64> = self
-                .conn
-                .prepare_cached(
-                    "SELECT rowid FROM drafts_fts WHERE drafts_fts MATCH ?1 ORDER BY rowid DESC LIMIT ?2",
-                )?
-                .query_map(params![fts, CANDIDATES_MAX as i64 + 1], |r| r.get(0))?
-                .collect::<rusqlite::Result<_>>()?;
-            // Checking FTS5 row by row costs a query parse per row (12 ms for a common word at 5k drafts),
-            // so a broad text filter keeps the newest `CANDIDATES_MAX` matches instead, as `search` does.
-            let mut ids = ids;
-            ids.truncate(CANDIDATES_MAX);
-            sets.push(ids);
-        }
         // Flagged-only with another filter: the flagged drafts are an index-only read (`drafts_flagged`), and
         // adding them to the intersection usually leaves a set small enough to fetch by id. Walking the sort
         // index instead tests every row of a folder when few of the set are flagged (10 ms on Windows).
-        if q.flagged_only && !sets.is_empty() {
+        if q.flagged_only && (!sets.is_empty() || !fts.is_empty()) {
             let ids: Vec<i64> = self
                 .conn
                 .prepare_cached("SELECT id FROM drafts WHERE flagged = 1 AND deleted_at IS NULL")?
                 .query_map([], |r| r.get(0))?
                 .collect::<rusqlite::Result<_>>()?;
+            sets.push(ids);
+        }
+        if !fts.is_empty() {
+            let narrow = sets.iter().filter(|s| s.len() <= CANDIDATES_MAX).min_by_key(|s| s.len());
+            let ids = match narrow {
+                // Another filter matches at most `CANDIDATES_MAX` drafts: the text is checked against every one
+                // of its matches, so none is lost to the cap (review finding G).
+                Some(narrow) => self.fts_within(&fts, narrow)?,
+                None => {
+                    let mut ids: Vec<i64> = self
+                        .conn
+                        .prepare_cached(
+                            "SELECT rowid FROM drafts_fts WHERE drafts_fts MATCH ?1 ORDER BY rowid DESC LIMIT ?2",
+                        )?
+                        .query_map(params![fts, CANDIDATES_MAX as i64 + 1], |r| r.get(0))?
+                        .collect::<rusqlite::Result<_>>()?;
+                    let small_folder = match q.folder {
+                        Some(f) if ids.len() > CANDIDATES_MAX && self.count(f)? <= CANDIDATES_MAX as i64 => {
+                            Some(f)
+                        }
+                        _ => None,
+                    };
+                    if let Some(f) = small_folder {
+                        // A small folder narrows broad text as a small tag does.
+                        let folder: Vec<i64> = self
+                            .conn
+                            .prepare_cached("SELECT id FROM drafts WHERE folder = ?1 AND deleted_at IS NULL")?
+                            .query_map(params![f as i64], |r| r.get(0))?
+                            .collect::<rusqlite::Result<_>>()?;
+                        self.fts_within(&fts, &folder)?
+                    } else {
+                        // Every filter is broad, so the newest `CANDIDATES_MAX` matches still fill pages with
+                        // drafts that match them all, as `search` does (package 01 Decisions). Checking FTS5
+                        // row by row instead costs a query parse per row.
+                        ids.truncate(CANDIDATES_MAX);
+                        ids
+                    }
+                }
+            };
             sets.push(ids);
         }
         sets.sort_by_key(Vec::len);
@@ -1034,6 +1059,22 @@ impl Store {
             f.candidates = Some(ids);
         }
         Ok(Some(f))
+    }
+
+    /// The ids in `within` whose text matches `fts`. The `+` keeps the set out of FTS5, which would run the
+    /// match once per id; instead SQLite walks the matches from the set's oldest id up and tests each against
+    /// the set (a bloom filter, then a lookup) without leaving the VM: 5 ms for a word in every draft at 50k,
+    /// where returning each match to Rust took 11 ms and one match per id 70 ms.
+    fn fts_within(&self, fts: &str, within: &[i64]) -> Result<Vec<i64>> {
+        let Some(&oldest) = within.iter().min() else { return Ok(Vec::new()) };
+        let ids = self
+            .conn
+            .prepare_cached(
+                "SELECT rowid FROM drafts_fts WHERE drafts_fts MATCH ?1 AND rowid >= ?2 AND +rowid IN rarray(?3)",
+            )?
+            .query_map(params![fts, oldest, id_array(within)], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(ids)
     }
 
     /// Up to `want` rows after `after`, in order, from each folder's index scan, merged.

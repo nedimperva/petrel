@@ -119,6 +119,18 @@ modify a draft they failed on, and tell you exactly which step broke and why.
   `runCommand` and every `file` path outside the data folder, in one `confirm_scope`. Yes records
   `sha256(steps JSON)`; `Action.trusted` is "the stored hash matches the steps", so any change outside the editor
   untrusts it. Paths inside the data folder (`files/`, the journal) never ask.
+- 2026-11-05 — **Scope is `files/`, and an untrusted action is also checked at the call** (review finding E). A
+  path is resolved (`~`, `$VAR`, then `.` and `..` without touching the disk) before the check, so
+  `files/../../x` asks as the place it writes to. In scope is `<data dir>/files/` only: the database, the action
+  mirror and the templates sit beside it. A command or out-of-scope path rendered at the step that differs from
+  what the first dialog showed (a prompt answer, a command's output in a template tag) asks again with that one
+  item; declining cancels the run, allowing trusts the action as the first dialog does. Trusted actions still
+  never ask.
+- 2026-11-05 — **The command limit covers background processes holding the output** (review finding F). After the
+  shell exits, the run waits for stdout/stderr to close only until the limit, then stops the process group
+  (Unix: TERM, then KILL after 0.5 s) and fails the step with "a background process kept the output open". A
+  background process with its output redirected (`> /dev/null 2>&1 &`) does not hold the run. On Windows the run
+  stops waiting but cannot stop the process once the shell is gone (no job object yet).
 - 2026-10-23 — **Small choices made while the owner was away** (each easy to change):
   - `[[tags]]` joins with `, `.
   - `[[longdate]]` is English (`Saturday, January 31, 2026`). chrono's locales would add a large table.

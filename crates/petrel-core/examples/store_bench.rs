@@ -131,6 +131,8 @@ fn main() -> anyhow::Result<()> {
         ("search, short prefix", "ba"),
         ("search, word and tag", "budget tag:idea"),
         ("search, flagged only", "is:flagged review"),
+        // A narrow tag makes broad text exact: every match of the word is walked down to the tag's oldest draft.
+        ("search, stopword and rare tag", "meeting tag:rare"),
     ] {
         let (p50, p95) = measure(100, || {
             store.search(q, 50).unwrap();

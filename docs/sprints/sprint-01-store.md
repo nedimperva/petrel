@@ -146,6 +146,13 @@ rows; the closest were archive 50 + undo 4.20 ms (p95 8.24) and two common tags 
   the list's `fts` uses the same newest-first window idea as `search` (owner-accepted for M1), with a 2,000 window.
   Exact for words in at most 2,000 drafts. Search with any filter (`tag:`, `is:flagged`, `in:`) goes through `list`
   and so gets this window, not the 400 one. Package 05's ranking task should revisit both windows together.
+- 2026-11-05 — **Broad text with a narrow filter is exact** (review finding G: `tag:unique common` found nothing
+  when the tagged draft was older than the newest 2,000 matches of "common"). When a tag, the flagged set or a
+  folder holds at most 2,000 drafts, the text is matched against all its FTS matches from that set's oldest id up,
+  with the set tested inside SQLite (`+rowid IN rarray(?)`, a bloom filter): 8 ms at 50k for a stopword prefix
+  and a 50-draft tag (new bench row "search, stopword and rare tag"). Returning each match to Rust took 11 ms;
+  one FTS5 query per id took 70 ms for a word and seconds for a prefix. With only broad filters the newest 2,000
+  window stays.
 - 2026-10-22 — **Two broad tags together are the one list shape over 1 ms** (1.5 ms at 50k when both tags are on
   12 % of drafts: ~3,000 rows walked for a page). Intersecting the two index ranges first measured worse end to end
   (2.2 ms). The bench allows 2 ms for this row. At the owner's library size (a few thousand drafts) it is far under
