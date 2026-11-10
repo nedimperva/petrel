@@ -30,6 +30,8 @@ use crate::title;
 pub const ROOT_SETTING: &str = "notes.root";
 /// Inside the notes folder; skipped by the scan like every other dot-folder.
 pub const TRASH_DIR: &str = ".trash";
+/// Captures land here until they are filed.
+pub const INBOX_DIR: &str = "inbox";
 /// More files than this in the notes folder are not indexed (a folder picked by mistake, like a home folder).
 pub const SCAN_MAX: usize = 50_000;
 /// Versions kept per note; older ones go first.
@@ -1020,6 +1022,136 @@ impl Store {
         Ok(NoteChange { note: self.peek_note(id)?, token, relinked })
     }
 
+    /// Files a note somewhere else: another folder, another title, or both. Links to it follow, as for a
+    /// rename. This is how a capture leaves `inbox/`.
+    pub fn move_note(&mut self, id: i64, folder: &str, title: &str) -> Result<NoteChange> {
+        let root = self.root()?;
+        let row = self.row(id)?;
+        let new_folder = clean_folder(folder);
+        let wanted = clean_title(title);
+        let wanted = if wanted.is_empty() { row.title.clone() } else { wanted };
+        if new_folder == row.folder {
+            return self.rename_note(id, &wanted);
+        }
+        // A free name in the new folder: `Plan 2` when `Plan` is taken, as for a new note.
+        let mut name = wanted.clone();
+        let mut n = 2;
+        while abs(&root, &join_rel(&new_folder, &name)).exists() || self.id_of(&join_rel(&new_folder, &name))?.is_some() {
+            name = format!("{wanted} {n}");
+            n += 1;
+        }
+        let to = join_rel(&new_folder, &name);
+        let target = abs(&root, &to);
+        if let Some(dir) = target.parent() {
+            std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+        }
+        rename_with_retry(&abs(&root, &row.path), &target)?;
+        self.conn.execute(
+            "UPDATE notes SET path = ?2, folder = ?3, title = ?4 WHERE id = ?1",
+            params![id, to, new_folder, name],
+        )?;
+        self.index_file(&root, &to)?;
+        let mut steps = vec![UndoStep::FileRenamed { from: row.path.clone(), to }];
+        let (old_folder, old_title) = (row.folder.clone(), row.title.clone());
+        let qualify_new = Some(new_folder.clone()).filter(|f| !f.is_empty());
+        let relinked = self.relink(&old_title, &mut steps, |t| match t {
+            Target::Note { folder, .. } if note_matches(t, &old_folder, &old_title) => Some(Target::Note {
+                folder: folder.as_ref().and(qualify_new.clone()),
+                title: name.clone(),
+            }),
+            _ => None,
+        })?;
+        let token = self.remember_notes(steps);
+        Ok(NoteChange { note: self.peek_note(id)?, token, relinked })
+    }
+
+    /// Adds one note's text to the end of another, under the date and time, and moves the first to the trash.
+    /// The inbox's "add to a note".
+    pub fn merge_note(&mut self, from_id: i64, into_id: i64) -> Result<NoteChange> {
+        if from_id == into_id {
+            bail!("a note can't be added to itself");
+        }
+        let root = self.root()?;
+        let from = self.peek_note(from_id)?;
+        let row = self.row(into_id)?;
+        let path = abs(&root, &row.path);
+        let before = std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+        let (raw, body) = split_front(&before);
+        let mut front = parse_front(raw);
+        let mut front_text = raw.to_string();
+        let mut tags = front.tags.clone();
+        for t in &from.tags {
+            if !tags.iter().any(|x| same(x, t)) {
+                tags.push(t.clone());
+            }
+        }
+        if tags != front.tags {
+            front.tags = tags;
+            front_text = render_front(&front);
+        }
+        let stamp = chrono::Local::now().format("%Y-%m-%d %H:%M");
+        let body = body.trim_end();
+        let glue = if body.is_empty() { String::new() } else { format!("{body}\n\n") };
+        let after = format!("{front_text}{glue}_{stamp}_\n\n{}\n", from.body.trim());
+        self.note_version(into_id, &before, "before_append")?;
+        write_atomic(&path, &after)?;
+        self.index_file(&root, &row.path)?;
+        let trashed = self.move_to_trash(&root, &from.path)?;
+        let steps = vec![
+            UndoStep::NoteText { path: row.path.clone(), before, after },
+            UndoStep::FileTrashed { path: from.path.clone(), trashed },
+        ];
+        let token = self.remember_notes(steps);
+        Ok(NoteChange { note: self.peek_note(into_id)?, token, relinked: 0 })
+    }
+
+    /// Writes every draft that is not in the Trash to a Markdown file once: Inbox drafts to `inbox/`, the
+    /// others to `drafts/`. The drafts stay in the database, so nothing is lost if this goes wrong. Returns
+    /// how many files were written; 0 when it already ran.
+    pub fn export_drafts_once(&mut self) -> Result<usize> {
+        const DONE: &str = "drafts.exported";
+        if self.setting(DONE)?.is_some() {
+            return Ok(0);
+        }
+        let root = self.root()?;
+        std::fs::create_dir_all(&root)?;
+        let rows: Vec<(String, String, i64, String, i64)> = self
+            .conn
+            .prepare(
+                "SELECT d.title, d.content, d.folder, \
+                    COALESCE((SELECT group_concat(t.name, ',') FROM draft_tags dt JOIN tags t ON t.id = dt.tag_id \
+                              WHERE dt.draft_id = d.id), ''), d.created_at \
+                 FROM drafts d WHERE d.deleted_at IS NULL AND d.folder != 2 AND trim(d.content) != ''",
+            )?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        let mut n = 0;
+        for (title, content, folder, tags, created) in rows {
+            let inbox = folder == 0;
+            let to = if inbox { INBOX_DIR } else { "drafts" };
+            let stamp = chrono::DateTime::from_timestamp_millis(created)
+                .map(|t| t.with_timezone(&chrono::Local).format("%Y-%m-%d %H%M").to_string())
+                .unwrap_or_default();
+            let name = if inbox || title.trim().is_empty() {
+                format!("{stamp} {}", title.chars().take(40).collect::<String>())
+            } else {
+                title.clone()
+            };
+            let tags = split_tags(&tags);
+            let body = if inbox { content.clone() } else { without_title_line(&content, &title) };
+            self.create_note(to, &name, &body, &tags)?;
+            n += 1;
+        }
+        self.set_setting(DONE, &self.now().to_string())?;
+        Ok(n)
+    }
+
+    /// A new capture: a file in `inbox/` named by the time it was made.
+    pub fn capture_note(&mut self, body: &str) -> Result<Note> {
+        let stamp = chrono::Local::now().format("%Y-%m-%d %H%M%S").to_string();
+        self.create_note(INBOX_DIR, &stamp, body, &[])
+    }
+
     /// Rewrites links found by searching for `words`, in notes and drafts (Trash included: a link there may
     /// come back). `map` gives the new target for a link that should change.
     fn relink(
@@ -1603,6 +1735,50 @@ mod tests {
         let d = std::env::temp_dir().join(format!("petrel-notes-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    #[test]
+    fn capture_file_and_merge() {
+        let dir = tmp();
+        let mut s = store_in(&dir);
+        let c = s.capture_note("Ask about the release date\n").unwrap();
+        assert_eq!(c.folder, INBOX_DIR);
+        assert!(dir.join(&c.path).exists());
+        let target = s.create_note("work", "Tern release", "Open questions\n", &[]).unwrap();
+        // Linked from elsewhere: the link follows a move.
+        let other = s.create_note("", "Week", "See [[Plan]]\n", &[]).unwrap();
+        let plan = s.create_note(INBOX_DIR, "Plan", "steps\n", &[]).unwrap();
+        let moved = s.move_note(plan.id, "ideas", "Plan").unwrap();
+        assert_eq!(moved.note.path, "ideas/Plan.md");
+        assert!(dir.join("ideas/Plan.md").exists() && !dir.join("inbox/Plan.md").exists());
+        assert!(s.peek_note(other.id).unwrap().body.contains("[[Plan]]"));
+        s.undo_notes(&moved.token.token).unwrap();
+        assert!(dir.join("inbox/Plan.md").exists());
+
+        let merged = s.merge_note(c.id, target.id).unwrap();
+        let body = s.peek_note(target.id).unwrap().body;
+        assert!(body.starts_with("Open questions") && body.contains("Ask about the release date"), "{body}");
+        assert!(!dir.join(&c.path).exists());
+        assert!(s.merge_note(target.id, target.id).is_err());
+        s.undo_notes(&merged.token.token).unwrap();
+        assert!(dir.join(&c.path).exists());
+        assert_eq!(s.peek_note(target.id).unwrap().body, "Open questions\n");
+    }
+
+    #[test]
+    fn drafts_are_exported_once() {
+        let dir = tmp();
+        let mut s = store_in(&dir);
+        s.new_draft("Shopping\nmilk").unwrap();
+        let kept = s.new_draft("Book idea\nThe lighthouse").unwrap();
+        s.move_drafts(&[kept.id], Folder::Archive).unwrap();
+        s.new_draft("   ").unwrap();
+        assert_eq!(s.export_drafts_once().unwrap(), 2);
+        assert_eq!(s.export_drafts_once().unwrap(), 0);
+        assert!(dir.join("drafts/Book idea.md").exists());
+        let inbox = s.list_notes(&NoteQuery { folder: Some(INBOX_DIR.into()), ..Default::default() }).unwrap();
+        assert_eq!(inbox.len(), 1);
+        assert!(s.peek_note(inbox[0].id).unwrap().body.contains("milk"));
     }
 
     #[test]
