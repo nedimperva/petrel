@@ -32,6 +32,8 @@ pub const ROOT_SETTING: &str = "notes.root";
 pub const TRASH_DIR: &str = ".trash";
 /// Captures land here until they are filed.
 pub const INBOX_DIR: &str = "inbox";
+/// Settings keys `copied.<path>` count copies (collections sort by them).
+const COPY_PREFIX: &str = "copied.";
 /// More files than this in the notes folder are not indexed (a folder picked by mistake, like a home folder).
 pub const SCAN_MAX: usize = 50_000;
 /// Versions kept per note; older ones go first.
@@ -236,6 +238,15 @@ pub struct Backlinks {
     pub linked: Vec<BackRef>,
     /// Texts that name the note without linking to it.
     pub mentioned: Vec<BackRef>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteVersion {
+    pub id: i64,
+    pub reason: String,
+    pub created_at: i64,
+    pub length: i64,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -796,6 +807,26 @@ impl Store {
         Ok(rows)
     }
 
+    /// The notes most about a question, best first, with their bodies: what "ask my notes" reads. Any word
+    /// may match (short and common words are dropped), ranked by bm25.
+    pub fn notes_about(&self, question: &str, limit: usize) -> Result<Vec<Note>> {
+        let words: Vec<String> = question
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| w.chars().count() > 2 && !STOP.contains(&w.to_lowercase().as_str()))
+            .map(|w| format!("\"{w}\"*"))
+            .collect();
+        if words.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT f.rowid FROM notes_fts f WHERE notes_fts MATCH ?1 ORDER BY bm25(notes_fts) LIMIT ?2",
+        )?;
+        let ids: Vec<i64> = stmt
+            .query_map(params![words.join(" OR "), limit as i64], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        ids.into_iter().map(|id| self.peek_note(id)).collect()
+    }
+
     /// The folders that hold notes, and the folders above them, in tree order.
     pub fn note_folders(&self) -> Result<Vec<NoteFolder>> {
         let counts: Vec<(String, i64)> = self
@@ -1036,7 +1067,9 @@ impl Store {
         // A free name in the new folder: `Plan 2` when `Plan` is taken, as for a new note.
         let mut name = wanted.clone();
         let mut n = 2;
-        while abs(&root, &join_rel(&new_folder, &name)).exists() || self.id_of(&join_rel(&new_folder, &name))?.is_some() {
+        while abs(&root, &join_rel(&new_folder, &name)).exists()
+            || self.id_of(&join_rel(&new_folder, &name))?.is_some()
+        {
             name = format!("{wanted} {n}");
             n += 1;
         }
@@ -1055,10 +1088,9 @@ impl Store {
         let (old_folder, old_title) = (row.folder.clone(), row.title.clone());
         let qualify_new = Some(new_folder.clone()).filter(|f| !f.is_empty());
         let relinked = self.relink(&old_title, &mut steps, |t| match t {
-            Target::Note { folder, .. } if note_matches(t, &old_folder, &old_title) => Some(Target::Note {
-                folder: folder.as_ref().and(qualify_new.clone()),
-                title: name.clone(),
-            }),
+            Target::Note { folder, .. } if note_matches(t, &old_folder, &old_title) => {
+                Some(Target::Note { folder: folder.as_ref().and(qualify_new.clone()), title: name.clone() })
+            }
             _ => None,
         })?;
         let token = self.remember_notes(steps);
@@ -1150,6 +1182,77 @@ impl Store {
     pub fn capture_note(&mut self, body: &str) -> Result<Note> {
         let stamp = chrono::Local::now().format("%Y-%m-%d %H%M%S").to_string();
         self.create_note(INBOX_DIR, &stamp, body, &[])
+    }
+
+    /// A note's saved versions, newest first (the history panel).
+    pub fn note_versions(&self, id: i64) -> Result<Vec<NoteVersion>> {
+        let mut st = self.conn.prepare(
+            "SELECT id, reason, created_at, length(content) FROM note_versions WHERE note_id = ?1 \
+             ORDER BY created_at DESC, id DESC",
+        )?;
+        let rows = st.query_map(params![id], |r| {
+            Ok(NoteVersion { id: r.get(0)?, reason: r.get(1)?, created_at: r.get(2)?, length: r.get(3)? })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// A version's body, without its front matter.
+    pub fn note_version_text(&self, version_id: i64) -> Result<String> {
+        let text: String = self
+            .conn
+            .query_row("SELECT content FROM note_versions WHERE id = ?1", params![version_id], |r| r.get(0))
+            .optional()?
+            .ok_or_else(|| anyhow!("no version {version_id}"))?;
+        Ok(split_front(&text).1.to_string())
+    }
+
+    /// Keeps the file as it is now as a version, whatever the interval: before an AI rewrite or a restore.
+    pub fn snapshot_note(&mut self, id: i64, reason: &str) -> Result<()> {
+        let root = self.root()?;
+        let row = self.row(id)?;
+        let path = abs(&root, &row.path);
+        let disk = std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+        self.note_version(id, &disk, reason)
+    }
+
+    /// Puts a version's body back, keeping today's front matter. The current text is kept first.
+    pub fn restore_note_version(&mut self, id: i64, version_id: i64) -> Result<Note> {
+        let owner: Option<i64> = self
+            .conn
+            .query_row("SELECT note_id FROM note_versions WHERE id = ?1", params![version_id], |r| r.get(0))
+            .optional()?;
+        if owner != Some(id) {
+            bail!("that version is not one of this note's");
+        }
+        let body = self.note_version_text(version_id)?;
+        self.snapshot_note(id, "restore")?;
+        let root = self.root()?;
+        let row = self.row(id)?;
+        let path = abs(&root, &row.path);
+        let disk = std::fs::read_to_string(&path).unwrap_or_default();
+        let front = split_front(&disk).0.to_string();
+        write_atomic(&path, &format!("{front}{body}"))?;
+        self.index_file(&root, &row.path)?;
+        self.note(id)
+    }
+
+    /// Counts a copy, so a collection can list what is used most first. Kept by path in settings: the index
+    /// is rebuildable and a count is not worth a migration.
+    pub fn record_copy(&mut self, id: i64) -> Result<i64> {
+        let row = self.row(id)?;
+        let key = format!("{COPY_PREFIX}{}", row.path);
+        let n = self.setting(&key)?.and_then(|v| v.parse::<i64>().ok()).unwrap_or(0) + 1;
+        self.set_setting(&key, &n.to_string())?;
+        Ok(n)
+    }
+
+    /// How often each note was copied, by path.
+    pub fn copy_counts(&self) -> Result<std::collections::HashMap<String, i64>> {
+        Ok(self
+            .settings_with_prefix(COPY_PREFIX)?
+            .into_iter()
+            .filter_map(|(k, v)| Some((k.strip_prefix(COPY_PREFIX)?.to_string(), v.parse().ok()?)))
+            .collect())
     }
 
     /// Rewrites links found by searching for `words`, in notes and drafts (Trash included: a link there may
@@ -1676,6 +1779,13 @@ fn summary(r: &rusqlite::Row) -> rusqlite::Result<NoteSummary> {
     })
 }
 
+/// Words too common to help find a note.
+const STOP: &[&str] = &[
+    "the", "and", "for", "are", "was", "what", "when", "where", "which", "who", "how", "why", "with", "that",
+    "this", "have", "has", "had", "did", "does", "you", "your", "about", "from", "there", "their", "can",
+    "could", "would", "should", "will", "into", "any", "all", "but", "not", "notes", "note", "my",
+];
+
 /// Each word as a prefix, all required: what a person typing in a search box means.
 fn fts_words(text: &str) -> Option<String> {
     let words: Vec<String> = text
@@ -1766,6 +1876,34 @@ mod tests {
     }
 
     #[test]
+    fn versions_restore_copies_and_asking() {
+        let dir = tmp();
+        let mut s = store_in(&dir);
+        let n = s
+            .create_note("Prompts", "Review", "Review this code for {{lang}} bugs\n", &["ai".into()])
+            .unwrap();
+        s.snapshot_note(n.id, "ai").unwrap();
+        let saved = s.save_note(n.id, "Shorter\n", &n.hash).unwrap();
+        assert!(saved.conflict.is_none());
+        let versions = s.note_versions(n.id).unwrap();
+        assert_eq!(versions[0].reason, "ai");
+        assert!(s.note_version_text(versions[0].id).unwrap().starts_with("Review this code"));
+        let back = s.restore_note_version(n.id, versions[0].id).unwrap();
+        assert!(back.body.starts_with("Review this code") && back.tags == vec!["ai".to_string()]);
+        let other = s.create_note("", "Other", "x\n", &[]).unwrap();
+        assert!(s.restore_note_version(other.id, versions[0].id).is_err());
+
+        assert_eq!(s.record_copy(n.id).unwrap(), 1);
+        assert_eq!(s.record_copy(n.id).unwrap(), 2);
+        assert_eq!(s.copy_counts().unwrap().get("Prompts/Review.md"), Some(&2));
+
+        s.create_note("", "Garden", "Tomatoes need sun and water\n", &[]).unwrap();
+        let found = s.notes_about("What do my tomatoes need?", 5).unwrap();
+        assert_eq!(found[0].title, "Garden");
+        assert!(s.notes_about("what is the", 5).unwrap().is_empty());
+    }
+
+    #[test]
     fn drafts_are_exported_once() {
         let dir = tmp();
         let mut s = store_in(&dir);
@@ -1776,7 +1914,8 @@ mod tests {
         assert_eq!(s.export_drafts_once().unwrap(), 2);
         assert_eq!(s.export_drafts_once().unwrap(), 0);
         assert!(dir.join("drafts/Book idea.md").exists());
-        let inbox = s.list_notes(&NoteQuery { folder: Some(INBOX_DIR.into()), ..Default::default() }).unwrap();
+        let inbox =
+            s.list_notes(&NoteQuery { folder: Some(INBOX_DIR.into()), ..Default::default() }).unwrap();
         assert_eq!(inbox.len(), 1);
         assert!(s.peek_note(inbox[0].id).unwrap().body.contains("milk"));
     }

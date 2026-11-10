@@ -25,9 +25,6 @@
       "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; frame-src 'self' about: data: blob:; connect-src ipc: http://ipc.localhost"
     }
   },
-  "plugins": {
-    "deep-link": { "desktop": { "schemes": ["petrel"] } }
-  },
   "bundle": {
     "active": true,
     "targets": "all",
@@ -39,14 +36,22 @@
       "icons/icon.ico"
     ],
     "windows": {
-      "webviewInstallMode": { "type": "downloadBootstrapper" },
-      "nsis": { "installMode": "currentUser" }
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser"
+      }
     },
     "linux": {
-      "rpm": { "desktopTemplate": "petrel.desktop" },
+      "rpm": {
+        "desktopTemplate": "petrel.desktop"
+      },
       "deb": {
         "desktopTemplate": "petrel.desktop",
-        "depends": ["libwebkit2gtk-4.1-0"]
+        "depends": [
+          "libwebkit2gtk-4.1-0"
+        ]
       }
     }
   }

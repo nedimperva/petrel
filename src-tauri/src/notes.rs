@@ -4,8 +4,8 @@
 use std::path::{Path, PathBuf};
 
 use petrel_core::notes::{
-    Backlinks, LinkTarget, Note, NoteChange, NoteFolder, NoteQuery, NoteSummary, Resolved, SavedNote,
-    ScanReport,
+    Backlinks, LinkTarget, Note, NoteChange, NoteFolder, NoteQuery, NoteSummary, NoteVersion, Resolved,
+    SavedNote, ScanReport,
 };
 use petrel_core::{Store, UndoToken};
 use tauri::State;
@@ -123,20 +123,58 @@ pub fn trash_note(state: State<AppState>, id: i64) -> R<UndoToken> {
     with(&state, |s| s.trash_note(id))
 }
 
+/// A new capture: a file in `inbox/`. The capture window calls this on the first keystroke, then saves.
 #[tauri::command]
-pub fn promote_draft(
-    state: State<AppState>,
-    draft_id: i64,
-    folder: String,
-    title: String,
-    keep_tags: bool,
-) -> R<NoteChange> {
-    with(&state, |s| s.promote_draft(draft_id, &folder, &title, keep_tags))
+pub fn capture_note(state: State<AppState>, body: String) -> R<Note> {
+    let default = default_root(&state.db_path);
+    with(&state, |s| {
+        let root = s.notes_root_or(&default)?;
+        std::fs::create_dir_all(&root)?;
+        s.capture_note(&body)
+    })
+}
+
+/// Files a note somewhere else (the inbox's `m` and Enter): another folder, a new title, or both.
+#[tauri::command]
+pub fn move_note(state: State<AppState>, id: i64, folder: String, title: String) -> R<NoteChange> {
+    with(&state, |s| s.move_note(id, &folder, &title))
+}
+
+/// Adds a capture to the end of a note and puts the capture in the trash.
+#[tauri::command]
+pub fn merge_note(state: State<AppState>, from: i64, into: i64) -> R<NoteChange> {
+    with(&state, |s| s.merge_note(from, into))
 }
 
 #[tauri::command]
-pub fn append_to_note(state: State<AppState>, draft_id: i64, note_id: i64, keep_tags: bool) -> R<NoteChange> {
-    with(&state, |s| s.append_to_note(draft_id, note_id, keep_tags))
+pub fn undo_note(state: State<AppState>, token: String) -> R<usize> {
+    with(&state, |s| s.undo(&token))
+}
+
+#[tauri::command]
+pub fn note_versions(state: State<AppState>, id: i64) -> R<Vec<NoteVersion>> {
+    with(&state, |s| s.note_versions(id))
+}
+
+#[tauri::command]
+pub fn note_version_text(state: State<AppState>, version_id: i64) -> R<String> {
+    with(&state, |s| s.note_version_text(version_id))
+}
+
+#[tauri::command]
+pub fn restore_note_version(state: State<AppState>, id: i64, version_id: i64) -> R<Note> {
+    with(&state, |s| s.restore_note_version(id, version_id))
+}
+
+/// Counts a copy from a collection, so its most used items come first.
+#[tauri::command]
+pub fn record_copy(state: State<AppState>, id: i64) -> R<i64> {
+    with(&state, |s| s.record_copy(id))
+}
+
+#[tauri::command]
+pub fn copy_counts(state: State<AppState>) -> R<std::collections::HashMap<String, i64>> {
+    with(&state, |s| s.copy_counts())
 }
 
 #[tauri::command]

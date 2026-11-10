@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Petrel: capture text first, act on it later"
+description = "Petrel: quick capture and notes, as Markdown files in one folder"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -24,6 +24,8 @@ tauri-plugin-dialog = "2"
 dirs = "7"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-autostart = "2"
-tauri-plugin-deep-link = "2"
-# Opens URLs for `petrel run`, which has no Tauri app; already in the tree through tauri-plugin-opener.
-open = "5"
+# AI on request: the Claude API over HTTPS from Rust, the key in the OS keyring.
+ureq = { version = "3", features = ["json"] }
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
+# "Copy formatted": Markdown to HTML for the clipboard.
+pulldown-cmark = { version = "0.13.5", default-features = false, features = ["html"] }
