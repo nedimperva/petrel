@@ -1,233 +1,210 @@
-// Settings (`Ctrl ,`, ui.md §4.7): when a new draft opens, the editor's type, the capture hotkey and start at
-// login. Each row says what it does and what state it is in, so nothing needs the docs. Changes apply at once.
+// Settings (`Ctrl ,`): the Petrel folder (put it inside Google Drive to sync), AI with your own Claude key, the
+// two hotkeys, start at login, and how the page looks.
 
-import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
-import { api, type DesktopSettings } from "../api";
-import { applyEditorPrefs, prefs, type Prefs, setPrefs, SIZES, storedValue } from "./prefs";
+import { createResource, createSignal, For, Show } from "solid-js";
+import { api, errText, type AiStatus, type DesktopSettings } from "../api";
+import { say } from "../ui";
+import { applyPrefs, prefs, setPrefs, SIZES, storedValue, type Prefs, type Theme } from "./prefs";
 
-interface Props {
-  onClose(): void;
-  /** A preference changed; the window applies what CSS can't (typewriter scrolling). */
-  onPrefs(p: Prefs): void;
-}
+export default function Settings(p: { section?: "ai"; onClose(): void; onRoot(root: string): void; onAi(s: AiStatus): void }) {
+  const [info, { refetch: refetchInfo }] = createResource(async () => (await api()).notesInfo());
+  const [desk, { mutate: setDesk }] = createResource<DesktopSettings>(async () => (await api()).desktopSettings());
+  const [ai, { mutate: setAi }] = createResource<AiStatus>(async () => (await api()).aiStatus());
+  const [key, setKey] = createSignal("");
+  const [hk, setHk] = createSignal<{ capture?: string; picker?: string }>({});
 
-/** A key press as a hotkey the engine can register (`Ctrl+Alt+Space`), or null for a lone modifier. */
-export function accelerator(e: KeyboardEvent): string | null {
-  if (["Control", "Alt", "Shift", "Meta", "AltGraph", "OS"].includes(e.key)) return null;
-  const mods = [e.ctrlKey && "Ctrl", e.shiftKey && "Shift", e.altKey && "Alt", e.metaKey && "Super"].filter(Boolean);
-  let key: string;
-  if (/^Key[A-Z]$/.test(e.code)) key = e.code.slice(3);
-  else if (/^Digit\d$/.test(e.code)) key = e.code.slice(5);
-  else if (/^F\d{1,2}$/.test(e.code) || /^Arrow/.test(e.code)) key = e.code;
-  else if (["Space", "Enter", "Tab", "Home", "End", "PageUp", "PageDown", "Insert", "Delete"].includes(e.code)) key = e.code;
-  else return null;
-  return [...mods, key].join("+");
-}
-
-const caps = (s: string) => s.split("+").map((k) => (k === "Space" ? "Space" : k.replace(/^Arrow/, "")));
-
-export default function Settings(props: Props) {
-  let dialog!: HTMLDivElement;
-  const [s, setS] = createSignal<DesktopSettings | null>(null);
-  const [recording, setRecording] = createSignal(false);
-  const [error, setError] = createSignal<string | null>(null);
-  const [busy, setBusy] = createSignal(false);
-
-  onMount(async () => {
-    // On the window, not the dialog: a button that disappears when clicked (Turn off) drops focus to the body.
-    window.addEventListener("keydown", onKey);
-    dialog.focus();
-    try {
-      setS(await (await api).desktopSettings());
-    } catch (e) {
-      setError(`Settings cannot be read: ${e}`);
-    }
-  });
-
-  async function apply(run: () => Promise<DesktopSettings>) {
-    setBusy(true);
-    setError(null);
-    try {
-      setS(await run());
-    } catch (e) {
-      setError(String(e).replace(/^Error: /, ""));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  onCleanup(() => window.removeEventListener("keydown", onKey));
-
-  async function setPref<K extends keyof Prefs>(key: K, value: Prefs[K]) {
-    const next = { ...prefs(), [key]: value };
+  const pref = async <K extends keyof Prefs>(k: K, v: Prefs[K]) => {
+    const next = { ...prefs(), [k]: v };
     setPrefs(next);
-    applyEditorPrefs(next);
-    props.onPrefs(next);
-    try {
-      await (await api).setUiSetting(...storedValue(key, value));
-    } catch (e) {
-      setError(`Not saved: ${e}`);
-    }
-  }
-
-  const setHotkey = (h: string | null) => apply(async () => (await api).setHotkey(h));
-
-  function onKey(e: KeyboardEvent) {
-    // The app's own keys must not act on the text behind the dialog.
-    e.stopPropagation();
-    if (recording()) {
-      e.preventDefault();
-      if (e.key === "Escape") return setRecording(false);
-      const a = accelerator(e);
-      if (!a) return;
-      if (!/(Ctrl|Alt|Super)\+/.test(a) && !/^Shift\+F\d/.test(a)) {
-        setError(`${a.replace(/\+/g, " ")} would be taken from every app. Add Ctrl, Alt or the Windows key.`);
-        return;
-      }
-      setRecording(false);
-      return setHotkey(a);
-    }
-    if (e.key === "Escape") {
-      e.preventDefault();
-      props.onClose();
-    }
-  }
-
-  const status = () => {
-    const v = s();
-    if (!v) return "";
-    if (!v.hotkey) return "Off.";
-    if (v.hotkeyPaused) return "Paused from the tray.";
-    if (v.hotkeyActive) return "On: press it in any app.";
-    return v.hotkeyError ? `Not working: ${v.hotkeyError}` : "Not registered.";
+    applyPrefs(next);
+    const [sk, sv] = storedValue(k, v);
+    await (await api()).setUiSetting(sk, sv).catch((e) => say(errText(e), { error: true }));
   };
 
+  async function chooseFolder() {
+    const s = await api();
+    const picked = await s.pickFolder();
+    if (!picked) return;
+    try {
+      const r = await s.setNotesRoot(picked);
+      await refetchInfo();
+      p.onRoot(r.root);
+      say(`Petrel now reads ${r.root}: ${r.added} notes found`);
+    } catch (e) {
+      say(errText(e), { error: true });
+    }
+  }
+
+  async function saveKey(k: string | null) {
+    try {
+      const st = await (await api()).setAiKey(k);
+      setAi(st);
+      p.onAi(st);
+      setKey("");
+      say(k ? "Key saved in the system keyring" : "Key removed");
+    } catch (e) {
+      say(errText(e), { error: true });
+    }
+  }
+
+  async function setHotkey(which: "capture" | "picker") {
+    const v = hk()[which];
+    if (v === undefined) return;
+    try {
+      setDesk(await (await api()).setHotkey(which, v.trim() || null));
+      setHk({ ...hk(), [which]: undefined });
+    } catch (e) {
+      say(errText(e), { error: true });
+    }
+  }
+
+  const drive = () => /google drive|googledrive|my drive/i.test(info()?.root ?? "");
+
   return (
-    <div class="scrim" onMouseDown={(e) => e.target === e.currentTarget && props.onClose()}>
-      <div class="dialog settings" ref={dialog} tabindex="-1" role="dialog" aria-label="Settings">
-        <h2>Settings</h2>
+    <div class="scrim" onMouseDown={(e) => e.target === e.currentTarget && p.onClose()} onKeyDown={(e) => e.key === "Escape" && p.onClose()}>
+      <div class="dialog settings" tabindex={-1} ref={(el) => setTimeout(() => el.focus())}>
+        <header class="dialog-head">
+          <h2>Settings</h2>
+          <span class="grow" />
+          <button class="btn" onClick={p.onClose}>
+            Done <kbd>Esc</kbd>
+          </button>
+        </header>
+
         <section>
-          <h3>New draft</h3>
-          <p class="hint">Coming back to Petrel with a draft open starts a fresh one; the old one stays in the Inbox.</p>
-          <div class="setting-row">
-            <select
-              value={prefs().newDraft}
-              onChange={(e) => setPref("newDraft", e.currentTarget.value as Prefs["newDraft"])}
-            >
-              <option value="away">After some time away</option>
-              <option value="always">Every time</option>
-              <option value="never">Never: keep the last draft</option>
-            </select>
-            <Show when={prefs().newDraft === "away"}>
-              <input
-                type="number"
-                class="minutes"
-                min="1"
-                max="1440"
-                value={prefs().awayMinutes}
-                onChange={(e) => {
-                  const n = Math.round(Number(e.currentTarget.value));
-                  if (n >= 1 && n <= 1440) void setPref("awayMinutes", n);
-                  else e.currentTarget.value = String(prefs().awayMinutes);
+          <h3>Your Petrel folder</h3>
+          <p class="muted">Every note, capture and collection is a Markdown file here. Put it inside your Google Drive folder and Drive keeps a copy on every computer.</p>
+          <div class="row">
+            <code class="path">{info()?.root ?? "…"}</code>
+            <button class="btn" onClick={chooseFolder}>
+              Change…
+            </button>
+          </div>
+          <Show when={!drive()}>
+            <p class="muted small">
+              Windows: Google Drive for desktop, "Mirror files", then a folder under <code>My Drive</code>. Linux: rclone bisync or Syncthing to the same folder.
+            </p>
+          </Show>
+          <p class="muted small">If a note changes in two places, Petrel keeps both copies and tells you. The index lives outside the folder and is rebuilt from it.</p>
+        </section>
+
+        <section classList={{ highlight: p.section === "ai" }}>
+          <h3>
+            <span class="spark">✦</span> AI
+          </h3>
+          <p class="muted">Claude runs only when you ask: Ctrl J on a selection, / on an empty line, S in the inbox, a question in Ctrl K. It uses your own Claude API key, kept in the system keyring.</p>
+          <Show
+            when={ai()?.ready}
+            fallback={
+              <form
+                class="row"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (key().trim()) void saveKey(key().trim());
                 }}
-              />
-              <span>minutes</span>
-            </Show>
-          </div>
+              >
+                <input class="grow" type="password" placeholder="sk-ant-…" value={key()} onInput={(e) => setKey(e.currentTarget.value)} autocomplete="off" />
+                <button class="btn primary" type="submit" disabled={!key().trim()}>
+                  Save key
+                </button>
+              </form>
+            }
+          >
+            <div class="row">
+              <span class="ok">On · {ai()!.model}</span>
+              <span class="grow" />
+              <button class="btn" onClick={() => saveKey(null)}>
+                Remove key
+              </button>
+            </div>
+          </Show>
+          <Show when={ai()?.error}>
+            <p class="bad small">{ai()!.error}</p>
+          </Show>
+          <p class="muted small">Get a key at console.anthropic.com. A short rewrite costs well under a cent.</p>
         </section>
+
         <section>
-          <h3>Editor</h3>
-          <div class="setting-row">
-            <span class="label">Text size</span>
-            <select value={prefs().editorSize} onChange={(e) => setPref("editorSize", Number(e.currentTarget.value))}>
-              <For each={SIZES}>{(n) => <option value={n}>{n} px</option>}</For>
-            </select>
-            <span class="label">Typeface</span>
-            <select
-              value={prefs().editorFont}
-              onChange={(e) => setPref("editorFont", e.currentTarget.value as Prefs["editorFont"])}
-            >
-              <option value="sans">Sans</option>
-              <option value="serif">Serif</option>
-              <option value="mono">Monospace</option>
-            </select>
-          </div>
-          <label class="setting-row">
-            <input type="checkbox" checked={prefs().typewriter} onChange={(e) => setPref("typewriter", e.currentTarget.checked)} />
-            <span>Typewriter scrolling: the line you type stays in the middle of the window.</span>
-          </label>
-          <p class="hint">
-            <kbd>Ctrl Shift D</kbd> focus mode dims everything but the paragraph you're writing.
-          </p>
-        </section>
-        <Show when={s()} fallback={<p>{error() ?? "Loading…"}</p>}>
-          {(v) => (
-            <>
-              <section>
-                <h3>Capture hotkey</h3>
-                <p class="hint">Opens the small capture window from any app. Type, then Esc saves and closes it.</p>
-                <Show
-                  when={v().hotkeySupported}
-                  fallback={
-                    <p class="hint">
-                      On Wayland the compositor owns the keys. In Hyprland, add to your config:
-                      <code class="block">bind = SUPER, N, exec, petrel --capture</code>
-                    </p>
-                  }
-                >
-                  <div class="setting-row">
-                    <span class="keys">
-                      <Show when={recording()} fallback={<Show when={v().hotkey} fallback={<span class="meta">none</span>}>{(h) => <For each={caps(h())}>{(k) => <kbd>{k}</kbd>}</For>}</Show>}>
-                        <span class="meta">Press the keys… (Esc cancels)</span>
-                      </Show>
-                    </span>
-                    <span class="grow" />
-                    <button disabled={busy()} onClick={() => (setError(null), setRecording(true))}>
-                      Change
+          <h3>Hotkeys</h3>
+          <Show
+            when={desk()?.hotkeySupported !== false}
+            fallback={
+              <p class="muted">
+                On Wayland your compositor binds keys. In Hyprland: <code>bind = SUPER, N, exec, petrel --capture</code> and <code>bind = SUPER, V, exec, petrel --picker</code>.
+              </p>
+            }
+          >
+            <For each={["capture", "picker"] as const}>
+              {(w) => {
+                const cur = () => (w === "capture" ? desk()?.hotkey : desk()?.pickerHotkey) ?? "";
+                const err = () => (w === "capture" ? desk()?.hotkeyError : desk()?.pickerHotkeyError);
+                return (
+                  <div class="row">
+                    <span class="label">{w === "capture" ? "Quick capture" : "Quick picker"}</span>
+                    <input
+                      value={hk()[w] ?? cur()}
+                      placeholder="off"
+                      onInput={(e) => setHk({ ...hk(), [w]: e.currentTarget.value })}
+                      onKeyDown={(e) => e.key === "Enter" && setHotkey(w)}
+                    />
+                    <button class="btn" disabled={hk()[w] === undefined} onClick={() => setHotkey(w)}>
+                      Set
                     </button>
-                    <Show when={v().hotkey !== v().hotkeyDefault}>
-                      <button disabled={busy()} onClick={() => setHotkey(v().hotkeyDefault)}>
-                        Use {v().hotkeyDefault.replace(/\+/g, " ")}
-                      </button>
-                    </Show>
-                    <Show when={v().hotkey}>
-                      <button disabled={busy()} onClick={() => setHotkey(null)}>
-                        Turn off
-                      </button>
+                    <Show when={err()}>
+                      <span class="bad small">{err()}</span>
                     </Show>
                   </div>
-                  <p class="hint" classList={{ warn: !!v().hotkey && !v().hotkeyActive && !v().hotkeyPaused }}>
-                    {status()}
-                  </p>
-                </Show>
-              </section>
-              <section>
-                <h3>Start at login</h3>
-                <label class="setting-row">
-                  <input
-                    type="checkbox"
-                    checked={v().autostart}
-                    disabled={busy()}
-                    onChange={(e) => {
-                      const on = e.currentTarget.checked;
-                      void apply(async () => (await api).setAutostart(on));
-                    }}
-                  />
-                  <span>Start Petrel when you log in, waiting in the tray, so the first capture is instant.</span>
-                </label>
-                <Show when={v().autostartError}>
-                  <p class="hint warn">{v().autostartError}</p>
-                </Show>
-              </section>
-              <Show when={error()}>
-                <p class="hint warn">{error()}</p>
-              </Show>
-            </>
-          )}
-        </Show>
-        <div class="buttons">
-          <button onClick={props.onClose}>Close</button>
-        </div>
+                );
+              }}
+            </For>
+          </Show>
+          <label class="row check">
+            <input
+              type="checkbox"
+              checked={desk()?.autostart ?? false}
+              onChange={async (e) => {
+                try {
+                  setDesk(await (await api()).setAutostart(e.currentTarget.checked));
+                } catch (err) {
+                  say(errText(err), { error: true });
+                }
+              }}
+            />
+            Start Petrel at login, in the tray, so capture is instant
+          </label>
+        </section>
+
+        <section>
+          <h3>Look</h3>
+          <div class="row">
+            <span class="label">Theme</span>
+            <div class="seg">
+              <For each={["system", "light", "dark"] as Theme[]}>
+                {(t) => (
+                  <button classList={{ on: prefs().theme === t }} onClick={() => pref("theme", t)}>
+                    {t[0].toUpperCase() + t.slice(1)}
+                  </button>
+                )}
+              </For>
+            </div>
+          </div>
+          <div class="row">
+            <span class="label">Writing size</span>
+            <div class="seg">
+              <For each={SIZES}>
+                {(s) => (
+                  <button classList={{ on: prefs().editorSize === s }} onClick={() => pref("editorSize", s)}>
+                    {s}
+                  </button>
+                )}
+              </For>
+            </div>
+          </div>
+          <label class="row check">
+            <input type="checkbox" checked={prefs().typewriter} onChange={(e) => pref("typewriter", e.currentTarget.checked)} />
+            Typewriter scrolling: the line you type stays in the middle
+          </label>
+        </section>
       </div>
     </div>
   );

@@ -187,8 +187,8 @@ export function linkExtensions(o: LinkOptions): Extension {
       },
       ".cm-tooltip.cm-tooltip-autocomplete > ul": { fontFamily: "var(--font-ui)", fontSize: "var(--t-md)", lineHeight: "1.4", maxHeight: "320px" },
       ".cm-tooltip.cm-tooltip-autocomplete > ul > li": { padding: "6px 10px", borderRadius: "var(--r-md)" },
-      ".cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected]": { background: "var(--accent-soft)", color: "var(--fg-0)" },
-      ".cm-completionDetail": { marginLeft: "var(--s-3)", fontStyle: "normal", color: "var(--fg-2)" },
+      ".cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected]": { background: "var(--accent-soft)", color: "var(--ink)" },
+      ".cm-completionDetail": { marginLeft: "var(--s-3)", fontStyle: "normal", color: "var(--faint)" },
     }),
     keymap.of([{ key: "Alt-Enter", run: follow }]),
     EditorView.domEventHandlers({

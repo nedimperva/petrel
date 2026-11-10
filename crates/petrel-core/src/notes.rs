@@ -466,21 +466,46 @@ fn abs(root: &Path, rel: &str) -> PathBuf {
     p
 }
 
-/// The text after front matter, with whitespace collapsed, for cards.
+/// The first lines of the text after front matter, for cards: Markdown marks for headings and lists made plain,
+/// blank lines dropped, at most `PREVIEW_LINES` lines and `PREVIEW_CHARS` characters (cut at a word).
 fn body_preview(body: &str) -> String {
     let mut out = String::new();
-    for word in body.lines().map(|l| l.trim().trim_start_matches('#').trim()).flat_map(str::split_whitespace)
-    {
-        if out.chars().count() + word.chars().count() + 1 > title::PREVIEW_MAX {
+    let mut lines = 0;
+    for line in body.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        if lines == PREVIEW_LINES {
             break;
         }
-        if !out.is_empty() {
-            out.push(' ');
+        let line = line.trim_start_matches('#').trim_start();
+        let line = if let Some(rest) = line.strip_prefix("- [ ] ").or_else(|| line.strip_prefix("* [ ] ")) {
+            format!("☐ {rest}")
+        } else if let Some(rest) = ["- [x] ", "- [X] ", "* [x] "].iter().find_map(|m| line.strip_prefix(m)) {
+            format!("☑ {rest}")
+        } else if let Some(rest) = line.strip_prefix("- ").or_else(|| line.strip_prefix("* ")) {
+            format!("• {rest}")
+        } else {
+            line.to_string()
+        };
+        if lines > 0 {
+            out.push('\n');
         }
-        out.push_str(word);
+        lines += 1;
+        for (i, word) in line.split_whitespace().enumerate() {
+            if out.chars().count() + word.chars().count() + 1 > PREVIEW_CHARS {
+                return out.trim_end().to_string();
+            }
+            if i > 0 {
+                out.push(' ');
+            }
+            out.push_str(word);
+        }
     }
     out
 }
+
+const PREVIEW_LINES: usize = 6;
+const PREVIEW_SETTING: &str = "notes.preview_format";
+const PREVIEW_FORMAT: &str = "2";
+const PREVIEW_CHARS: usize = 280;
 
 /// An FTS5 query for the words of `text` as one phrase, or None when it has no words.
 fn phrase(text: &str) -> Option<String> {
@@ -593,6 +618,11 @@ impl Store {
         if !root.is_dir() {
             report.removed = self.conn.execute("DELETE FROM notes", [])?;
             return Ok(report);
+        }
+        // Cards show a new kind of preview: read every file once more so none keeps the old one.
+        if self.setting(PREVIEW_SETTING)?.as_deref() != Some(PREVIEW_FORMAT) {
+            self.conn.execute("UPDATE notes SET mtime = -1", [])?;
+            self.set_setting(PREVIEW_SETTING, PREVIEW_FORMAT)?;
         }
         let known: HashMap<String, (i64, i64)> = self
             .conn
@@ -1901,6 +1931,14 @@ mod tests {
         let found = s.notes_about("What do my tomatoes need?", 5).unwrap();
         assert_eq!(found[0].title, "Garden");
         assert!(s.notes_about("what is the", 5).unwrap().is_empty());
+    }
+
+    #[test]
+    fn previews_keep_lines_and_drop_marks() {
+        assert_eq!(body_preview("# Plan\n\n- [ ] milk\n- [x] eggs\n- bread\n"), "Plan\n☐ milk\n☑ eggs\n• bread");
+        let long = "word ".repeat(100);
+        assert!(body_preview(&long).chars().count() <= PREVIEW_CHARS);
+        assert_eq!(body_preview("1\n2\n3\n4\n5\n6\n7\n8"), "1\n2\n3\n4\n5\n6");
     }
 
     #[test]

@@ -1,10 +1,11 @@
-// The save controller for the note page: the note-shaped twin of editor/autosave.ts. One save at a time; the
+// The save controller for the note page and the capture window. One save at a time; the
 // file is created on the first keystroke or title (an empty new note is not a file); each save hands back the
 // hash the next one starts from, so text changed in another app is kept as a conflict copy, never overwritten.
 
-import type { Note, NotesApi } from "../api";
-import type { SaveState } from "../editor/autosave";
+import type { Api, Note } from "../api";
 import type { EditorHandle } from "../editor/editor";
+
+export type SaveState = "saved" | "dirty" | "saving" | "error";
 
 export const NOTE_SAVE_MS = 300;
 const RETRY_MS = 2000;
@@ -18,7 +19,7 @@ export interface NoteSaver {
 }
 
 export function createNoteSaver(o: {
-  store: () => Promise<NotesApi>;
+  store: () => Promise<Pick<Api, "createNote" | "saveNote">>;
   editor: () => EditorHandle | undefined;
   note: () => Note | null;
   setNote(n: Note): void;

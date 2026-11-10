@@ -94,21 +94,21 @@ const typewriterScroll = EditorView.updateListener.of((u) => {
 
 // Headings are heavier, not bigger: the first line is the title whether or not it starts with '#'.
 const markdownHighlight = HighlightStyle.define([
-  { tag: tags.heading, fontWeight: "600", color: "var(--fg-0)" },
+  { tag: tags.heading, fontWeight: "650", color: "var(--ink)" },
   { tag: tags.emphasis, fontStyle: "italic" },
   { tag: tags.strong, fontWeight: "600" },
-  { tag: tags.strikethrough, textDecoration: "line-through", color: "var(--fg-2)" },
+  { tag: tags.strikethrough, textDecoration: "line-through", color: "var(--faint)" },
   { tag: tags.link, color: "var(--accent)" },
   { tag: tags.url, color: "var(--accent)" },
   { tag: tags.monospace, fontFamily: "var(--font-mono)" },
-  { tag: tags.quote, color: "var(--fg-1)" },
-  { tag: tags.processingInstruction, color: "var(--fg-2)" },
-  { tag: tags.meta, color: "var(--fg-2)" },
-  { tag: tags.contentSeparator, color: "var(--fg-2)" },
+  { tag: tags.quote, color: "var(--ink-2)" },
+  { tag: tags.processingInstruction, color: "var(--faint)" },
+  { tag: tags.meta, color: "var(--faint)" },
+  { tag: tags.contentSeparator, color: "var(--faint)" },
 ]);
 
 const theme = EditorView.theme({
-  "&": { height: "100%", fontSize: "var(--editor-size, 14px)", color: "var(--fg-0)", backgroundColor: "transparent" },
+  "&": { height: "100%", fontSize: "var(--editor-size, 14px)", color: "var(--ink)", backgroundColor: "transparent" },
   ".cm-scroller": {
     fontFamily: "var(--editor-font, var(--font-ui))",
     lineHeight: "var(--editor-leading, 1.55)",
@@ -125,10 +125,10 @@ const theme = EditorView.theme({
   ".cm-activeLine": { backgroundColor: "transparent" },
   ".cm-cursor": { borderLeftColor: "var(--accent)", borderLeftWidth: "2px" },
   ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": { backgroundColor: "var(--accent-soft)" },
-  ".cm-placeholder": { color: "var(--fg-2)", fontStyle: "normal" },
-  ".cm-panels": { backgroundColor: "var(--bg-1)", color: "var(--fg-1)", borderColor: "var(--line)" },
+  ".cm-placeholder": { color: "var(--faint)", fontStyle: "normal" },
+  ".cm-panels": { backgroundColor: "var(--sunk)", color: "var(--ink-2)", borderColor: "var(--line)" },
   ".cm-panels-top": { borderBottom: "1px solid var(--line)" },
-  ".cm-searchMatch": { backgroundColor: "var(--warn-soft)" },
+  ".cm-searchMatch": { backgroundColor: "var(--mark)" },
   ".cm-searchMatch-selected": { backgroundColor: "var(--accent-soft)" },
   ".cm-textfield, .cm-button": { font: "inherit", fontSize: "12px" },
   ".cm-dim": { opacity: "0.35", transition: "opacity var(--d-base) var(--ease)" },
@@ -159,7 +159,7 @@ export function createEditor(
       extra.of([]),
       markdown({ base: markdownLanguage }),
       syntaxHighlighting(markdownHighlight),
-      placeholder(o.placeholder ?? "Type. It's saved. Act on it later."),
+      placeholder(o.placeholder ?? "Start writing. It saves as you type."),
       search({ top: true }),
       // Petrel's own keys first. Alt ↑/↓ (move line), Shift Alt ↓ (duplicate line) and Enter continuing lists
       // come with the defaults and the Markdown language.
