@@ -73,9 +73,11 @@ pub fn show_window(state: State<AppState>, window: tauri::WebviewWindow) {
 /// main window was never shown, nothing would be left on screen, so Petrel quits rather than lingering unseen.
 #[tauri::command]
 pub fn close_capture(state: State<AppState>, app: tauri::AppHandle) {
+    use tauri::Emitter;
     if let Some(w) = app.get_webview_window("capture") {
         let _ = w.destroy();
     }
+    let _ = app.emit_to("main", "petrel-changed", ());
     if state.tray.load(Ordering::SeqCst) {
         return;
     }

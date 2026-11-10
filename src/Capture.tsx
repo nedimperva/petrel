@@ -78,7 +78,7 @@ export default function Capture() {
     await s.showWindow();
     s.uiSettings().then((m) => applyPrefs(parsePrefs(m)), () => {});
     window.addEventListener("keydown", onKey, true);
-    await s.listen({ quit: () => void done(), openNote: () => {}, focus: () => {} });
+    await s.listen({ quit: () => void done(), openNote: () => {}, focus: () => {}, changed: () => {} });
     if (inTauri) {
       const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
       await getCurrentWebviewWindow().onCloseRequested((e) => {

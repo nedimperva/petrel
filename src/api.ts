@@ -174,6 +174,8 @@ export interface AppEvents {
   quit(): void;
   /** The picker's "Open in Petrel". */
   openNote(id: number): void;
+  /** A capture was made in its window: lists are out of date. */
+  changed(): void;
   /** The window came back to the front: the folder may have changed (Drive, another app). */
   focus(): void;
 }
@@ -272,6 +274,7 @@ async function tauriApi(): Promise<Api> {
       const win = getCurrentWebviewWindow();
       await win.listen("petrel-quit", () => events.quit());
       await win.listen<number>("petrel-open-note", (e) => events.openNote(e.payload));
+      await win.listen("petrel-changed", () => events.changed());
       await win.onFocusChanged(({ payload }) => payload && events.focus());
     },
 

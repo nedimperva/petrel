@@ -142,10 +142,10 @@ export default function App() {
       await page?.flush();
       const r = await (await api()).scanNotes();
       const n = r.added + r.changed + r.removed;
-      if (n) {
-        setRev(rev() + 1);
-        if (r.changed && view().kind === "note") await page?.reload();
-      }
+      // The capture window and the picker write through the same index, so a zero here can still mean new
+      // captures: always redraw the lists.
+      if (view().kind !== "note") setRev(rev() + 1);
+      else if (r.changed) await page?.reload();
       if (loud) say(n ? `${r.added} new, ${r.changed} changed, ${r.removed} gone` : "Up to date");
     } catch (e) {
       if (loud) say(errText(e), { error: true });
@@ -200,6 +200,7 @@ export default function App() {
       },
       openNote: (id) => void openNote(id),
       focus: () => void rescan(),
+      changed: () => view().kind !== "note" && setRev(rev() + 1),
     });
     if (inTauri) {
       const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");

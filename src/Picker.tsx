@@ -110,7 +110,7 @@ export default function Picker() {
               )}
             </For>
             <Show when={data() && !rows().length}>
-              <p class="muted pad">Nothing matches.</p>
+              <p class="muted pad">{data()!.all.length ? "Nothing matches." : "Nothing to copy yet. Make a folder like Prompts or Snippets and put notes in it."}</p>
             </Show>
           </div>
           <Show when={sel()}>
