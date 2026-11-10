@@ -31,7 +31,25 @@ sight until you ask for it.
   (close is red on hover). The rest of the bar drags the window, and a double click maximizes it.
 - Close hides to the tray, as now.
 
-## 3. The sidebar replaces Home, the Inbox page and collection pages
+## 3. Browsing notes, prompts and collections (reopened)
+
+The owner does not want the inbox, notes and collections in one sidebar (2026-11-10). This needs a better way to
+look through them. Three directions to choose from:
+
+- **A. A Library, apart from writing.** `Ctrl L` switches the whole window from the page to a Library. Its
+  collections are tabs in the title bar (Inbox, Notes, Prompts, Snippets, …), as Tern puts its list tabs there.
+  Below them is a list on the left and a live preview on the right. In Prompts and Snippets the preview shows the
+  blanks to fill and Copy. `Esc` or `Enter` goes back to writing. The writing page never shows any of it.
+- **B. Each kind gets its own view.** The bar has three quiet words: Write · Inbox · Library. The Inbox is a
+  triage view (one capture at a time, `m` to file and `Del`). The Library is a grid of collections, and a
+  collection opens to a list and preview, as in A.
+- **C. Only the command bar.** No browsing screen at all. `Ctrl K` lists collections first and then their notes
+  as you type, with a preview beside the results. The inbox is reached by `Ctrl K` then `inbox`. It is the most
+  minimal, but the hardest way to just look around.
+
+The old sidebar plan is below for reference.
+
+## 3a. (superseded) The sidebar replaces Home, the Inbox page and collection pages
 
 - `Ctrl \` or the bar button opens it. It is hidden by default and docks beside the page from 1100 px wide; below
   that it floats over the page.
