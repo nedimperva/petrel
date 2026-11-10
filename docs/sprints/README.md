@@ -1,5 +1,8 @@
 # How to work a sprint
 
+> **Superseded on 2026-11-09.** Petrel no longer has actions, drafts or `petrel://` links. The current design is
+> [docs/design/petrel.md](../design/petrel.md). This file is kept for history.
+
 Read this before touching a work-package file. Existing sprint filenames are stable IDs, not sequential
 weeks. The milestone order and release scope live in `docs/PLAN.md`. Select a small task slice and its
 acceptance checks before implementation; record required versus deferred tasks in the package log.

@@ -1,58 +1,45 @@
 # Petrel
 
-**Capture text first, act on it later. Fast, local-first, keyboard-first, for Linux and Windows.**
+**Quick notes and capture, as Markdown files in one folder. Minimal, keyboard-first, for Linux and Windows.**
 
-Linux first, then Windows · Rust · Tauri 2 · SolidJS · SQLite · MIT
+Rust · Tauri 2 · SolidJS · SQLite (index only) · MIT
 
-> **Petrel is at the skeleton stage (0.1, milestone M0).** It compiles, saves what you type, and has a speed
-> table, but there is no installer and no actions yet. The roadmap, architecture, schema and the action engine
-> specification are in [`docs/`](docs/PLAN.md). A sibling of [Tern](https://github.com/nedimperva/tern), built on
-> the same stack and conventions.
+Petrel is a personal tool. You press a key, type, and it is saved as a `.md` file. Captures land in `inbox/`;
+later you file them into a note or a collection. Collections are just folders (Notes, Prompts, Snippets, Songs,
+…) and their notes are easy to find and copy, with `{{blanks}}` you fill in as you copy. Claude can tidy,
+shorten, continue or explain your text and answer questions from your notes, but only when you ask.
 
-## What it will be
+- **Files are the truth.** Every note is a plain Markdown file in a folder you pick (put it in Google Drive to have
+  it everywhere). The SQLite database is only an index and can be rebuilt. If a file changed in another app while
+  you were editing, both texts are kept.
+- **Capture from anywhere.** `Ctrl Alt Space` (or a compositor keybind on Wayland), the tray,
+  `petrel --new "text"`, `echo text | petrel --stdin`.
+- **Copy is the action.** `Ctrl K` has Copy, Copy as Markdown and Copy formatted. The quick picker
+  (`Ctrl Alt V`) finds a prompt or snippet from any app, fills its blanks and copies it.
+- **AI on request.** `Ctrl J` on a note: tidy, shorten, make a list, continue, or a custom ask. The old text is
+  shown struck through until you keep or drop the change; a version is taken first. `Ctrl K` then a question asks
+  your notes. Needs an Anthropic API key in Settings, kept in the OS keyring.
+- **Never loses text.** Autosave, versions (`Ctrl H`), deleted notes go to `.trash/` in the folder, undo with `z`.
 
-Petrel opens to an empty draft with the cursor ready. You type. It is saved. Later — or right away — you send the
-text where it belongs with one key: the clipboard, a file, a URL, a shell command, a mail, another draft, or a
-script of your own. Drafts live in an inbox you triage with the keyboard, carry tags, and are found by full-text
-search in milliseconds. There is no account, no server and no telemetry; everything is a SQLite file on your disk.
+## Keys
 
-If you know Drafts on Mac and iOS, that is the shape. Petrel is not affiliated with Agile Tortoise and shares no
-code with Drafts. It reads a documented subset of Drafts action files so you can bring your actions along; see
-[the compatibility statement](docs/design/actions.md#compatibility-statement-what-the-readme-may-claim).
-
-- **Capture from anywhere.** A hotkey (or a compositor keybind on Wayland), the tray, `petrel --new "text"`,
-  `echo text | petrel --stdin`, `petrel://create?text=…`, a `.desktop` action, Windows "Send to".
-- **Keyboard first.** `Ctrl K` command bar, `j`/`k` lists, every action on its own key.
-- **Actions.** Ordered steps with `[[template]]` tags: Insert Text, Clipboard, Open URL, Save File, Run Command,
-  Prompt, Run Action, HTML Preview, Mail, and JavaScript with `draft`, `editor`, `app`, `Prompt`, `HTTP`,
-  `FileManager`, `Credential`. Scripts run in a sandboxed runtime with per-action permissions.
-- **Never loses text.** Continuous autosave, version history, a trash that waits 30 days, a database backup
-  before every migration.
-- **Yours.** Actions are readable JSON on disk; drafts export as Markdown; an optional folder mirror lets
-  Syncthing or git carry them. Sync between machines comes later and will be file-based.
-
-## Plan
-
-Delivery: **safe foundation → Linux private alpha → focused Linux beta → Windows release → expansion.**
-Milestones, exit criteria and scope boundaries: [docs/PLAN.md](docs/PLAN.md).
-
-| Document | What it holds |
+| Where | Keys |
 |---|---|
-| [docs/PLAN.md](docs/PLAN.md) | Milestones, gates, performance targets, work-package map, decision record |
-| [docs/design/actions.md](docs/design/actions.md) | Action engine, run algorithm, template tags, built-in steps, scripting API, import/export |
-| [docs/design/ui.md](docs/design/ui.md) | Layout, screens, keys, tokens (shared with Tern), review checklist |
-| [docs/research/data-model.md](docs/research/data-model.md) | SQLite schema v1, migration rules, the queries that must be fast |
-| [docs/research/stack.md](docs/research/stack.md) | Stack choices and platform notes |
-| [docs/research/drafts-reference.md](docs/research/drafts-reference.md) | What Drafts does, and what Petrel does differently on purpose |
-| [docs/sprints/](docs/sprints/README.md) | Work packages and how to work them |
-| [docs/acceptance/](docs/acceptance/m1-alpha.md) | Owner checklists per milestone |
+| Anywhere | `Ctrl K` search, commands or ask · `Ctrl P` find a note · `Ctrl N` new note · `Ctrl 1` home · `Ctrl 2` inbox · `Ctrl ,` settings |
+| A note | `Ctrl J` AI · `/` on an empty line for AI · `Ctrl Shift C` copy as Markdown · `Ctrl H` history · `[[` link |
+| Inbox | `j` `k` move · `Enter` open · `m` file into a note or collection · `1`–`3` the suggested homes · `d` delete · `z` undo |
+| Capture window | `Tab` choose where it goes · `Ctrl Enter` or `Esc` done (an empty capture is dropped) |
+| Quick picker | type to find · `Enter` copy and close · `Tab` next blank · `Ctrl O` open in Petrel |
+
+The design: [docs/design/petrel.md](docs/design/petrel.md). Notes rules: [docs/design/notes.md](docs/design/notes.md).
+Command line: [docs/cli.md](docs/cli.md).
 
 ## Building from source
 
 Linux (Arch, including Omarchy):
 
 ```
-sudo pacman -S --needed base-devel rustup nodejs npm webkit2gtk-4.1 librsvg
+sudo pacman -S --needed base-devel rustup nodejs npm webkit2gtk-4.1 librsvg libayatana-appindicator libsecret gnome-keyring
 rustup default stable
 ```
 
@@ -96,18 +83,19 @@ windowrulev2 = size 560 320, title:^(Petrel capture)$
 windowrulev2 = center, title:^(Petrel capture)$
 ```
 
-`Esc` saves and closes it, `Ctrl Enter` runs the default action and closes it. The capture window stays on top.
+`Esc` or `Ctrl Enter` saves and closes it; `Tab` picks a note or collection to file it in. The capture window stays on top.
 In `npm run dev` the capture window is [http://localhost:1420/?capture](http://localhost:1420/?capture).
 
-Petrel keeps running in the tray: closing the window hides it, and the tray menu has New draft, Capture, Show and
-Quit. On Linux the tray needs `libayatana-appindicator` and a tray host (Waybar's `tray` module on Omarchy); without
+Petrel keeps running in the tray: closing the window hides it, and the tray menu has Capture, Quick picker, Show,
+Pause hotkeys and Quit. On Linux the tray needs `libayatana-appindicator` and a tray host (Waybar's `tray` module on Omarchy); without
 one, closing the window quits as before. On Windows a left click on the icon shows the window.
 
-`Ctrl Alt Space` opens the capture window from any app on Windows and X11 (change it or turn it off in Settings,
-`Ctrl ,`; pause it from the tray). On Wayland apps can't grab keys, so bind `petrel --capture` in the compositor as
-above. Settings also has "Start at login", which starts Petrel hidden in the tray.
+`Ctrl Alt Space` opens the capture window and `Ctrl Alt V` the quick picker from any app on Windows and X11 (change
+them or turn them off in Settings, `Ctrl ,`; pause them from the tray). On Wayland apps can't grab keys, so bind
+`petrel --capture` and `petrel --picker` in the compositor as above. In `npm run dev` the picker is
+[http://localhost:1420/?picker](http://localhost:1420/?picker). Settings also has "Start at login", which starts Petrel hidden in the tray.
 
-Text from the command line goes straight to the Inbox without a window ([docs/cli.md](docs/cli.md)):
+Text from the command line goes straight to `inbox/` without a window ([docs/cli.md](docs/cli.md)):
 
 ```
 petrel --new "call the bank" --tag errand
@@ -118,25 +106,14 @@ git log -1 | petrel --stdin --tag git
 
 ```
 crates/petrel-core/      the engine (Rust, no UI)
-  src/store.rs           SQLite schema, migrations with backup, drafts, tags, versions, search, sweep
-  src/title.rs           the first line is the title
-  src/gen.rs             a generated test library (Zipf vocabulary)
-  src/template.rs        [[tag]] engine                      (package 03)
-  src/action.rs          actions, steps, the run algorithm   (package 03)
-  src/host.rs            Host trait: clipboard, URLs, files, shell, keyring, HTTP, prompts (package 03)
-  src/script.rs          JavaScript runtime and API          (package 04)
+  src/notes.rs           the notes folder: scan, index, save with conflict copies, move, merge, trash, versions
+  src/links.rs           [[links]] and backlinks
+  src/store.rs           SQLite schema, migrations with backup, settings, the old drafts tables
   examples/store_bench.rs  timings on a 50,000-draft store
-  examples/runtime_spike/  the QuickJS-vs-Boa measurement behind the scripting decision
-src-tauri/               the desktop shell and CLI: commands, windows, tray, deep links, updater
-src/                     the UI (SolidJS): editor, list, action column, command bar
+src-tauri/               the desktop shell and CLI: commands, windows (main, capture, picker), tray, hotkeys, AI
+src/                     the UI (SolidJS): home, inbox, collections, the writing page, command bar, picker
 ```
-
-## Contributing
-
-Not yet — the first packages are being built. Ideas go to Discussions; once there is code, read
-`docs/sprints/README.md` before opening a PR.
 
 ## License
 
-[MIT](LICENSE) © Nedim Perva. Petrel is an independent project and is not affiliated with or endorsed by
-Agile Tortoise, Inc.; "Drafts" is their trademark.
+[MIT](LICENSE) © Nedim Perva.

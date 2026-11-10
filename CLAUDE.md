@@ -1,116 +1,56 @@
 # Petrel: notes for agent sessions
 
-Petrel is a local-first, keyboard-first text capture and actions app for Linux and Windows, in the shape of
-Drafts (capture first, act later) and built like Tern (`github.com/nedimperva/tern`): a Rust engine
-(`crates/petrel-core`), a Tauri 2 shell (`src-tauri`) and a SolidJS UI (`src`). The README covers layout, setup
-and keys; this file covers state and decisions that aren't visible from the code.
+Petrel is a personal, local-first, keyboard-first notes and quick-capture app for Linux and Windows. Notes are
+Markdown files in one folder; a Rust engine (`crates/petrel-core`) indexes them in SQLite, a Tauri 2 shell
+(`src-tauri`) adds windows, tray, hotkeys and AI, and a SolidJS UI (`src`) draws it. The README covers setup and
+keys; `docs/design/petrel.md` is the design; this file covers state and decisions that aren't visible from the code.
 
-## Where things stand (2026-10-22, package 00 merged, package 01 M1 slice in review)
+## Where things stand (2026-11-10)
 
-- The workspace compiles: `petrel-core` (schema v1, migrations with backup-before-migrate, drafts, tags, versions,
-  FTS search, sweep; 21 tests; `gen_store` and `store_bench` examples), `src-tauri` (five commands, single instance,
-  logging, hidden-then-shown window), and the SolidJS UI (CodeMirror 6 Markdown editor, 300 ms autosave with flush on
-  blur/hide/close, status strip, fake store for `npm run dev`). CI (`check.yml`) runs both OSes. Clippy
-  `-D warnings` and fmt are clean. The speed table passes at 50k (package 00 Results).
-- **Search is newest-first** (400 newest matches by rowid, then `modified_at`), not bm25-ranked; see package 00
-  Decisions for the numbers. Snippets are made in Rust (`store::snippet`).
-- **Package 01's M1 store slice** (schema v4, 48 tests): `Store::list(&ListQuery)` (folder or All, flags, tags
-  all/none, text, four sorts, flagged-top, keyset `Cursor { key, id, flagged }`), `search` with `tag:`/`-tag:`/
-  `is:flagged`/`in:`/phrases parsed in `query.rs`, `tag_counts`/`rename_tag`/`merge_tags`, `move_drafts`/
-  `flag_drafts` → `UndoToken` → `undo`, version thinning in `sweep()` (`retention.rs`, settings with floors). A text
-  filter in `list` is the newest 2,000 matches unless another filter is that narrow (then exact, finding G); filters on ≤ 2,000 drafts become `rarray` id sets. v3 (after the
-  owner's Windows bench, 2026-10-23): trigger-kept `folder_counts`/`tag_counts`, only `drafts_list` leads with the
-  folder, and a checkpointer thread (`Checkpointer` in `store.rs`) so no write does a WAL checkpoint inline. v4:
-  `move_drafts`/`undo` keep the counts per batch (`count_move`, `count_ctl.manual`) instead of per row. Open
-  owner question: move/flag bumping `modified_at`.
-- **The list panel and editor keys are on the same PR** (packages 05 and 02, partial): `src/list/DraftList.tsx`
-  (`Ctrl L`; tabs, chips, `/` search, `j k Enter x e # f t z`, `Del` empties Trash), `src/editor/commands.ts`,
-  `Ctrl E`/`Ctrl #`/`Ctrl Shift F`/`Ctrl T` on the open draft, a new draft after 10 minutes away. Tried only
-  headless against the fake store.
-- **Package 03's engine slice** (on a PR, 2026-10-23): `template.rs` (`[[tags]]`), `host.rs` (`Host`,
-  `RecordingHost`, `host::system` for files and processes), `action.rs` (`prepare` → `execute` → `finish`; the store
-  is not locked while steps run), `store_actions.rs` (actions, JSON mirror, trust hash, run log, default "Basics"
-  group). The window side is on the same PR: `src-tauri/src/host.rs` (`TauriHost`; dialogs are `host-request`
-  events answered by `host_reply`), `run_action` in `spawn_blocking` (one run at a time, `cancel_run` on `Esc`), the
-  login shell's `PATH` cached in `settings`, and `src/actions/` (column `Ctrl 2`, editor `Ctrl Shift A`, log `g l`,
-  dialogs). Tried headless against the fake store only. `CliHost` (`src-tauri/src/cli_host.rs`) runs `petrel run` (2026-11-06). Not yet: dry-run "Test" (M2).
-- **The owner's UI direction (2026-10-23): minimalist, focused writing.** The launch screen is the text alone
-  (action column hidden until `Ctrl 2`, a quiet strip), the list has a preview pane (`peek_draft` never marks
-  accessed), and the capture window (`petrel --capture`, `src/Capture.tsx`) has one footer line: folder, tags,
-  save state, `Ctrl Enter`, `Esc`. Design canvas: https://claude.ai/artifact/9AifYKBNuTHiHk5rVYa6HC. On branch
-  `sprint/02-quiet-ui-and-capture`; tried headless only.
-- **Command bar, tray and CLI capture (2026-11-05, on a PR):** `Ctrl K` (`src/palette/`, lazy-loaded), the tray
-  (`src-tauri/src/tray.rs`: closing the main window hides it, Quit saves every window first via `petrel-quit`),
-  `petrel --new TEXT` / `--stdin --tag` written from the calling process before Tauri starts (`src-tauri/src/cli.rs`,
-  `docs/cli.md`). Then the capture hotkey (`Ctrl+Alt+Space`, not on Wayland), start at login (`--hidden`) and a
-  Settings dialog (`Ctrl ,`, `src/settings/`), in `src-tauri/src/desktop.rs`. The sandbox can now boot the debug build under `xvfb-run dbus-run-session` (with
-  `libwebkit2gtk-4.1-dev` and `libayatana-appindicator3-dev` installed) and drive it with `xdotool`.
-- **History panel and links (2026-11-06, on a PR after #6/#7 merged):** `Ctrl H` (`src/versions/`, word diff in
-  `diff.ts`, restore via `restore_version`) and `petrel://` links (`src-tauri/src/uri.rs`, deep-link plugin; no
-  `run` link on purpose, see package 07 Decisions).
-- **Notes (M2 start, 2026-11-06, on a PR):** plain `.md` files in a folder the owner picks; SQLite (schema v5) only
-  indexes them. `crates/petrel-core/src/notes.rs` and `links.rs`, `src-tauri/src/notes.rs`, `src/notes/` (lazy).
-  `Ctrl 3` home, `Ctrl P` finder, `Ctrl Shift N` promote, `[[links]]` in drafts and notes. Rules in
-  `docs/design/notes.md`. Tried in a browser against the fake store only.
-- **rquickjs is the scripting runtime** (owner decision 2026-10-22, package 03 Decisions); `bindgen` feature off.
-  Newest-first search is accepted for M1; relevance ranking is a package 05 (M2) task.
-  The spike is a standalone crate under `crates/petrel-core/examples/runtime_spike/`, not a workspace member.
-- Not yet done by anyone: a boot on Hyprland, the Windows smoke test, the kill test, a packaged cold-start number.
-  The agent's sandbox has no display and 3.9 GB of disk; it can run `cargo check`/clippy/tests but not the window.
-- The owner has shipped Tern through its Linux beta on this stack. Reuse Tern's `check.yml`, `release.yml`,
-  `update.rs`, `packaging/aur`, `tokens.css`, the palette and virtual list components, and the Linux/Windows
-  notes. Do not copy anything from Drafts (Agile Tortoise); it is closed source and its name is a trademark.
-  The design is from the owner's use and the public documentation; see `docs/research/drafts-reference.md`.
-
-## Planning decisions (2026-10-22)
-
-The owner approved `docs/PLAN.md`: safe foundation → Linux private alpha → focused Linux beta → Windows release →
-expansion. Sprint numbers are work-package IDs, not weeks; read each package's Delivery scope first. The capture
-path (launch → typing → saved) is the product; anything that slows it needs a measurement in the PR. Text is
-never lost: versions before risk, tombstones instead of deletes, backup before migration. Scripting runs in a
-Rust-hosted JavaScript runtime chosen by the M0 gate (expected rquickjs), never in the webview. Drafts
-compatibility is the documented subset in `docs/design/actions.md`, nothing more.
-
-## First steps for the next session
-
-1. Read `docs/PLAN.md`, `docs/sprints/README.md`, then `docs/sprints/sprint-00-compile-and-boot.md` (Log first).
-2. Package 02 (editor commands, open-to-new-draft, capture window) and package 05's list UI on top of the
-   package 01 commands (`list_drafts`, `search_drafts`, `move_drafts`, `undo`, …; types in `src/api.ts`).
-3. Owner, when convenient: `scripts/kill-test.sh`, the Windows smoke list, laptop `store_bench` numbers.
+- **Redesign implemented (owner decisions 2026-11-09/10, canvas https://claude.ai/artifact/2iMBXDeW8F2UVV1tLguc7g),
+  on a PR based on the notes PR (#9).** No actions, no drafts UI, no `petrel://` links, no `petrel run`: those
+  modules were deleted (`action.rs`, `host.rs`, `template.rs`, `store_actions.rs`, `src/actions/`, `src/list/`,
+  the deep-link plugin). Captures are notes in `inbox/` (`capture_note`); collections are top-level folders; copy
+  with `{{blanks}}`; quick picker window (`Ctrl Alt V`, `petrel --picker`, `src/Picker.tsx`); AI in
+  `src-tauri/src/ai.rs` (Messages API over `ureq`, key in the keyring) with the rewrite preview in
+  `src/note/aiPreview.ts`. Old drafts are exported once to `inbox/` and `drafts/` at start (`export_drafts_once`).
+- Tried headless: the debug build boots under `xvfb-run -a dbus-run-session` (capture, `--new`, `--stdin` and the
+  picker work); the UI was driven with Playwright against the fake store (`src/fake.ts`). Not tried: a real
+  window on Windows, AI with a real key.
+- The drafts tables (schema up to v4) stay in the database so old data can be exported; nothing new writes them.
+- Open owner questions: light or dark by default (both exist, system default), whether the warm look is right,
+  whether `Ctrl Alt V` suits him, a local model.
 
 ## Design decisions to keep
 
-- **Local-first, no service.** The UI reads SQLite only. No account, no telemetry, no sync before M4, and sync will
-  be files the user controls.
-- **The stored draft is untouched by a failed action.** Steps edit a working copy; commit happens after the last
-  step; a version is taken before every run. See the run algorithm in `docs/design/actions.md`.
-- **Everything outside the database goes through `Host`.** Clipboard, URLs, files, shell, keyring, HTTP, prompts.
-  The same action runs from the window (`TauriHost`), the CLI (`CliHost`) and tests (`RecordingHost`).
-- **Permissions are per action and checked at the call.** `allowShell`, `allowFiles`, `allowHttp`; first shell or
-  out-of-scope file use confirms with the rendered command/path. Secrets in the keyring (service `petrel`) only.
-- **Templates are the user's language.** `[[tag]]`, `[[tag|arg]]`, `\[[`; unknown tags are preserved and logged.
-- **Keyset paging, never OFFSET.** `title` and `preview` are stored at save time; list queries never derive them.
-- **An empty new draft is not a row.** The row is created on the first keystroke.
-- **Debug builds use `<data dir>/dev/petrel.db`**, never the installed database (migrations are forward-only).
-- **Markdown preview is untrusted HTML** in a sandboxed iframe with a CSP, as Tern treats mail.
+- **Files are the truth.** The UI never treats SQLite as the source; it can be rebuilt from the folder. Atomic
+  writes, conflict copies when the file changed on disk, `.trash/` instead of deletes, a version before risk.
+  Rules in `docs/design/notes.md`.
+- **AI runs only when the owner asks.** No background calls, no suggestions he did not press a key for. A
+  rewrite is shown beside the old text and changes nothing until Keep; a version (`ai`) is taken first.
+- **AI calls go from Rust, never the webview.** Key in the keyring (service `petrel`, user
+  `anthropic-api-key`); debug builds may read `ANTHROPIC_API_KEY`. Never log or store the key elsewhere.
+- **Copy is the only action.** Plain, Markdown, formatted (HTML). Blanks are `{{name}}`, `{{name|default}}`, `\{{`.
+- **Local-first, no service.** No account, no telemetry. Sync is the folder (Google Drive or similar).
+- **Debug builds use `<data dir>/dev/petrel.db`** and `<data dir>/dev/notes`, never the installed ones.
+- **Markdown never becomes trusted HTML in the app.** Answers are escaped before formatting (`answerHtml`).
 
 ## Linux / Omarchy notes
 
 Same as Tern's: Arch packages (`webkit2gtk-4.1 libayatana-appindicator librsvg gnome-keyring libsecret`),
 `WEBKIT_DISABLE_DMABUF_RENDERER=1` default on Linux, Hyprland tiles new windows (float rule for `petrel-capture`
 documented in the README), global shortcuts are the compositor's job on Wayland (`bind = SUPER, N, exec, petrel
---capture`), a keyring must be running for `Credential`.
+--capture`, the same for `--picker`), a keyring must be running for the AI key.
 
 ## Conventions
 
 - Rust: `anyhow::Result` in the engine; commands return `Result<T, String>`; serde `camelCase` on the wire; store
   methods synchronous behind a `Mutex`, `spawn_blocking` when slow.
 - UI: SolidJS signals, no state library; keyboard handling in `App.tsx`; tokens only; JS bundle budget 300 kB gz
-  including CodeMirror (lazy-load languages and the preview).
+  including CodeMirror (225 kB on 2026-11-10).
 - Comments explain why, not what. Short, plain sentences in docs and UI text.
 
 ## Roadmap
 
-`docs/PLAN.md` (milestones), `docs/sprints/` (work packages), `docs/research/` (reference, stack, data model),
-`docs/design/` (actions and scripting spec, UI spec), `docs/acceptance/` (owner checklists). Work on a
-`sprint/NN-name` branch and open a PR to `main`; `main` must always build.
+`docs/design/petrel.md` is the current design. `docs/PLAN.md`, `docs/sprints/` and `docs/design/actions.md` are
+the old Drafts-shaped plan, kept for history. Work on a branch and open a PR to `main`; `main` must always build.

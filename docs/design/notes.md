@@ -1,6 +1,6 @@
 # Notes
 
-Notes are the place for text that is kept and grown. Drafts are the place for text that is caught and acted on.
+Notes are all of Petrel's text: captures are notes in `inbox/` until they are filed (2026-11-09, see `petrel.md`).
 Decided by the owner on 2026-11-06. Design doc and canvas: https://claude.ai/artifact/V31DtPgjUWXkcxBzapRSzq.
 
 ## Files are the truth

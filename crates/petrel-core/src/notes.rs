@@ -470,11 +470,7 @@ fn abs(root: &Path, rel: &str) -> PathBuf {
 /// blank lines dropped, at most `PREVIEW_LINES` lines and `PREVIEW_CHARS` characters (cut at a word).
 fn body_preview(body: &str) -> String {
     let mut out = String::new();
-    let mut lines = 0;
-    for line in body.lines().map(str::trim).filter(|l| !l.is_empty()) {
-        if lines == PREVIEW_LINES {
-            break;
-        }
+    for (n, line) in body.lines().map(str::trim).filter(|l| !l.is_empty()).take(PREVIEW_LINES).enumerate() {
         let line = line.trim_start_matches('#').trim_start();
         let line = if let Some(rest) = line.strip_prefix("- [ ] ").or_else(|| line.strip_prefix("* [ ] ")) {
             format!("☐ {rest}")
@@ -485,10 +481,9 @@ fn body_preview(body: &str) -> String {
         } else {
             line.to_string()
         };
-        if lines > 0 {
+        if n > 0 {
             out.push('\n');
         }
-        lines += 1;
         for (i, word) in line.split_whitespace().enumerate() {
             if out.chars().count() + word.chars().count() + 1 > PREVIEW_CHARS {
                 return out.trim_end().to_string();
@@ -1935,7 +1930,10 @@ mod tests {
 
     #[test]
     fn previews_keep_lines_and_drop_marks() {
-        assert_eq!(body_preview("# Plan\n\n- [ ] milk\n- [x] eggs\n- bread\n"), "Plan\n☐ milk\n☑ eggs\n• bread");
+        assert_eq!(
+            body_preview("# Plan\n\n- [ ] milk\n- [x] eggs\n- bread\n"),
+            "Plan\n☐ milk\n☑ eggs\n• bread"
+        );
         let long = "word ".repeat(100);
         assert!(body_preview(&long).chars().count() <= PREVIEW_CHARS);
         assert_eq!(body_preview("1\n2\n3\n4\n5\n6\n7\n8"), "1\n2\n3\n4\n5\n6");
