@@ -51,6 +51,8 @@ pub enum Task {
     Continue,
     Summarize,
     Title,
+    /// One of the owner's own prompts (the Prompts collection, blanks filled), run on the selection or the note.
+    Prompt,
 }
 
 impl Task {
@@ -83,13 +85,14 @@ impl Task {
                 "Suggest one short title for this note, at most six words, no quotes and no full \
                 stop. Return only the title."
             }
+            Task::Prompt => "Do what the prompt below asks with this text. Return only the result.",
         }
     }
 
     /// Rewrites want speed; reading and answering is given more thought.
     fn effort(self) -> &'static str {
         match self {
-            Task::Explain | Task::Summarize | Task::Continue => "medium",
+            Task::Explain | Task::Summarize | Task::Continue | Task::Prompt => "medium",
             _ => "low",
         }
     }
@@ -293,6 +296,9 @@ pub async fn ai_write(
         if task == Task::Custom {
             let i = instruction.filter(|i| !i.trim().is_empty()).context("say what to do with the text")?;
             user += &format!("\n\nInstruction: {i}");
+        } else if task == Task::Prompt {
+            let i = instruction.filter(|i| !i.trim().is_empty()).context("the prompt is empty")?;
+            user += &format!("\n\n<prompt>\n{}\n</prompt>", head(&i, NOTE_CHARS));
         }
         complete(&model, task.effort(), SYSTEM, &user, 8_000)
     })
@@ -324,29 +330,53 @@ impl From<&Note> for Source {
 pub struct Answer {
     answer: String,
     sources: Vec<Source>,
+    /// Every note the answer was given from, for a question that follows it.
+    read: Vec<i64>,
 }
+
+/// A question already asked in this exchange, and its answer.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Exchange {
+    question: String,
+    answer: String,
+}
+
+/// Turns of an exchange sent back, at most: a long talk is a note, not a question.
+const EARLIER_MAX: usize = 6;
 
 const ASK_NOTES: usize = 8;
 
 /// Answers a question from the notes: the best-matching notes go to the model and it answers from them alone,
-/// naming the ones it used. The sources are the notes it named (or all it read if it named none).
+/// naming the ones it used. The sources are the notes it named (or all it read if it named none). A follow-up
+/// (Tab after an answer) sends the earlier turns and the same notes (`notes`) instead of searching again.
 #[tauri::command]
-pub async fn ai_ask(app: tauri::AppHandle, question: String) -> R<Answer> {
+pub async fn ai_ask(
+    app: tauri::AppHandle,
+    question: String,
+    earlier: Option<Vec<Exchange>>,
+    notes: Option<Vec<i64>>,
+) -> R<Answer> {
     let question = question.trim().to_string();
     if question.is_empty() {
         return Err("ask something".into());
     }
     let state = app.state::<AppState>();
     let model = model(&state);
+    let earlier = earlier.unwrap_or_default();
     let notes = {
         let store = state.store.lock().map_err(|_| "store lock poisoned".to_string())?;
-        store.notes_about(&question, ASK_NOTES).map_err(|e| format!("{e:#}"))?
+        match notes.filter(|ids| !ids.is_empty()) {
+            Some(ids) => ids.iter().take(ASK_NOTES).filter_map(|&id| store.peek_note(id).ok()).collect(),
+            None => store.notes_about(&question, ASK_NOTES).map_err(|e| format!("{e:#}"))?,
+        }
     };
     blocking(move || {
         if notes.is_empty() {
             return Ok(Answer {
                 answer: "Nothing in your notes seems to be about that.".into(),
                 sources: Vec::new(),
+                read: Vec::new(),
             });
         }
         let mut user = String::from("Here are the notes that matched best:\n\n");
@@ -358,6 +388,17 @@ pub async fn ai_ask(app: tauri::AppHandle, question: String) -> R<Answer> {
                 n.folder,
                 head(&n.body, NOTE_CHARS / 2)
             );
+        }
+        let skip = earlier.len().saturating_sub(EARLIER_MAX);
+        for e in earlier.iter().skip(skip) {
+            user += &format!(
+                "<earlier>\nQuestion: {}\nAnswer: {}\n</earlier>\n\n",
+                head(e.question.trim(), 2_000),
+                head(e.answer.trim(), 6_000)
+            );
+        }
+        if !earlier.is_empty() {
+            user += "The question below follows the earlier ones; read it in their light.\n\n";
         }
         user += &format!(
             "Question: {question}\n\nAnswer from these notes only, briefly, in Markdown. If they do not say, \
@@ -371,7 +412,8 @@ pub async fn ai_ask(app: tauri::AppHandle, question: String) -> R<Answer> {
         } else {
             used.iter().map(|&i| Source::from(&notes[i])).collect()
         };
-        Ok(Answer { answer, sources })
+        let read = notes.iter().map(|n| n.id).collect();
+        Ok(Answer { answer, sources, read })
     })
     .await
 }

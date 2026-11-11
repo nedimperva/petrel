@@ -60,6 +60,16 @@ pub fn start(last_primary: Option<String>) -> Pending {
     rx
 }
 
+/// Only the app in front, for the picker when reading selections is off.
+pub fn start_app_only() -> Pending {
+    let (tx, rx) = mpsc::channel();
+    let (app, title, own, _) = platform::front_window();
+    let ctx =
+        if own { CaptureContext::default() } else { CaptureContext { app, title, ..Default::default() } };
+    let _ = tx.send((ctx, None));
+    rx
+}
+
 /// Waits a little for what `start` reads.
 pub fn wait(rx: &Pending) -> Option<(CaptureContext, Option<String>)> {
     rx.recv_timeout(WAIT).ok()

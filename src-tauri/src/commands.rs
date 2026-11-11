@@ -106,6 +106,30 @@ pub async fn capture_context(app: tauri::AppHandle) -> crate::context::CaptureCo
     .unwrap_or_default()
 }
 
+/// The app that was in front when the picker opened, and its selection, once. The picker counts its copies for
+/// that app and fills `{{selection}}` from it.
+#[tauri::command]
+pub async fn picker_context(app: tauri::AppHandle) -> crate::context::CaptureContext {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let rx = state.picker_context.lock().ok().and_then(|mut s| s.take());
+        rx.as_ref().and_then(crate::context::wait).map(|(c, _)| c).unwrap_or_default()
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// The clipboard's text, for a `{{clipboard}}` blank. Read only when a blank asks for it.
+#[tauri::command]
+pub fn read_clipboard(state: State<AppState>) -> R<String> {
+    let mut slot = state.clipboard.lock().map_err(|_| "clipboard lock poisoned".to_string())?;
+    if slot.is_none() {
+        *slot = Some(arboard::Clipboard::new().map_err(|e| format!("the clipboard: {e}"))?);
+    }
+    let cb = slot.as_mut().ok_or("no clipboard")?;
+    Ok(cb.get_text().unwrap_or_default())
+}
+
 /// The command bar's "Capture window".
 #[tauri::command]
 pub fn open_capture_window(app: tauri::AppHandle) {

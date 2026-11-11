@@ -79,6 +79,7 @@ const LABELS: Record<AiTask, string> = {
   continue: "Continued",
   summarize: "Summary",
   title: "Title",
+  prompt: "Your prompt",
 };
 
 export default function NotePage(p: Props) {

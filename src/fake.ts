@@ -2,7 +2,7 @@
 // and collections, and an AI that answers from a script. The real rules (files, conflicts, front matter, links)
 // are in crates/petrel-core/src/notes.rs and its tests; this is enough to work on the screens.
 
-import type { AiSuggestion, Api, Note, NoteSummary, NoteVersion, TopicFace, UndoToken } from "./api";
+import type { AiSuggestion, Api, Note, NoteSummary, NoteVersion, OpenTask, TopicFace, UndoToken } from "./api";
 import { parseLinks } from "./notes/parse";
 
 const MIN = 60_000;
@@ -14,6 +14,7 @@ export function fakeApi(): Api {
   const versions = new Map<number, { v: NoteVersion; text: string; note: number }>();
   const undos = new Map<string, () => void>();
   const copies: Record<string, number> = {};
+  const copiesIn: Record<string, Record<string, number>> = {};
   let nextId = 1;
   let nextVersion = 1;
   let aiKey: string | null = "fake";
@@ -174,8 +175,8 @@ export function fakeApi(): Api {
     listen: () => wait(undefined),
 
     notesInfo: () => wait({ root: "~/Google Drive/Petrel" }),
-    setNotesRoot: (root) => wait({ added: 0, changed: 0, removed: 0, skipped: 0, root }),
-    scanNotes: () => wait({ added: 0, changed: 0, removed: 0, skipped: 0, root: "~/Google Drive/Petrel" }),
+    setNotesRoot: (root) => wait({ added: 0, changed: 0, removed: 0, skipped: 0, root, paths: [] }),
+    scanNotes: () => wait({ added: 0, changed: 0, removed: 0, skipped: 0, root: "~/Google Drive/Petrel", paths: [] }),
     listNotes: async (q) =>
       [...notes.values()]
         .filter((n) => q.folder == null || n.folder === q.folder)
@@ -273,12 +274,60 @@ export function fakeApi(): Api {
       n.hash = crypto.randomUUID();
       return { ...n };
     },
-    recordCopy: async (id) => {
+    recordCopy: async (id, app) => {
       const p = get(id).path;
       copies[p] = (copies[p] ?? 0) + 1;
+      if (app) (copiesIn[app] ??= {})[p] = (copiesIn[app][p] ?? 0) + 1;
       return copies[p];
     },
     copyCounts: async () => ({ ...copies }),
+    copyCountsIn: async (app) => ({ ...(copiesIn[app] ?? {}) }),
+    pickerContext: async () => ({ text: "the selected words", app: "Code", title: "main.rs", link: null }),
+    readClipboard: async () => "text from the clipboard",
+    openTasks: async () => {
+      const out: OpenTask[] = [];
+      for (const n of [...notes.values()].sort(newest)) {
+        let fence = false;
+        n.body.split("\n").forEach((l, line) => {
+          if (/^\s*(```|~~~)/.test(l)) fence = !fence;
+          const m = /^\s*(?:[-*+]|\d+[.)]) \[ \] (.+)$/.exec(l);
+          if (m && !fence) out.push({ noteId: n.id, title: n.title, folder: n.folder, modifiedAt: n.modifiedAt, line, text: m[1].trim() });
+        });
+      }
+      return out;
+    },
+    tickTask: async (id, line, text) => {
+      const n = get(id);
+      const lines = n.body.split("\n");
+      if (!lines[line]?.includes(`[ ] ${text}`)) throw new Error(`that task changed in ${n.title}; open the note to tick it`);
+      const before = n.body;
+      lines[line] = lines[line].replace("[ ]", "[x]");
+      n.body = lines.join("\n");
+      n.modifiedAt = Date.now();
+      return token(() => (n.body = before));
+    },
+    conflicts: async () =>
+      [...notes.values()].flatMap((c) => {
+        const m = /^(.+) \(conflict \d{4}-\d{2}-\d{2} \d{4}( \d+)?\)$/.exec(c.title);
+        const o = m && [...notes.values()].find((x) => x.folder === c.folder && x.title === m[1]);
+        return o ? [{ original: o.id, copy: c.id, title: o.title, folder: o.folder, copiedAt: c.modifiedAt }] : [];
+      }),
+    settleConflict: async (original, copy, keep) => {
+      const o = get(original);
+      const c = get(copy);
+      const before = o.body;
+      if (keep === "both") {
+        const old = c.title;
+        c.title = `${o.title} (other)`;
+        return token(() => (c.title = old));
+      }
+      if (keep === "right") o.body = c.body;
+      notes.delete(copy);
+      return token(() => {
+        o.body = before;
+        notes.set(c.id, c);
+      });
+    },
     linkTargets: async (text, limit) =>
       [...notes.values()]
         .filter((n) => n.folder !== "inbox" && lower(n.title).includes(lower(text)))
@@ -380,17 +429,19 @@ export function fakeApi(): Api {
         continue: "\n\nThe next step is to write it down properly, one short paragraph at a time.",
         summarize: "In short: the note lists what is left before the release and who to ask.",
         title: "Release checklist",
+        prompt: `Done as the prompt asks:\n\n${t}`,
       };
       return wait(out[task] ?? t, 900);
     },
-    aiAsk: async (q) => {
-      const found = about(q, 3);
+    aiAsk: async (q, _earlier, ids) => {
+      const found = ids?.length ? ids.map(get) : about(q, 3);
       return wait(
         {
           answer: found.length
             ? `From your notes: **${found[0].title}** is the closest. ${found[0].body.replace(/^#.*\n/, "").trim().split("\n")[0]}`
             : "Nothing in your notes seems to be about that.",
           sources: found.map((n) => ({ id: n.id, title: n.title, folder: n.folder, preview: n.body.slice(0, 160) })),
+          read: found.map((n) => n.id),
         },
         1200,
       );

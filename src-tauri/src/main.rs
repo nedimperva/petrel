@@ -7,6 +7,7 @@ mod context;
 mod desktop;
 mod notes;
 mod tray;
+mod watch;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -34,6 +35,10 @@ pub struct AppState {
     pub capture_context: Mutex<Option<context::Pending>>,
     /// The Linux primary selection the last capture saw, so an old selection is not brought in twice.
     pub last_primary: Mutex<Option<String>>,
+    /// The app in front (and its selection) when the picker was opened: copies count per app, `{{selection}}`.
+    pub picker_context: Mutex<Option<context::Pending>>,
+    /// The live folder (`watch.rs`); replaced when the folder changes.
+    pub watcher: Mutex<Option<watch::Watcher>>,
 }
 
 /// Where the database lives: `PETREL_DB` if set; otherwise `<app data>/petrel.db`, or `<app data>/dev/petrel.db`
@@ -155,6 +160,23 @@ fn remember_context(app: &tauri::AppHandle) {
     };
 }
 
+/// The app in front when the picker is called, read before the picker takes the focus; its selection too
+/// (for `{{selection}}`) unless Settings turned that off.
+fn remember_picker_context(app: &tauri::AppHandle) {
+    let Some(state) = app.try_state::<AppState>() else { return };
+    let selection = state
+        .store
+        .lock()
+        .ok()
+        .and_then(|s| s.setting("ui.capture_selection").ok().flatten())
+        .is_none_or(|v| v != "0");
+    let last = state.last_primary.lock().ok().and_then(|l| l.clone());
+    let rx = if selection { context::start(last) } else { context::start_app_only() };
+    if let Ok(mut slot) = state.picker_context.lock() {
+        *slot = Some(rx);
+    };
+}
+
 /// Opens the quick picker, or focuses it: a small search over the collections that copies and closes.
 pub fn open_picker(app: &tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("picker") {
@@ -162,6 +184,7 @@ pub fn open_picker(app: &tauri::AppHandle) {
         let _ = w.set_focus();
         return;
     }
+    remember_picker_context(app);
     let built = WebviewWindowBuilder::new(app, "picker", WebviewUrl::App("index.html".into()))
         .title("Petrel picker")
         .inner_size(620.0, 440.0)
@@ -298,6 +321,8 @@ fn main() {
                 picker_hotkey: Mutex::new(desktop::Hotkey::default()),
                 capture_context: Mutex::new(None),
                 last_primary: Mutex::new(None),
+                picker_context: Mutex::new(None),
+                watcher: Mutex::new(None),
             });
             // Without a tray (no StatusNotifier host on Linux, say), closing the window quits, as before.
             // The Linux tray loads libayatana-appindicator at run time and panics if it is missing.
@@ -313,6 +338,19 @@ fn main() {
                 log::info!("started hidden in the tray");
             }
             desktop::init(app.handle());
+            let root = {
+                let state = app.state::<AppState>();
+                let default = notes::default_root(&state.db_path);
+                let mut store = state.store.lock().map_err(|_| anyhow::anyhow!("store lock poisoned"))?;
+                store.notes_root_or(&default)
+            };
+            match root {
+                Ok(r) => {
+                    let _ = std::fs::create_dir_all(&r);
+                    watch::start(app.handle(), &r);
+                }
+                Err(e) => log::warn!("no notes folder to watch: {e:#}"),
+            }
             // Petrel's own title bar is for Windows, as in Tern. On Linux the window manager frames the main
             // window (Hyprland draws no frame at all), and the UI leaves the window buttons out.
             #[cfg(target_os = "linux")]
@@ -376,6 +414,13 @@ fn main() {
             notes::restore_note_version,
             notes::record_copy,
             notes::copy_counts,
+            notes::copy_counts_in,
+            notes::open_tasks,
+            notes::tick_task,
+            notes::conflicts,
+            notes::settle_conflict,
+            commands::picker_context,
+            commands::read_clipboard,
             notes::link_targets,
             notes::resolve_link,
             notes::backlinks,

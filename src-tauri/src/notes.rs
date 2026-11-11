@@ -4,8 +4,8 @@
 use std::path::{Path, PathBuf};
 
 use petrel_core::notes::{
-    Backlinks, LinkTarget, Note, NoteChange, NoteFolder, NoteQuery, NoteSummary, NoteVersion, Resolved,
-    SavedNote, ScanReport, TopicFace,
+    Backlinks, Conflict, LinkTarget, Note, NoteChange, NoteFolder, NoteQuery, NoteSummary, NoteVersion,
+    OpenTask, Resolved, SavedNote, ScanReport, TopicFace,
 };
 use petrel_core::{Store, UndoToken};
 use tauri::State;
@@ -41,8 +41,10 @@ pub fn notes_info(state: State<AppState>) -> R<NotesInfo> {
 }
 
 #[tauri::command]
-pub fn set_notes_root(state: State<AppState>, root: String) -> R<ScanReport> {
-    with(&state, |s| s.set_notes_root(Path::new(&root)))
+pub fn set_notes_root(app: tauri::AppHandle, state: State<AppState>, root: String) -> R<ScanReport> {
+    let report = with(&state, |s| s.set_notes_root(Path::new(&root)))?;
+    crate::watch::start(&app, Path::new(&root));
+    Ok(report)
 }
 
 #[tauri::command]
@@ -166,10 +168,40 @@ pub fn restore_note_version(state: State<AppState>, id: i64, version_id: i64) ->
     with(&state, |s| s.restore_note_version(id, version_id))
 }
 
-/// Counts a copy from a collection, so its most used items come first.
+/// Counts a copy from a collection, so its most used items come first; `app` is the app in front of the picker.
 #[tauri::command]
-pub fn record_copy(state: State<AppState>, id: i64) -> R<i64> {
-    with(&state, |s| s.record_copy(id))
+pub fn record_copy(state: State<AppState>, id: i64, app: Option<String>) -> R<i64> {
+    with(&state, |s| s.record_copy(id, app.as_deref()))
+}
+
+/// What the picker copied with this app in front, by path.
+#[tauri::command]
+pub fn copy_counts_in(state: State<AppState>, app: String) -> R<std::collections::HashMap<String, i64>> {
+    with(&state, |s| s.copy_counts_in(&app))
+}
+
+/// Every unticked task, for the Ctrl K tasks page.
+#[tauri::command]
+pub fn open_tasks(state: State<AppState>) -> R<Vec<OpenTask>> {
+    with(&state, |s| s.open_tasks())
+}
+
+/// Ticks one task in its file.
+#[tauri::command]
+pub fn tick_task(state: State<AppState>, id: i64, line: usize, text: String) -> R<UndoToken> {
+    with(&state, |s| s.tick_task(id, line, &text))
+}
+
+/// Notes with a conflict copy beside them.
+#[tauri::command]
+pub fn conflicts(state: State<AppState>) -> R<Vec<Conflict>> {
+    with(&state, |s| s.conflicts())
+}
+
+/// `keep`: `left`, `right` or `both`.
+#[tauri::command]
+pub fn settle_conflict(state: State<AppState>, original: i64, copy: i64, keep: String) -> R<UndoToken> {
+    with(&state, |s| s.settle_conflict(original, copy, &keep))
 }
 
 #[tauri::command]

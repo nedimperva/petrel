@@ -61,6 +61,8 @@ export interface ScanReport {
   removed: number;
   skipped: number;
   root: string;
+  /** The notes added, changed or gone. */
+  paths: string[];
 }
 
 export interface NoteChange {
@@ -140,7 +142,8 @@ export type AiTask =
   | "explain"
   | "continue"
   | "summarize"
-  | "title";
+  | "title"
+  | "prompt";
 
 export interface AiSource {
   id: number;
@@ -152,6 +155,33 @@ export interface AiSource {
 export interface AiAnswer {
   answer: string;
   sources: AiSource[];
+  /** Every note the answer was given from: a follow-up asks the same ones. */
+  read: number[];
+}
+
+/** One question and its answer, sent back with a follow-up. */
+export interface AiExchange {
+  question: string;
+  answer: string;
+}
+
+/** An unticked `- [ ]` in a note. `line` is its line in the file, from 0. */
+export interface OpenTask {
+  noteId: number;
+  title: string;
+  folder: string;
+  modifiedAt: number;
+  line: number;
+  text: string;
+}
+
+/** A note with a conflict copy beside it (`Title (conflict …)`). */
+export interface Conflict {
+  original: number;
+  copy: number;
+  title: string;
+  folder: string;
+  copiedAt: number;
 }
 
 export interface AiSuggestion {
@@ -193,6 +223,8 @@ export interface AppEvents {
   changed(): void;
   /** The window came back to the front: the folder may have changed (Drive, another app). */
   focus(): void;
+  /** The file watcher saw notes change in the folder and read them again. */
+  folder?(report: ScanReport): void;
 }
 
 export interface Api {
@@ -239,8 +271,18 @@ export interface Api {
   noteVersions(id: number): Promise<NoteVersion[]>;
   noteVersionText(versionId: number): Promise<string>;
   restoreNoteVersion(id: number, versionId: number): Promise<Note>;
-  recordCopy(id: number): Promise<number>;
+  /** `app`: the app in front of the picker, so it can offer what is used there first. */
+  recordCopy(id: number, app?: string | null): Promise<number>;
   copyCounts(): Promise<Record<string, number>>;
+  copyCountsIn(app: string): Promise<Record<string, number>>;
+  /** The app in front when the picker opened, and what was selected there. Once per picker. */
+  pickerContext(): Promise<CaptureContext>;
+  readClipboard(): Promise<string>;
+  openTasks(): Promise<OpenTask[]>;
+  tickTask(id: number, line: number, text: string): Promise<UndoToken>;
+  conflicts(): Promise<Conflict[]>;
+  /** `left` keeps the note, `right` the copy's text, `both` renames the copy. */
+  settleConflict(original: number, copy: number, keep: "left" | "right" | "both"): Promise<UndoToken>;
   linkTargets(text: string, limit: number): Promise<LinkTarget[]>;
   resolveLink(inner: string): Promise<Resolved>;
   backlinks(id: number): Promise<Backlinks>;
@@ -271,7 +313,8 @@ export interface Api {
     instruction?: string;
     noteId?: number;
   }): Promise<string>;
-  aiAsk(question: string): Promise<AiAnswer>;
+  /** With `earlier` and `notes`, a follow-up: the same notes, the talk so far. */
+  aiAsk(question: string, earlier?: AiExchange[], notes?: number[]): Promise<AiAnswer>;
   aiSuggestHome(noteId: number): Promise<AiSuggestion[]>;
   aiRelated(noteId: number): Promise<AiRelated[]>;
   /** A few sentences on the notes changed between two moments. */
@@ -310,6 +353,7 @@ async function tauriApi(): Promise<Api> {
       await win.listen<number>("petrel-open-note", (e) => events.openNote(e.payload));
       await win.listen("petrel-changed", () => events.changed());
       await win.onFocusChanged(({ payload }) => payload && events.focus());
+      if (events.folder) await win.listen<ScanReport>("petrel-folder", (e) => events.folder!(e.payload));
     },
 
     notesInfo: () => invoke("notes_info"),
@@ -334,8 +378,15 @@ async function tauriApi(): Promise<Api> {
     noteVersions: (id) => invoke("note_versions", { id }),
     noteVersionText: (versionId) => invoke("note_version_text", { versionId }),
     restoreNoteVersion: (id, versionId) => invoke("restore_note_version", { id, versionId }),
-    recordCopy: (id) => invoke("record_copy", { id }),
+    recordCopy: (id, app) => invoke("record_copy", { id, app: app ?? null }),
     copyCounts: () => invoke("copy_counts"),
+    copyCountsIn: (app) => invoke("copy_counts_in", { app }),
+    pickerContext: () => invoke("picker_context"),
+    readClipboard: () => invoke("read_clipboard"),
+    openTasks: () => invoke("open_tasks"),
+    tickTask: (id, line, text) => invoke("tick_task", { id, line, text }),
+    conflicts: () => invoke("conflicts"),
+    settleConflict: (original, copy, keep) => invoke("settle_conflict", { original, copy, keep }),
     linkTargets: (text, limit) => invoke("link_targets", { text, limit }),
     resolveLink: (inner) => invoke("resolve_link", { inner }),
     backlinks: (id) => invoke("backlinks", { id }),
@@ -356,7 +407,7 @@ async function tauriApi(): Promise<Api> {
     aiStatus: () => invoke("ai_status"),
     setAiKey: (key) => invoke("set_ai_key", { key }),
     aiWrite: (o) => invoke("ai_write", { ...o }),
-    aiAsk: (question) => invoke("ai_ask", { question }),
+    aiAsk: (question, earlier, notes) => invoke("ai_ask", { question, earlier: earlier ?? null, notes: notes ?? null }),
     aiSuggestHome: (noteId) => invoke("ai_suggest_home", { noteId }),
     aiRelated: (noteId) => invoke("ai_related", { noteId }),
     aiWeek: (from, to) => invoke("ai_week", { from, to }),

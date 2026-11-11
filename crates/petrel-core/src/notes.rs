@@ -27,6 +27,13 @@ use crate::links::{self, same, Link, Target};
 use crate::store::{Folder, Store, UndoToken, VERSION_INTERVAL_MS};
 use crate::title;
 
+mod conflicts;
+mod paths;
+mod tasks;
+
+pub use conflicts::Conflict;
+pub use tasks::OpenTask;
+
 /// The setting that holds the notes folder.
 pub const ROOT_SETTING: &str = "notes.root";
 /// Inside the notes folder; skipped by the scan like every other dot-folder.
@@ -41,6 +48,8 @@ pub const FACE_FILE: &str = ".petrel";
 const BETWEEN_MAX: usize = 200;
 /// Settings keys `copied.<path>` count copies (collections sort by them).
 const COPY_PREFIX: &str = "copied.";
+/// Settings keys `copied_in.<app>|<path>` count copies made from the picker with that app in front.
+const COPY_IN_PREFIX: &str = "copied_in.";
 /// More files than this in the notes folder are not indexed (a folder picked by mistake, like a home folder).
 pub const SCAN_MAX: usize = 50_000;
 /// Versions kept per note; older ones go first.
@@ -172,6 +181,8 @@ pub struct ScanReport {
     /// Files that could not be read as UTF-8 text; left alone.
     pub skipped: usize,
     pub root: String,
+    /// The notes added, changed or gone, relative to the folder: the open note reloads when it is one of them.
+    pub paths: Vec<String>,
 }
 
 /// A note changed by a rename, promote or append, and the undo token for it.
@@ -666,11 +677,17 @@ impl Store {
                 match known.get(&rel) {
                     Some(&(s, m)) if s == size && m == mtime => {}
                     Some(_) => match self.index_file(&root, &rel) {
-                        Ok(true) => report.changed += 1,
+                        Ok(true) => {
+                            report.changed += 1;
+                            report.paths.push(rel.clone());
+                        }
                         _ => report.skipped += 1,
                     },
                     None => match self.index_file(&root, &rel) {
-                        Ok(true) => report.added += 1,
+                        Ok(true) => {
+                            report.added += 1;
+                            report.paths.push(rel.clone());
+                        }
                         _ => report.skipped += 1,
                     },
                 }
@@ -680,6 +697,7 @@ impl Store {
         for path in known.keys() {
             if !seen.contains(path) {
                 report.removed += forget.execute(params![path])?;
+                report.paths.push(path.clone());
             }
         }
         drop(forget);
@@ -1484,13 +1502,29 @@ impl Store {
     }
 
     /// Counts a copy, so a collection can list what is used most first. Kept by path in settings: the index
-    /// is rebuildable and a count is not worth a migration.
-    pub fn record_copy(&mut self, id: i64) -> Result<i64> {
+    /// is rebuildable and a count is not worth a migration. A copy from the quick picker also counts for the app
+    /// that was in front (`copied_in.<app>|<path>`), so the picker can offer what is used there first. Local only.
+    pub fn record_copy(&mut self, id: i64, app: Option<&str>) -> Result<i64> {
         let row = self.row(id)?;
         let key = format!("{COPY_PREFIX}{}", row.path);
         let n = self.setting(&key)?.and_then(|v| v.parse::<i64>().ok()).unwrap_or(0) + 1;
         self.set_setting(&key, &n.to_string())?;
+        if let Some(app) = app.map(str::trim).filter(|a| !a.is_empty() && !a.contains('|')) {
+            let key = format!("{COPY_IN_PREFIX}{app}|{}", row.path);
+            let m = self.setting(&key)?.and_then(|v| v.parse::<i64>().ok()).unwrap_or(0) + 1;
+            self.set_setting(&key, &m.to_string())?;
+        }
         Ok(n)
+    }
+
+    /// How often each note was copied with `app` in front, by path.
+    pub fn copy_counts_in(&self, app: &str) -> Result<std::collections::HashMap<String, i64>> {
+        let prefix = format!("{COPY_IN_PREFIX}{app}|");
+        Ok(self
+            .settings_with_prefix(&prefix)?
+            .into_iter()
+            .filter_map(|(k, v)| Some((k.strip_prefix(&prefix)?.to_string(), v.parse().ok()?)))
+            .collect())
     }
 
     /// How often each note was copied, by path.
@@ -2179,6 +2213,25 @@ fn without_title_line(content: &str, title: &str) -> String {
 }
 
 #[cfg(test)]
+pub(crate) mod tests_support {
+    use std::path::{Path, PathBuf};
+
+    use crate::store::Store;
+
+    pub fn store_in(dir: &Path) -> Store {
+        let mut s = Store::open_in_memory().unwrap();
+        s.set_notes_root(dir).unwrap();
+        s
+    }
+
+    pub fn tmp() -> PathBuf {
+        let d = std::env::temp_dir().join(format!("petrel-notes-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -2240,9 +2293,11 @@ mod tests {
         let other = s.create_note("", "Other", "x\n", &[]).unwrap();
         assert!(s.restore_note_version(other.id, versions[0].id).is_err());
 
-        assert_eq!(s.record_copy(n.id).unwrap(), 1);
-        assert_eq!(s.record_copy(n.id).unwrap(), 2);
+        assert_eq!(s.record_copy(n.id, None).unwrap(), 1);
+        assert_eq!(s.record_copy(n.id, Some("Code")).unwrap(), 2);
         assert_eq!(s.copy_counts().unwrap().get("Prompts/Review.md"), Some(&2));
+        assert_eq!(s.copy_counts_in("Code").unwrap().get("Prompts/Review.md"), Some(&1));
+        assert!(s.copy_counts_in("Firefox").unwrap().is_empty());
 
         s.create_note("", "Garden", "Tomatoes need sun and water\n", &[]).unwrap();
         let found = s.notes_about("What do my tomatoes need?", 5).unwrap();
