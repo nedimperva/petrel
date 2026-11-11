@@ -46,14 +46,17 @@ mod linux {
     use serde_json::Value;
 
     pub fn arrange(title: &str, width: u32, height: u32) -> Result<()> {
-        // The window is mapped a moment after Tauri shows it.
-        for _ in 0..20 {
+        let me = u64::from(std::process::id());
+        // The window is mapped a moment after Tauri shows it; a first webview can take a few seconds.
+        for _ in 0..100 {
             let out = Command::new("hyprctl").args(["clients", "-j"]).output().context("running hyprctl")?;
             let clients: Value = serde_json::from_slice(&out.stdout).context("reading hyprctl clients")?;
-            let found = clients.as_array().and_then(|cs| {
-                cs.iter()
-                    .find(|c| c["title"] == title && c["pid"].as_u64() == Some(u64::from(std::process::id())))
-            });
+            let list = clients.as_array().cloned().unwrap_or_default();
+            // Ours by pid when Hyprland says so; by title alone otherwise (some setups report the webview's pid).
+            let found = list
+                .iter()
+                .find(|c| c["title"] == title && c["pid"].as_u64() == Some(me))
+                .or_else(|| list.iter().find(|c| c["title"] == title));
             if let Some(c) = found {
                 let address = c["address"].as_str().context("a client without an address")?;
                 let cmd = super::batch(
@@ -63,15 +66,17 @@ mod linux {
                     width,
                     height,
                 );
-                let status = Command::new("hyprctl").args(["--batch", &cmd]).status()?;
-                if !status.success() {
-                    bail!("hyprctl said {status}");
+                let out = Command::new("hyprctl").args(["--batch", &cmd]).output()?;
+                let said = String::from_utf8_lossy(&out.stdout).trim().replace('\n', " ");
+                log::info!("hyprctl {cmd} -> {said}");
+                if !out.status.success() {
+                    bail!("hyprctl said {}: {said}", out.status);
                 }
                 return Ok(());
             }
             std::thread::sleep(Duration::from_millis(50));
         }
-        bail!("no window called {title} appeared")
+        bail!("no window called {title} appeared in hyprctl clients within 5 s")
     }
 }
 

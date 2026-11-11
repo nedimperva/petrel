@@ -103,6 +103,10 @@ bind = SUPER, N, exec, petrel --capture
 bind = SUPER, V, exec, petrel --picker
 ```
 
+On Wayland no app can grab a key for itself, so `Ctrl Shift Space` does nothing until it is bound as above
+(`bind = CTRL SHIFT, SPACE, exec, petrel --picker` if you want that key). If the picker still tiles, Petrel's log
+(`~/.local/share/io.github.nedimperva.petrel/petrel.log`) has a `hyprctl` line with what Hyprland answered.
+
 On Hyprland (Omarchy) Petrel floats both windows, sizes them, centres them and pins them to every workspace
 itself, through `hyprctl`, each time they open, so no window rule is needed. If you want rules anyway: every Petrel
 window shares the app id, so match by title. Hyprland before 0.48:

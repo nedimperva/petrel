@@ -2399,7 +2399,8 @@ kbd {
 /* ---- the one AI menu: Ctrl J, or / on an empty line ----------------------------------------------------- */
 
 .ai-menu {
-  width: 360px;
+  width: 380px;
+  border-radius: 12px;
   padding: 0;
   overflow: hidden;
 }
@@ -2710,7 +2711,7 @@ kbd {
 .note-margin {
   display: none;
 }
-@container (min-width: 1000px) {
+@container (min-width: 840px) {
   .page-main {
     padding-right: var(--margin-w);
   }
@@ -2731,7 +2732,8 @@ kbd {
   }
 }
 .page {
-  --margin-w: 320px;
+  /* 320 px on a wide page; on a laptop it gives up a little to keep the text wide enough. */
+  --margin-w: clamp(250px, 28cqi, 320px);
 }
 .note-margin.quiet:not(:hover) {
   opacity: 0.25;
@@ -2917,4 +2919,20 @@ kbd {
 }
 .ai-menu-list {
   max-height: 300px;
+}
+
+.ai-menu-scope {
+  flex: none;
+  font-size: var(--t-xs);
+  color: var(--muted);
+}
+.ai-menu .menu-item {
+  height: 32px;
+  align-items: center;
+}
+.ai-menu .menu-item.on {
+  background: var(--accent-soft);
+}
+.ai-menu-enter {
+  margin-left: auto;
 }

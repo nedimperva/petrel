@@ -385,8 +385,8 @@ export default function NotePage(p: Props) {
       const above = paragraphAbove(m.head);
       if (above) out.push({ label: "Turn into a checklist", hint: "the paragraph above", group: "Rewrite", go: () => void run("checklist", above.from, above.to) });
     }
-    out.push({ label: "Continue writing", hint: "from the cursor", group: "Write", go: () => void run("continue", m.head, m.head) });
-    out.push({ label: "Summarize", hint: "the text above the cursor", group: "Write", go: () => void run("summarize", m.head, m.head) });
+    out.push({ label: "Continue from here", hint: "from the cursor", group: "Write", go: () => void run("continue", m.head, m.head) });
+    out.push({ label: "Summarize the note", hint: "the text above the cursor", group: "Write", go: () => void run("summarize", m.head, m.head) });
     out.push({ label: "Suggest a title", hint: "renames the note if you keep it", group: "Write", go: () => void run("title", 0, len) });
     const promptRange = m.whole ? { from: 0, to: len } : { from: m.from, to: m.to };
     for (const n of prompts())
@@ -820,12 +820,13 @@ export default function NotePage(p: Props) {
               <span class="spark">✦</span>
               <input
                 ref={(el) => setTimeout(() => el.focus())}
-                placeholder="Pick one, or say what to do…"
+                placeholder="Type to find, or say what to do"
                 value={m().q}
                 onInput={(e) => setMenu({ ...m(), q: e.currentTarget.value, i: 0 })}
                 onKeyDown={menuKey}
                 onBlur={() => setMenu(null)}
               />
+              <span class="ai-menu-scope">{m().to > m().from ? (m().whole ? "this paragraph" : "the selection") : "the whole note"}</span>
             </div>
             <div class="ai-menu-list" role="listbox">
               <For each={menuItems()}>
@@ -847,7 +848,9 @@ export default function NotePage(p: Props) {
                     }}
                   >
                     <span>{x.label}</span>
-                    <span class="muted">{x.hint}</span>
+                    <Show when={i() === m().i}>
+                      <kbd class="ai-menu-enter">Enter</kbd>
+                    </Show>
                   </button>
                   </>
                 )}
