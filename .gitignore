@@ -25,4 +25,3 @@ secrets/
 
 # The runtime spike is its own crate; its lock file is noise.
 crates/petrel-core/examples/runtime_spike/Cargo.lock
-.gstack/
