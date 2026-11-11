@@ -67,6 +67,7 @@ pub fn show_window(state: State<AppState>, window: tauri::WebviewWindow) {
     }
     let _ = window.show();
     let _ = window.set_focus();
+    crate::arrange(&window);
 }
 
 /// The capture window saved its draft and is done. With a tray Petrel keeps running there. Without one, if the
