@@ -3,7 +3,7 @@
 // counted, so the review and the capture window offer the usual places first.
 
 import { api, type Note, type NoteChange } from "../api";
-import { today } from "../journal/days";
+import { dayTitle, today } from "../journal/days";
 import { folderName } from "../ui";
 import type { Target } from "./Destination";
 import { bump, parseCounts, type Counts } from "./learn";
@@ -18,8 +18,9 @@ export async function fileCapture(n: Note, t: Target): Promise<{ change: NoteCha
     return { change, text: `Added to ${t.title}` };
   }
   if (t.kind === "day") {
-    const change = await s.fileIntoDay(n.id, today());
-    return { change, text: "Added to today's page" };
+    const date = t.date ?? today();
+    const change = await s.fileIntoDay(n.id, date);
+    return { change, text: date === today() ? "Added to today's page" : `Added to ${dayTitle(date)}` };
   }
   const change = await s.moveNote(n.id, t.folder, titleFrom(titleLine(n.body)));
   return { change, text: `Filed in ${folderName(t.folder)} as “${change.note.title}”` };

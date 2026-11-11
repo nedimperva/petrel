@@ -1,6 +1,6 @@
-// Sending a capture with a word: `#recipes` files it in that collection, `#today` on today's page, `>Groceries`
-// adds it to the end of that note. The word is taken out of the text. Pure, for `npm test`; the capture window
-// does the looking up.
+// Sending a capture with a word: `#recipes` files it in that collection, `#today` on today's page (`#fri`,
+// `#tomorrow`, `#nov20` on that day's), `>Groceries` adds it to the end of that note. The word is taken out of the
+// text. Pure, for `npm test`; the capture window does the looking up and passes `dayWord` (journal/days.ts).
 
 export interface Token {
   sign: "#" | ">";
@@ -52,20 +52,28 @@ export function typingToken(lineBefore: string): { sign: "#" | ">"; word: string
   return { sign: m[1] as "#" | ">", word: m[2], back: m[2].length + 1 };
 }
 
-export type Route = { kind: "folder"; folder: string } | { kind: "day" } | { kind: "note"; title: string };
+export type Route = { kind: "folder"; folder: string } | { kind: "day"; date: string } | { kind: "note"; title: string };
 
-/** Which typed token routes the capture: the last one that names a collection, `today`, or a note title (case
- * does not matter; a note's title may use spaces where the word has `-`). */
-export function pickRoute(text: string, folders: string[], noteTitles: string[]): { route: Route; token: Token } | null {
+/** Which typed token routes the capture: the last one that names a collection, a day, or a note title (case
+ * does not matter; a note's title may use spaces where the word has `-`). A collection named like a day wins,
+ * except over `#today`. */
+export function pickRoute(
+  text: string,
+  folders: string[],
+  noteTitles: string[],
+  dayWord: (word: string) => string | null,
+): { route: Route; token: Token } | null {
   const low = (s: string) => s.toLowerCase();
   const found = tokens(text);
   for (let i = found.length - 1; i >= 0; i--) {
     const t = found[i];
     const w = low(t.word);
     if (t.sign === "#") {
-      if (w === "today") return { route: { kind: "day" }, token: t };
+      const day = dayWord(w);
+      if (w === "today" && day) return { route: { kind: "day", date: day }, token: t };
       const f = folders.find((x) => !x.includes("/") && low(x) === w);
       if (f) return { route: { kind: "folder", folder: f }, token: t };
+      if (day) return { route: { kind: "day", date: day }, token: t };
     } else {
       const n = noteTitles.find((x) => low(x) === w || low(x).replace(/\s+/g, "-") === w);
       if (n) return { route: { kind: "note", title: n }, token: t };

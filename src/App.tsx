@@ -114,8 +114,8 @@ export default function App() {
         say(`Added to ${t.title}`, { undo: () => s.undo(ch.token.token).then(() => openNote(n.id)) });
         void openNote(ch.note.id);
       } else if (t.kind === "day") {
-        const ch = await s.fileIntoDay(n.id, today());
-        say("Added to today's page", { undo: () => s.undo(ch.token.token).then(() => openNote(n.id)) });
+        const ch = await s.fileIntoDay(n.id, t.date ?? today());
+        say(t.date && t.date !== today() ? "Added to that day's page" : "Added to today's page", { undo: () => s.undo(ch.token.token).then(() => openNote(n.id)) });
         void openNote(ch.note.id);
       } else {
         const ch = await s.moveNote(n.id, t.folder, n.title);

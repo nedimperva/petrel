@@ -2111,3 +2111,8 @@ kbd {
   font-size: var(--t-xs);
   white-space: nowrap;
 }
+
+/* Keep going: the last capture, faded above the new text. */
+.cm-earlier {
+  opacity: 0.45;
+}

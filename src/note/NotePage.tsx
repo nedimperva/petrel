@@ -8,6 +8,7 @@ import { createEffect, createSignal, For, on, onCleanup, onMount, Show } from "s
 import { api, errText, type AiRelated, type AiTask, type Backlinks, type Note } from "../api";
 import { toggleTask } from "../editor/commands";
 import { createEditor, type EditorHandle } from "../editor/editor";
+import { cleanPaste } from "../editor/paste";
 import { pictureExtensions } from "../editor/pictures";
 import { addDays, clock, dayTitle, isDayNote, JOURNAL, monthGrid, today } from "../journal/days";
 import { dayExtensions } from "../journal/stamps";
@@ -349,6 +350,7 @@ export default function NotePage(p: Props) {
     });
     editor.setExtra([
       aiPreview(actions),
+      cleanPaste(() => say("Pasted as Markdown. Ctrl Z for plain text.")),
       pictureExtensions(() => note()?.folder ?? p.folder),
       dayExtensions(() => dayPage() === today()),
       linkExtensions({

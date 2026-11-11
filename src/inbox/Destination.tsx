@@ -4,16 +4,18 @@
 
 import { createResource, createSignal, For, onMount, Show } from "solid-js";
 import { api, type NoteSummary } from "../api";
+import { dayTitle, today } from "../journal/days";
 import Mark from "../library/Mark";
 import { folderName } from "../ui";
 import { filedCounts } from "./file";
 import { keyOf, score } from "./learn";
 
-export type Target = { kind: "note"; id: number; title: string } | { kind: "folder"; folder: string } | { kind: "day" };
+/** `day` without a date is today's page. */
+export type Target = { kind: "note"; id: number; title: string } | { kind: "folder"; folder: string } | { kind: "day"; date?: string };
 
 export function targetLabel(t: Target | null): string {
   if (!t) return "Inbox";
-  if (t.kind === "day") return "Today's page";
+  if (t.kind === "day") return !t.date || t.date === today() ? "Today's page" : dayTitle(t.date);
   return t.kind === "note" ? t.title : folderName(t.folder);
 }
 

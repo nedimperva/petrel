@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { pickRoute, strip, tokens, typingToken } from "../src/inbox/route.ts";
-import { addDays, isDayNote, isoWeek, monthGrid, parseDay } from "../src/journal/days.ts";
+import { addDays, dayWord, isDayNote, isoWeek, monthGrid, parseDay } from "../src/journal/days.ts";
 import { bump, parseCounts, score } from "../src/inbox/learn.ts";
 import { quoteBlock, titleLine } from "../src/inbox/quote.ts";
 
@@ -18,14 +18,14 @@ test("words are found outside code and Markdown", () => {
 
 test("a route takes the last word that names a place", () => {
   const folders = ["Recipes", "Travel", "Travel/Mostar"];
-  const r = pickRoute("Grandma's trick #recipes", folders, []);
+  const r = pickRoute("Grandma's trick #recipes", folders, [], dayWord);
   assert.deepEqual(r?.route, { kind: "folder", folder: "Recipes" });
   assert.equal(strip("Grandma's trick #recipes", r!.token), "Grandma's trick");
-  assert.deepEqual(pickRoute("#travel then #nothing", folders, [])?.route, { kind: "folder", folder: "Travel" });
-  assert.deepEqual(pickRoute("milk >groceries", folders, ["Groceries"])?.route, { kind: "note", title: "Groceries" });
-  assert.deepEqual(pickRoute("x >trip-to-mostar", folders, ["Trip to Mostar"])?.route, { kind: "note", title: "Trip to Mostar" });
-  assert.deepEqual(pickRoute("call back #Today", folders, [])?.route, { kind: "day" });
-  assert.equal(pickRoute("#mostar is a sub-folder", folders, []), null);
+  assert.deepEqual(pickRoute("#travel then #nothing", folders, [], dayWord)?.route, { kind: "folder", folder: "Travel" });
+  assert.deepEqual(pickRoute("milk >groceries", folders, ["Groceries"], dayWord)?.route, { kind: "note", title: "Groceries" });
+  assert.deepEqual(pickRoute("x >trip-to-mostar", folders, ["Trip to Mostar"], dayWord)?.route, { kind: "note", title: "Trip to Mostar" });
+  assert.equal(pickRoute("call back #Today", folders, [], dayWord)?.route.kind, "day");
+  assert.equal(pickRoute("#mostar is a sub-folder", folders, [], dayWord), null);
   assert.equal(strip("#recipes first", { from: 0, to: 8 }), "first");
 });
 

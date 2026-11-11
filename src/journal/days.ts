@@ -72,3 +72,55 @@ export function isoWeek(now = new Date()): string {
   const week = Math.ceil(((d.getTime() - Date.UTC(year, 0, 1)) / 86400000 + 1) / 7);
   return `${year}-W${pad(week)}`;
 }
+
+const WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+const MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+
+/** A month by its name or its first three letters or more (`nov`, `novem`). */
+function monthOf(w: string): number {
+  return w.length >= 3 ? MONTHS.findIndex((m) => m.startsWith(w)) : -1;
+}
+
+/** The day a capture word names: `today`, `tomorrow`, `yesterday`, a weekday (`fri`, `friday`: the next one,
+ * not today), a date (`nov20`, `20nov`, `2026-11-20`). A date more than a month gone is next year's. Null when the
+ * word is not a day. */
+export function dayWord(word: string, now = new Date()): string | null {
+  if (parseDay(word)) return word;
+  const w = word.toLowerCase().replace(/[-_.]/g, "");
+  const base = dayOf(now);
+  if (w === "today") return base;
+  if (w === "tomorrow" || w === "tmrw" || w === "tmr") return addDays(base, 1);
+  if (w === "yesterday") return addDays(base, -1);
+  if (w.length >= 3) {
+    const wd = WEEKDAYS.findIndex((d) => d.startsWith(w));
+    if (wd >= 0 && !/\d/.test(w)) {
+      const ahead = (wd - now.getDay() + 7) % 7 || 7;
+      return addDays(base, ahead);
+    }
+  }
+  const m = /^([a-z]+)(\d{1,2})$/.exec(w) ?? /^(\d{1,2})([a-z]+)$/.exec(w);
+  if (!m) return null;
+  const [name, num] = /\d/.test(m[1]) ? [m[2], m[1]] : [m[1], m[2]];
+  const month = monthOf(name);
+  const day = Number(num);
+  if (month < 0 || day < 1 || day > 31) return null;
+  let d = new Date(now.getFullYear(), month, day);
+  if (d.getMonth() !== month) return null;
+  if (now.getTime() - d.getTime() > 31 * 86400000) d = new Date(now.getFullYear() + 1, month, day);
+  return dayOf(d);
+}
+
+/** Day words to offer while `#…` is typed: the words that start with it, or the date it already names. */
+export function dayOptions(typed: string, now = new Date()): { word: string; day: string }[] {
+  const w = typed.toLowerCase();
+  const words = ["today", "tomorrow", "yesterday", ...WEEKDAYS.map((d) => d.slice(0, 3))];
+  const out: { word: string; day: string }[] = [];
+  for (const x of words) {
+    const full = WEEKDAYS.find((d) => d.startsWith(x)) ?? x;
+    if (w && !(x.startsWith(w) || full.startsWith(w))) continue;
+    out.push({ word: w.length > 3 && full.startsWith(w) ? full : x, day: dayWord(x, now)! });
+  }
+  const exact = !out.length && w ? dayWord(w, now) : null;
+  if (exact) out.push({ word: typed, day: exact });
+  return w ? out.slice(0, 4) : out.slice(0, 2);
+}
