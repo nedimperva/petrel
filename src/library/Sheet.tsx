@@ -1,6 +1,6 @@
 // A card, opened: the whole text on a sheet over the library. A prompt's blanks become fields on the right and
-// the text fills in as you type; Enter copies. A prompt or snippet with `## versions` shows one at a time: Tab
-// steps through them (after the last blank), and the one copied last comes first. A capture from the inbox gets
+// the text fills in as you type; Enter copies. A prompt or snippet with `## versions` shows one at a time: Alt ←
+// and Alt → step through them, and the one copied last comes first. A capture from the inbox gets
 // its filing buttons instead: Move to (m), Suggest a home (s, Claude, only when pressed) and Delete (d).
 
 import { createMemo, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
@@ -47,16 +47,11 @@ export default function Sheet(p: {
   const inbox = () => note()?.folder === "inbox";
   let side: HTMLElement | undefined;
 
-  /** Tab moves through the blanks, then on to the next version. */
-  function tab(e: KeyboardEvent): boolean {
+  /** Alt ← and Alt →: the version before or after, its first blank in focus. */
+  function step(back: boolean) {
     const n = versions().length;
-    if (n < 2) return false;
-    const stops = side ? [...side.querySelectorAll<HTMLElement>("input, textarea, .choices")] : [];
-    const at = stops.indexOf(document.activeElement as HTMLElement);
-    if (at >= 0 && (e.shiftKey ? at > 0 : at < stops.length - 1)) return false;
-    setVi((vi() + (e.shiftKey ? n - 1 : 1)) % n);
+    setVi((vi() + (back ? n - 1 : 1)) % n);
     setTimeout(() => side?.querySelector<HTMLElement>("input, textarea, .choices")?.focus());
-    return true;
   }
   const [sugg, setSugg] = createSignal<AiSuggestion[] | "loading" | null>(null);
 
@@ -86,9 +81,8 @@ export default function Sheet(p: {
     const n = note();
     if (!n) return;
     if (e.key === "Escape") p.onClose();
-    else if (e.key === "Tab" && !inbox() && tab(e)) {
-      // Stepped to another version.
-    } else if (e.key === "Enter" && !(e.target instanceof HTMLTextAreaElement && !e.ctrlKey)) {
+    else if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight") && versions().length > 1) step(e.key === "ArrowLeft");
+    else if (e.key === "Enter" && !(e.target instanceof HTMLTextAreaElement && !e.ctrlKey)) {
       const s = sugg();
       if (inbox() && Array.isArray(s) && s[0]) p.onFile(n, s[0]);
       else if (inbox()) p.onMove(n);
@@ -138,7 +132,7 @@ export default function Sheet(p: {
                     )}
                   </For>
                   <span class="muted small">
-                    <kbd>Tab</kbd> next version
+                    <kbd>Alt ←</kbd> <kbd>Alt →</kbd> other versions
                   </span>
                 </div>
               </Show>

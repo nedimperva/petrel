@@ -1,10 +1,11 @@
-// A collection's look (`t` on a card in the library, or its mark on the shelf): one colour and one mark. Saved at
-// once to the folder's `.petrel` file, so the other computer gets it with the folder.
+// A collection's look and kind (`t` on a card in the library, or its mark on the shelf): one colour, one mark, and
+// whether it holds things to copy (cards in the library and the picker) or pages. Saved at once to the folder's
+// `.petrel` file, so the other computer gets it with the folder.
 
 import { createSignal, For, onMount } from "solid-js";
 import { errText } from "../api";
 import { folderName, say } from "../ui";
-import { COLORS, colorOf, MARKS } from "./faces";
+import { COLORS, colorOf, MARKS, toCopy } from "./faces";
 import { faces, saveFace } from "./Mark";
 
 export default function FacePicker(p: { top: string; onClose(): void }) {
@@ -13,12 +14,14 @@ export default function FacePicker(p: { top: string; onClose(): void }) {
   const current = () => faces()[p.top] ?? { color: "", mark: "" };
   const [color, setColor] = createSignal(current().color || colorOf(p.top, faces()));
   const [mark, setMark] = createSignal(current().mark || "dot");
+  const [copy, setCopy] = createSignal(current().copy ?? "");
 
-  async function save(c: string, m: string) {
+  async function save(c: string, m: string, k = copy()) {
     setColor(c);
     setMark(m);
+    setCopy(k);
     try {
-      await saveFace(p.top, { color: c, mark: m === "dot" ? "" : m });
+      await saveFace(p.top, { color: c, mark: m === "dot" ? "" : m, copy: k });
     } catch (e) {
       say(errText(e), { error: true });
     }
@@ -44,6 +47,16 @@ export default function FacePicker(p: { top: string; onClose(): void }) {
             Done <kbd>Esc</kbd>
           </button>
         </header>
+        <h3 class="face-label">Holds</h3>
+        <div class="seg" role="radiogroup" aria-label="What it holds">
+          <button role="radio" aria-checked={toCopy(p.top, { [p.top]: { color: "", mark: "", copy: copy() } })} classList={{ on: toCopy(p.top, { [p.top]: { color: "", mark: "", copy: copy() } }) }} onClick={() => void save(color(), mark(), "yes")}>
+            Things to copy
+          </button>
+          <button role="radio" aria-checked={!toCopy(p.top, { [p.top]: { color: "", mark: "", copy: copy() } })} classList={{ on: !toCopy(p.top, { [p.top]: { color: "", mark: "", copy: copy() } }) }} onClick={() => void save(color(), mark(), "no")}>
+            Pages
+          </button>
+        </div>
+        <p class="muted small">Things to copy are cards in the library and the quick picker. Pages are found with Ctrl K.</p>
         <h3 class="face-label">Colour</h3>
         <div class="face-colors" role="radiogroup" aria-label="Colour">
           <For each={COLORS}>

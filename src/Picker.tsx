@@ -1,6 +1,7 @@
 // The quick picker (`petrel --picker`, Ctrl Alt V): find a prompt, snippet or any note, fill its blanks, and Enter
-// copies it and closes, so the paste goes where you were. Ctrl O opens it in Petrel instead. It knows which app
-// was in front: what you copied there before comes first ("3× here"). Tab steps through a card's versions.
+// copies it and closes, so the paste goes where you were. Ctrl O opens it in Petrel instead. It lists the things
+// to copy (collections set so with `t`); once you type, the notes that match come after them. It knows which app
+// was in front: what you copied there before comes first ("3× here"). Alt ← → step through a card's versions.
 
 import { createMemo, createResource, createSignal, For, onMount, Show } from "solid-js";
 import { api, type CaptureContext, type NoteSummary } from "./api";
@@ -10,7 +11,9 @@ import FillBlanks from "./collection/FillBlanks";
 import { copyFilled } from "./collection/copyItem";
 import { hasVersions, lastFirst, versionsOf, type Version } from "./collection/versions";
 import { applyPrefs, parsePrefs } from "./settings/prefs";
-import { folderName } from "./ui";
+import { folderName, KeyHints } from "./ui";
+import { faces, loadFaces } from "./library/Mark";
+import { toCopy } from "./library/faces";
 
 export default function Picker() {
   let input!: HTMLInputElement;
@@ -40,11 +43,15 @@ export default function Picker() {
       for (const w of words) s += t.startsWith(w) ? 30 : t.includes(w) ? 15 : 0;
       return s;
     };
-    return d.all
+    const hits = d.all
       .filter((n) => words.every((w) => (n.title + " " + n.folder + " " + n.preview).toLowerCase().includes(w)))
-      .sort((a, b) => score(b) - score(a) || b.modifiedAt - a.modifiedAt)
-      .slice(0, 40);
+      .sort((a, b) => score(b) - score(a) || b.modifiedAt - a.modifiedAt);
+    const copyable = hits.filter((n) => toCopy(n.folder, faces()));
+    // Notes (pages) only when asked for by name: the list is for what you copy.
+    const pages = words.length ? hits.filter((n) => !toCopy(n.folder, faces())).slice(0, 8) : [];
+    return [...copyable.slice(0, 40), ...pages];
   };
+  const isPage = (n: NoteSummary) => !toCopy(n.folder, faces());
 
   const close = async () => (await api()).closePicker();
   const sel = () => rows()[i()];
@@ -80,7 +87,8 @@ export default function Picker() {
     const n = rows().length;
     if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) (setI((i() + 1) % Math.max(1, n)), setVi(0));
     else if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p")) (setI((i() + n - 1) % Math.max(1, n)), setVi(0));
-    else if (e.key === "Tab" && versions().length > 1) setVi((vi() + (e.shiftKey ? versions().length - 1 : 1)) % versions().length);
+    else if (e.altKey && (e.key === "ArrowRight" || e.key === "ArrowLeft") && versions().length > 1)
+      setVi((vi() + (e.key === "ArrowLeft" ? versions().length - 1 : 1)) % versions().length);
     else if (e.key === "Enter") void pick(rows()[i()]);
     else if (e.ctrlKey && e.key.toLowerCase() === "o") {
       const r = rows()[i()];
@@ -93,6 +101,7 @@ export default function Picker() {
 
   onMount(async () => {
     input?.focus();
+    void loadFaces();
     const s = await api();
     s.uiSettings().then((m) => applyPrefs(parsePrefs(m)), () => {});
     await s.showWindow();
@@ -135,6 +144,10 @@ export default function Picker() {
           <div class="palette-list">
             <For each={rows()}>
               {(n, k) => (
+                <>
+                <Show when={isPage(n) && (k() === 0 || !isPage(rows()[k() - 1]))}>
+                  <div class="picker-section">Notes</div>
+                </Show>
                 <button class="palette-row" classList={{ on: k() === i() }} onMouseMove={() => k() !== i() && (setI(k()), setVi(0))} onClick={() => pick(n)}>
                   <span class="row-label">{n.folder === "inbox" ? n.preview.split("\n")[0] : n.title}</span>
                   <Show when={here()[n.path]}>
@@ -144,10 +157,11 @@ export default function Picker() {
                   </Show>
                   <span class="row-sub">{folderName(n.folder)}</span>
                 </button>
+                </>
               )}
             </For>
             <Show when={data() && !rows().length}>
-              <p class="muted pad">{data()!.all.length ? "Nothing matches." : "Nothing to copy yet. Make a folder like Prompts or Snippets and put notes in it."}</p>
+              <p class="muted pad">{q() ? "Nothing matches." : "Nothing to copy yet. Make a folder like Prompts or Snippets, or set a collection to copy with t in the library."}</p>
             </Show>
           </div>
           <Show when={sel()}>
@@ -164,21 +178,9 @@ export default function Picker() {
           </Show>
         </div>
         <footer class="picker-foot">
-          <span>
-            <kbd>Enter</kbd> copy and close
-          </span>
-          <Show when={versions().length > 1} fallback={<span><kbd>Tab</kbd> next blank</span>}>
-            <span>
-              <kbd>Tab</kbd> next version
-            </span>
-          </Show>
-          <span>
-            <kbd>Ctrl O</kbd> open in Petrel
-          </span>
+          <KeyHints hints={[["Enter", "copy and close"], versions().length > 1 && ["Alt ← →", "version"], ["Ctrl O", "open in Petrel"]]} />
           <span class="grow" />
-          <span>
-            <kbd>Esc</kbd>
-          </span>
+          <KeyHints hints={[["Esc", "close"]]} />
         </footer>
       </Show>
     </div>

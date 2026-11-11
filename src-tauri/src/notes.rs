@@ -259,8 +259,14 @@ pub fn topic_faces(state: State<AppState>) -> R<std::collections::HashMap<String
 }
 
 #[tauri::command]
-pub fn set_topic_face(state: State<AppState>, top: String, color: String, mark: String) -> R<TopicFace> {
-    with(&state, |s| s.set_topic_face(&top, &color, &mark))
+pub fn set_topic_face(
+    state: State<AppState>,
+    top: String,
+    color: String,
+    mark: String,
+    copy: Option<String>,
+) -> R<TopicFace> {
+    with(&state, |s| s.set_topic_face(&top, &color, &mark, copy.as_deref().unwrap_or("")))
 }
 
 /// A pasted picture, sent as raw bytes (a JSON array would be several times bigger). The folder and the file

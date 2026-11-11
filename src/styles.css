@@ -2453,3 +2453,34 @@ kbd {
 .key-hint .keys kbd + kbd {
   margin-left: 2px;
 }
+
+/* Collections of pages: tiles at the end of the shelf, their notes found with Ctrl K. */
+.page-tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+.page-tile {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--raised);
+  color: var(--ink-2);
+  font: inherit;
+  font-size: var(--t-sm);
+  cursor: pointer;
+}
+.page-tile:hover {
+  border-color: var(--accent);
+}
+.picker-section {
+  padding: 10px 10px 4px;
+  color: var(--faint);
+  font-size: var(--t-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}

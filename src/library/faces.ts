@@ -42,6 +42,20 @@ const DEFAULT_COLORS = ["blue", "green", "clay", "plum"];
 /** The top folder of a path ("" is the top of the notes folder). */
 export const topOf = (folder: string) => folder.split("/")[0];
 
+/** Names that are things to copy unless the owner says otherwise. */
+const COPY_NAMES = /prompt|snippet|template|repl|command|signature|boilerplate|copy/i;
+
+/** Whether a collection holds things to copy (cards in the library and the picker) or pages (found with Ctrl K).
+ * The inbox, the journal and the top of the folder are pages. */
+export function toCopy(folder: string, faces?: Record<string, TopicFace>): boolean {
+  const top = topOf(folder);
+  if (!top || top === "inbox" || top === "journal") return false;
+  const set = faces?.[top]?.copy;
+  if (set === "yes") return true;
+  if (set === "no") return false;
+  return COPY_NAMES.test(top);
+}
+
 /** The colour id a collection draws with. */
 export function colorOf(folder: string, faces?: Record<string, TopicFace>): string {
   const top = topOf(folder);

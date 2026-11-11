@@ -212,6 +212,8 @@ export interface CaptureContext {
 export interface TopicFace {
   color: string;
   mark: string;
+  /** `yes` things to copy, `no` pages, `""` by its name (library/faces.ts `toCopy`). */
+  copy?: string;
 }
 
 export interface AppEvents {
@@ -396,7 +398,7 @@ async function tauriApi(): Promise<Api> {
     notesBetween: (from, to) => invoke("notes_between", { from, to }),
     notesHaving: (what) => invoke("notes_having", { what }),
     topicFaces: () => invoke("topic_faces"),
-    setTopicFace: (top, face) => invoke("set_topic_face", { top, color: face.color, mark: face.mark }),
+    setTopicFace: (top, face) => invoke("set_topic_face", { top, color: face.color, mark: face.mark, copy: face.copy ?? "" }),
     saveAttachment: (folder, name, bytes) =>
       invoke("save_attachment", bytes, {
         headers: { "x-petrel-folder": encodeURIComponent(folder), "x-petrel-name": encodeURIComponent(name) },

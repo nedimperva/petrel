@@ -1,8 +1,9 @@
-// The library (Ctrl L): everything you keep, as cards. "All" is the shelf, one row per collection with the most
-// used first; a collection's tab shows all its cards at their natural height. The arrow keys move between cards,
-// Enter opens one as a sheet, c copies, e edits, p pins, t picks the collection's colour and mark, / filters, and in
-// the inbox m files the card you are on and r reviews the inbox one card at a time. A note changed in two places
-// shows a card at the top until it is settled (Settle.tsx).
+// The library (Ctrl L): what you copy, as cards. Only collections of things to copy (Prompts, Snippets: `t` sets
+// it) are rows of cards; collections of pages are tiles at the end, and their notes are found with Ctrl K. "All" is
+// the shelf, the most used first; a collection's tab shows all its cards. The arrow keys move between cards, Enter
+// opens one as a sheet, c copies, e edits, p pins, t sets the collection's look and kind, / filters, and in the inbox
+// m files the card you are on and r reviews the inbox one card at a time. A note changed in two places is a card
+// in the inbox until it is settled (Settle.tsx).
 
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 import { api, errText, type AiSuggestion, type Conflict, type Note, type NoteSummary } from "../api";
@@ -14,7 +15,8 @@ import { folderName, say, typing, undoLast } from "../ui";
 import type { Tab } from "../TitleBar";
 import Card, { topOf } from "./Card";
 import FacePicker from "./FacePicker";
-import Mark, { loadFaces } from "./Mark";
+import Mark, { faces, loadFaces } from "./Mark";
+import { toCopy } from "./faces";
 import Settle from "./Settle";
 import Sheet from "./Sheet";
 
@@ -108,15 +110,30 @@ export default function Library(p: {
   const inbox = createMemo(() => (p.data?.notes ?? []).filter((n) => n.folder === "inbox").sort((a, b) => b.modifiedAt - a.modifiedAt));
 
   /** Shelf rows, or the one collection's cards. */
+  const conflicts = () => p.data?.conflicts ?? [];
+  const pageCols = createMemo(() => cols().filter((c) => !toCopy(c.top, faces())));
   const shelf = createMemo(() => {
     const rows: { id: string; top: string; label: string; sub: string; notes: NoteSummary[]; total: number }[] = [];
-    if (inbox().length) rows.push({ id: "inbox", top: "inbox", label: "Inbox", sub: "captures waiting for a home", notes: inbox().filter(match), total: inbox().length });
+    if (inbox().length || conflicts().length)
+      rows.push({ id: "inbox", top: "inbox", label: "Inbox", sub: "captures waiting for a home", notes: inbox().filter(match), total: inbox().length });
     for (const c of cols()) {
+      if (!toCopy(c.top, faces())) continue;
       const ns = c.notes.filter(match);
       rows.push({ id: `c:${c.top}`, top: c.top, label: folderName(c.top), sub: c.use ? "most copied first" : "newest first", notes: ns, total: c.notes.length });
     }
-    return rows.filter((r) => r.notes.length);
+    return rows.filter((r) => r.notes.length || (r.id === "inbox" && conflicts().length && !q()));
   });
+  /** A note changed in two places: a card in the inbox until it is settled. */
+  const conflictCard = (c: Conflict) => (
+    <button type="button" class="lcard conflict" onClick={() => setSettling(c)}>
+      <div class="lcard-top">
+        <span class="lcard-where">To settle · {folderName(c.folder)}</span>
+      </div>
+      <h3 class="lcard-title">{c.title}</h3>
+      <div class="lcard-body">Changed in two places. Open it to compare the two texts and keep one, or both.</div>
+      <footer class="lcard-meta">Settle</footer>
+    </button>
+  );
   const items = createMemo((): NoteSummary[] => {
     if (p.tab === "all") return shelf().flatMap((r) => r.notes.slice(0, ROW));
     if (p.tab === "inbox") return inbox().filter(match);
@@ -353,32 +370,13 @@ export default function Library(p: {
         </Show>
       </div>
 
-      <Show when={p.tab === "all" && p.data?.conflicts.length}>
-        <section class="shelf-row">
-          <div class="shelf-head">
-            <h2>To settle</h2>
-            <span class="muted small">changed in two places · pick the text to keep</span>
-          </div>
-          <div class="shelf-cards">
-            <For each={p.data!.conflicts}>
-              {(c) => (
-                <button type="button" class="lcard conflict" onClick={() => setSettling(c)}>
-                  <div class="lcard-top">
-                    <span class="lcard-where">{folderName(c.folder)}</span>
-                  </div>
-                  <h3 class="lcard-title">{c.title}</h3>
-                  <div class="lcard-body">Two texts of this note: the one in it now and one kept beside it. Open to compare.</div>
-                  <footer class="lcard-meta">Settle</footer>
-                </button>
-              )}
-            </For>
-          </div>
-        </section>
-      </Show>
       <Show
         when={p.tab === "all"}
         fallback={
           <div class="lib-grid">
+            <Show when={p.tab === "inbox" && !q()}>
+              <For each={conflicts()}>{conflictCard}</For>
+            </Show>
             <For each={items()}>{(n) => card(n)}</For>
             <Show when={p.tab !== "inbox"}>
               <button type="button" class="lcard add" onClick={() => p.onNew(p.tab.slice(2))}>
@@ -414,14 +412,36 @@ export default function Library(p: {
                 </Show>
               </div>
               <div class="shelf-cards">
-                <For each={r.notes.slice(0, ROW)}>{(n) => card(n)}</For>
+                <Show when={r.id === "inbox" && !q()}>
+                  <For each={conflicts()}>{conflictCard}</For>
+                </Show>
+                <For each={r.notes.slice(0, ROW - (r.id === "inbox" && !q() ? Math.min(conflicts().length, ROW) : 0))}>{(n) => card(n)}</For>
               </div>
             </section>
           )}
         </For>
+        <Show when={pageCols().length && !q()}>
+          <section class="shelf-row">
+            <div class="shelf-head">
+              <h2>Pages</h2>
+              <span class="muted small">notes you write, found with Ctrl K · t on a collection makes it one to copy</span>
+            </div>
+            <div class="page-tiles">
+              <For each={pageCols()}>
+                {(c) => (
+                  <button type="button" class="page-tile" onClick={() => p.onTab(`c:${c.top}`)}>
+                    <Mark folder={c.top} size={12} />
+                    <span>{folderName(c.top)}</span>
+                    <span class="muted small">{c.notes.length}</span>
+                  </button>
+                )}
+              </For>
+            </div>
+          </section>
+        </Show>
       </Show>
 
-      <Show when={p.data && !items().length}>
+      <Show when={p.data && !items().length && !(p.tab === "all" && (pageCols().length || conflicts().length)) && !(p.tab === "inbox" && conflicts().length)}>
         <div class="empty">
           <p class="empty-title">{q() ? "Nothing matches." : p.tab === "inbox" ? "Inbox zero" : "Nothing here yet"}</p>
           <p class="muted">
