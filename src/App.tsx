@@ -376,7 +376,7 @@ export default function App() {
       void openDay(addDays(onDay()!, e.key === "ArrowLeft" ? -1 : 1));
     }
     else if (mod && e.shiftKey && k === "c" && onNote()) void copy("markdown");
-    else if (e.key === "Escape" && view().kind === "library") {
+    else if (e.key === "Escape" && view().kind === "library" && !reviewing()) {
       if (document.querySelector(".scrim")) return;
       void writing();
     } else if (e.key === "Escape" && beside() !== null && view().kind === "note" && !e.defaultPrevented && !document.querySelector(".scrim, .menu, .explain")) {

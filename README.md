@@ -14,8 +14,9 @@ shorten, continue or explain your text and answer questions from your notes, but
   you were editing, both texts are kept.
 - **Capture from anywhere.** `Ctrl Alt Space` (or a compositor keybind on Wayland), the tray,
   `petrel --new "text"`, `echo text | petrel --stdin`. Text selected in the app you were in comes along as a quote
-  with where it came from. `#recipes`, `#today` or a day (`#fri`, `#nov20`) in a capture files it there,
-  `>Groceries` adds it to that note. Opened again within two minutes, the window adds to the last capture.
+  with where it came from. `@recipes`, `@today` or a day (`@fri`, `@nov20`) in a capture files it there,
+  `@Groceries` adds it to that note (`#` stays a heading). Opened again within two minutes, the window adds to
+  the last capture.
 - **File it later, one card at a time.** Inbox review (`r` in the library): a number files a capture, the places
   you use most come first. Collections get a colour and a mark of their own (`t`).
 - **A page for today.** `Ctrl D` opens `journal/YYYY-MM-DD.md`; `Alt ←` and `Alt →` go through the days. On
@@ -41,15 +42,15 @@ shorten, continue or explain your text and answer questions from your notes, but
 | Where | Keys |
 |---|---|
 | Anywhere | `Ctrl K` search, commands or ask (`in:travel`, `pinned`, `today`, `this week`, `has:link`, `has:picture`, `has:task`) · `Ctrl P` find a note · `Ctrl N` new note · `Ctrl D` today's page · `Ctrl L` library · `Ctrl Tab` the note before (hold `Ctrl` for the last few) · `Ctrl \` a note beside · `Ctrl ,` settings |
-| Ctrl K | an answer: `Tab` ask again · `Ctrl Enter` save the exchange · "Open tasks in every note": `x` tick · `Enter` open |
-| Today's page | `Alt ←` `Alt →` other days · `Enter` on an empty line stamps the time · `Ctrl J` or `/` the week |
-| A note | `Ctrl J` AI (`↓` your prompts) · `/` on an empty line for AI · `Ctrl Shift C` copy as Markdown · `Ctrl H` history · `[[` link · `Alt Enter` follow it · `Shift Enter` open it beside · `Esc` close the note beside |
-| Library | arrows or `h` `j` `k` `l` move · `Enter` open · `c` copy · `e` edit · `p` pin · `t` colour and mark · `/` filter · `m` file an inbox card · `r` review the inbox · `z` undo · `Esc` back to writing |
+| Ctrl K | the last row asks your notes · an answer: `Tab` ask again · `Ctrl Enter` save the exchange · "Open tasks in every note": `x` tick · `Enter` open · `Esc` in a panel goes back to Ctrl K |
+| Today's page | `Alt ←` `Alt →` other days · `Enter` on an empty line stamps the time · the week is in `Ctrl K` |
+| A note | `Ctrl J` or `/` on an empty line: the AI menu (`1`–`9` pick, type to narrow or to ask; your prompts at the end) · `Ctrl Shift C` copy as Markdown · `Ctrl H` history · `[[` link · `Alt Enter` follow it · `Shift Enter` open it beside · `Esc` close the note beside |
+| Library | cards of what you copy, pages as tiles · arrows or `h` `j` `k` `l` move · `Enter` open · `c` copy · `e` edit · `p` pin · `t` look, and pages or things to copy · `/` filter · `m` file an inbox card · `r` the inbox one card at a time · `z` undo · `Esc` back to writing |
 | Inbox review | `1`–`6` file · `/` somewhere else · `Space` keep for later · `e` edit · `d` delete · `s` suggest a home · `z` undo · `Esc` stop |
-| An opened card | `Enter` copy (fill the blanks first) · `Tab` next blank, then next version · `↑` earlier answers · `1`–`9` pick a choice · `e` edit · in the inbox: `m` move · `s` suggest a home · `1`–`3` pick one · `d` delete |
-| To settle | `1` keep the note · `2` keep the other text · `b` keep both · `Esc` later |
-| Capture window | `#topic`, `#today`, `#fri`, `#nov20` or `>Note` says where it goes · `Tab` choose from a list · `Esc` done (an empty capture is dropped) · `Ctrl Enter` done, or a new capture when adding to the last one |
-| Quick picker | type to find · `Enter` copy and close · `Tab` next version, then next blank · `Ctrl O` open in Petrel |
+| An opened card | `Enter` copy (fill the blanks first) · `Tab` next blank · `Alt ←` `Alt →` other versions · `↑` earlier answers · `1`–`9` pick a choice · `e` edit · in the inbox: `m` move · `s` suggest a home · `1`–`3` pick one · `d` delete |
+| To settle (a card in the inbox) | `1` keep the note · `2` keep the other text · `3` or `b` keep both · `Esc` later |
+| Capture window | `@topic`, `@today`, `@fri`, `@nov20` or `@Note` says where it goes · `Ctrl K` choose from a list · `Esc` done (an empty capture is dropped) · `Ctrl Enter` done, or a new capture when adding to the last one |
+| Quick picker | type to find (things to copy; matching notes after them) · `Enter` copy and close · `Alt ←` `Alt →` other versions · `Tab` next blank · `Ctrl O` open in Petrel |
 
 The design: [docs/design/petrel.md](docs/design/petrel.md). Notes rules: [docs/design/notes.md](docs/design/notes.md).
 Command line: [docs/cli.md](docs/cli.md).
@@ -93,17 +94,31 @@ Debug builds keep their database at `<app data>/dev/petrel.db`, apart from an in
 Petrel sets `WEBKIT_DISABLE_DMABUF_RENDERER=1` itself (set it to `0` to opt out). On Hyprland the window class is
 `petrel`; to float it: `windowrulev2 = float, class:^(petrel)$`.
 
-`petrel --capture` opens the small capture window (or focuses it); a second launch hands the flag to the running
-Petrel. On Wayland every Petrel window shares the app id, so Hyprland rules match the capture window by title:
+`petrel --capture` opens the small capture window (or focuses it), `petrel --picker` the quick picker; a second
+launch hands the flag to the running Petrel. Bind them in Hyprland:
 
 ```
 bind = SUPER, N, exec, petrel --capture
-windowrulev2 = float, title:^(Petrel capture)$
-windowrulev2 = size 560 320, title:^(Petrel capture)$
-windowrulev2 = center, title:^(Petrel capture)$
+bind = SUPER, V, exec, petrel --picker
 ```
 
-`Esc` or `Ctrl Enter` saves and closes it; `Tab` picks a note or collection to file it in. The capture window stays on top.
+On Hyprland (Omarchy) Petrel floats both windows, sizes them, centres them and pins them to every workspace
+itself, through `hyprctl`, each time they open, so no window rule is needed. If you want rules anyway: every Petrel
+window shares the app id, so match by title. Hyprland before 0.48:
+
+```
+windowrulev2 = float, title:^(Petrel (capture|picker))$
+windowrulev2 = center, title:^(Petrel (capture|picker))$
+windowrulev2 = pin, title:^(Petrel (capture|picker))$
+```
+
+From 0.48 `windowrulev2` is gone and `windowrule` takes the same arguments (`windowrule = float, title:^(Petrel
+(capture|picker))$`, and the same for `center` and `pin`). Hyprland 0.53 changed rules to `match:` fields with
+effects (`windowrule = match:title ^(Petrel (capture|picker))$, float on, center on, pin on`); check the Hyprland
+wiki for the version you run.
+
+`Esc` or `Ctrl Enter` saves and closes it; `@recipes`, `@today`, `@fri` or `@Groceries` says where it goes, and
+`Ctrl K` picks a place from a list. The capture window stays on top.
 Opened again within two minutes, it adds to the last capture; `Ctrl Enter` makes the new text its own.
 In `npm run dev` the capture window is [http://localhost:1420/?capture](http://localhost:1420/?capture).
 

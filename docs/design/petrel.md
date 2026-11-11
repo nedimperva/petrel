@@ -71,7 +71,7 @@ It is not for sale; it may be open source later.
 
 Canvas: https://claude.ai/artifact/Sw6CPjnpGXY6Vz9LnVCQ5d. Out for now: one line from a terminal, the greeting page.
 
-- **Capture with a word.** `#recipes` (a top folder), `#today` or `>Groceries` (a note) in the capture window says
+- **Capture with a word** (now `@`, see the model). `@recipes` (a top folder), `@today` or `@Groceries` (a note) in the capture window says
   where it goes; the list offers places as you type, the word is taken out, and a word left in the text still
   routes it when you press Esc (`src/inbox/route.ts`).
 - **The quote comes along.** Text selected in the app in front when the capture key is pressed starts the capture
@@ -100,10 +100,10 @@ Canvas: https://claude.ai/artifact/Sw6CPjnpGXY6Vz9LnVCQ5d. Out for now: one line
 
 Page: https://claude.ai/artifact/Kan675aYKsn9pvSgDMGRqq. Built: 1, 2, 4–12, 14, 16–19. Not now: 3, 13, 15, 20.
 
-- **Capture for a day.** `#fri`, `#tomorrow`, `#nov20` (also `20nov`, `2026-11-20`, weekday names) file the
+- **Capture for a day.** `@fri`, `@tomorrow`, `@nov20` (also `20nov`, `2026-11-20`, weekday names) file the
   capture on that day's page, under the time; offered as you type beside the folders. A weekday is the next one,
   not today; a date more than a month gone is next year's. A collection named like a day wins, except over
-  `#today` (`dayWord` in `src/journal/days.ts`).
+  `@today` (`dayWord` in `src/journal/days.ts`).
 - **Keep going.** The capture window opened again within two minutes of the last capture shows it faded and adds
   the new text under it, in the same file (`ui.capture.last`). `Ctrl Enter` makes the new text its own capture.
 - **Paste that stays clean.** Pasted HTML becomes Markdown: headings, lists, links (http, https, mailto), bold,

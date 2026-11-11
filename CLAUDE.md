@@ -5,7 +5,16 @@ Markdown files in one folder; a Rust engine (`crates/petrel-core`) indexes them 
 (`src-tauri`) adds windows, tray, hotkeys and AI, and a SolidJS UI (`src`) draws it. The README covers setup and
 keys; `docs/design/petrel.md` is the design; this file covers state and decisions that aren't visible from the code.
 
-## Where things stand (2026-11-11, evening)
+## Where things stand (2026-11-11, night)
+
+- **Coherence pass (owner asked 2026-11-11), branch `claude/project-thread-4an9hg`, PR to `main`:** the model and
+  the key grammar are at the top of `docs/design/petrel.md` (write, find, copy; three kinds of screen; one meaning
+  per key). Collections are pages or things to copy (`copy: yes|no` in `.petrel`, `toCopy` in
+  `src/library/faces.ts`); the library's cards and the picker show only things to copy. `@` is the only capture
+  routing sign. Ctrl J and `/` open one AI menu. Review is a mode of the library (`reviewing`), the week and history
+  are panels like Ctrl K, Esc from a panel goes back to Ctrl K, conflicts are inbox cards. `KeyHints` in `ui.tsx`
+  is the key line on every screen. On Hyprland `src-tauri/src/hypr.rs` floats, sizes, centres and pins the capture
+  window and the picker through `hyprctl` (not tried on Linux).
 
 - **Redesign implemented (owner decisions 2026-11-09/10, canvas https://claude.ai/artifact/2iMBXDeW8F2UVV1tLguc7g),
   on a PR based on the notes PR (#9).** No actions, no drafts UI, no `petrel://` links, no `petrel run`: those
