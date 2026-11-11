@@ -58,6 +58,53 @@ Canvas: https://claude.ai/artifact/Sw6CPjnpGXY6Vz9LnVCQ5d. Out for now: one line
 - **The week, when you ask**: counts and open tasks from the files, then a few sentences from Claude after Enter,
   which says first how many notes and words it will read. Enter keeps it as `journal/YYYY-Www.md`.
 
+## Twenty more (chosen 2026-11-11)
+
+Page: https://claude.ai/artifact/Kan675aYKsn9pvSgDMGRqq. Built: 1, 2, 4–12, 14, 16–19. Not now: 3, 13, 15, 20.
+
+- **Capture for a day.** `#fri`, `#tomorrow`, `#nov20` (also `20nov`, `2026-11-20`, weekday names) file the
+  capture on that day's page, under the time; offered as you type beside the folders. A weekday is the next one,
+  not today; a date more than a month gone is next year's. A collection named like a day wins, except over
+  `#today` (`dayWord` in `src/journal/days.ts`).
+- **Keep going.** The capture window opened again within two minutes of the last capture shows it faded and adds
+  the new text under it, in the same file (`ui.capture.last`). `Ctrl Enter` makes the new text its own capture.
+- **Paste that stays clean.** Pasted HTML becomes Markdown: headings, lists, links (http, https, mailto), bold,
+  italic, code, quotes; the rest is dropped to its words. Parsed with `DOMParser` (inert, nothing runs or loads),
+  inserted as text only. The plain text goes in first, so `Ctrl Z` gives it back (`src/editor/paste.ts`).
+- **Headings in the margin.** Three or more headings show in the right margin on a wide window, the current one
+  marked; a click jumps; the list steps back while you type (`src/note/outline.ts`).
+- **A note beside.** `Ctrl \` or `Shift Enter` on a `[[link]]`: a second note on the right, read-only until
+  clicked, one at a time, `Esc` closes, "Open here" swaps. Never the same note on both sides (`src/note/Beside.tsx`).
+- **Back.** `Ctrl Tab` goes to the note before; held, the last few to step through. The same list is `Ctrl K`'s
+  empty state (`ui.recent`).
+- **Paragraph focus.** A Settings switch and a `Ctrl K` line: the other paragraphs fade to about a third while the
+  editor has the focus (`ui.focus`).
+- **Blanks that fill themselves.** `{{clipboard}}`, `{{today}}`, `{{selection}}` (from the picker: what was
+  selected in the app in front) start filled. `{{tone: formal / casual / blunt}}` is a choice, picked with the
+  number keys. `{{name|default}}` and `\{{` as before (`src/blanks.ts`).
+- **Blanks remember.** The last five answers per blank name, in the database's UI settings (`ui.blanks`), never in
+  the notes. A field starts with the last; `Up` steps back; the answers are chips (`src/collection/BlankFields.tsx`).
+- **Versions on one card.** In a Prompts or Snippets note, each `## heading` starts a version (two or more make
+  versions). The card says "N versions"; `Tab` steps through them on the sheet (after the last blank) and in the
+  picker; the one copied last comes first (`ui.versions`, `src/collection/versions.ts`).
+- **The picker knows where you are.** Copies from the picker are counted per app in front (`copied_in.<app>|<path>`
+  in settings); what was used there comes first, with "N× here". Local only.
+- **Your prompts on a note.** `Ctrl J` lists the Prompts collection under the built-in tasks (`↓` to choose). A
+  prompt runs on the selection, or the whole note when nothing is selected; `{{text}}`, `{{code}}`, `{{selection}}`
+  and `{{note}}` are that text, other blanks are asked. The result is shown beside the old text with Keep and Drop,
+  like Tidy (AI task `prompt`; a version first).
+- **Ask again.** After an answer in `Ctrl K`, `Tab` opens a follow-up: the earlier turns and the same notes go with
+  it. `Ctrl Enter` keeps the whole exchange and its sources as one note.
+- **The live folder.** The folder is watched from Rust (`notify`, 600 ms debounce, `src-tauri/src/watch.rs`); only
+  the changed files are read again (`Store::scan_paths`). The open note reloads where you were, with "Updated from
+  Drive" in the footer, when nothing typed is waiting to be saved; otherwise the conflict-copy rule holds. The rescan
+  on focus stays for folders that send no events.
+- **Settle a conflict.** A "To settle" card in the library for each note with a conflict copy; both texts side by
+  side with the differences marked (`src/versions/diff.ts`); keep left, keep right, or keep both (the copy renamed
+  `Title (other)`). The side not kept goes to `.trash/`; one undo (`Store::settle_conflict`).
+- **Open tasks.** A `Ctrl K` page with every unticked `- [ ]` in every note (from the engine, `Store::open_tasks`),
+  grouped by note, newest first. `x` ticks it in the file (`Store::tick_task`, one undo), `Enter` opens the note.
+
 ## Rules
 
 - **Files are the truth.** Every note is a `.md` file in one folder the owner picks, ideally inside Google
@@ -96,5 +143,5 @@ On Wayland the compositor binds the keys: `bind = SUPER, N, exec, petrel --captu
 
 ## Not yet
 
-A local model as a second AI provider. The page's link in a capture's quote on Linux. A file watcher (the folder is rescanned when the window comes to the
-front instead). A real-window check on Windows of this design.
+A local model as a second AI provider. The page's link in a capture's quote on Linux. A real-window check on
+Windows of this design. The note beside does not reload when its file changes on disk (the main note does).

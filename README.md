@@ -14,17 +14,25 @@ shorten, continue or explain your text and answer questions from your notes, but
   you were editing, both texts are kept.
 - **Capture from anywhere.** `Ctrl Alt Space` (or a compositor keybind on Wayland), the tray,
   `petrel --new "text"`, `echo text | petrel --stdin`. Text selected in the app you were in comes along as a quote
-  with where it came from. `#recipes` or `#today` in a capture files it there, `>Groceries` adds it to that note.
+  with where it came from. `#recipes`, `#today` or a day (`#fri`, `#nov20`) in a capture files it there,
+  `>Groceries` adds it to that note. Opened again within two minutes, the window adds to the last capture.
 - **File it later, one card at a time.** Inbox review (`r` in the library): a number files a capture, the places
   you use most come first. Collections get a colour and a mark of their own (`t`).
 - **A page for today.** `Ctrl D` opens `journal/YYYY-MM-DD.md`; `Alt ←` and `Alt →` go through the days. On
   today's page, Enter on an empty line starts the next entry with the time.
 - **Pictures.** Paste or drop one into a note: it is saved next to the note in `attachments/` and moves with it.
 - **Copy is the action.** `Ctrl K` has Copy, Copy as Markdown and Copy formatted. The quick picker
-  (`Ctrl Alt V`) finds a prompt or snippet from any app, fills its blanks and copies it.
+  (`Ctrl Alt V`) finds a prompt or snippet from any app, fills its blanks and copies it; what you used in that app
+  comes first. Blanks can fill themselves (`{{clipboard}}`, `{{today}}`, `{{selection}}`), offer choices
+  (`{{tone: formal / casual}}`) and remember your last answers. `## headings` in a prompt are versions of it.
+- **Two notes at once.** `Ctrl \` opens a second note beside the one you write in; `Ctrl Tab` goes back to the
+  last one. A note with headings shows them in the margin.
+- **The folder is live.** A note changed in Drive reloads where you were; a note changed in two places gets a
+  card in the library to settle it side by side. Pasted web pages come in as clean Markdown.
 - **AI on request.** `Ctrl J` on a note: tidy, shorten, make a list, continue, or a custom ask. The old text is
-  shown struck through until you keep or drop the change; a version is taken first. `Ctrl K` then a question asks
-  your notes. The week, when you ask: what you wrote, what is still open, and a few sentences on it. Needs an
+  shown struck through until you keep or drop the change; a version is taken first. Your own prompts (the Prompts
+  collection) are on `Ctrl J` too. `Ctrl K` then a question asks your notes, and `Tab` asks again. The week, when
+  you ask: what you wrote, what is still open, and a few sentences on it. Needs an
   Anthropic API key in Settings, kept in the OS keyring.
 - **Never loses text.** Autosave, versions (`Ctrl H`), deleted notes go to `.trash/` in the folder, undo with `z`.
 
@@ -32,14 +40,16 @@ shorten, continue or explain your text and answer questions from your notes, but
 
 | Where | Keys |
 |---|---|
-| Anywhere | `Ctrl K` search, commands or ask (`in:travel`, `pinned`, `today`, `this week`, `has:link`, `has:picture`, `has:task`) · `Ctrl P` find a note · `Ctrl N` new note · `Ctrl D` today's page · `Ctrl L` library · `Ctrl ,` settings |
+| Anywhere | `Ctrl K` search, commands or ask (`in:travel`, `pinned`, `today`, `this week`, `has:link`, `has:picture`, `has:task`) · `Ctrl P` find a note · `Ctrl N` new note · `Ctrl D` today's page · `Ctrl L` library · `Ctrl Tab` the note before (hold `Ctrl` for the last few) · `Ctrl \` a note beside · `Ctrl ,` settings |
+| Ctrl K | an answer: `Tab` ask again · `Ctrl Enter` save the exchange · "Open tasks in every note": `x` tick · `Enter` open |
 | Today's page | `Alt ←` `Alt →` other days · `Enter` on an empty line stamps the time · `Ctrl J` or `/` the week |
-| A note | `Ctrl J` AI · `/` on an empty line for AI · `Ctrl Shift C` copy as Markdown · `Ctrl H` history · `[[` link |
+| A note | `Ctrl J` AI (`↓` your prompts) · `/` on an empty line for AI · `Ctrl Shift C` copy as Markdown · `Ctrl H` history · `[[` link · `Alt Enter` follow it · `Shift Enter` open it beside · `Esc` close the note beside |
 | Library | arrows or `h` `j` `k` `l` move · `Enter` open · `c` copy · `e` edit · `p` pin · `t` colour and mark · `/` filter · `m` file an inbox card · `r` review the inbox · `z` undo · `Esc` back to writing |
 | Inbox review | `1`–`6` file · `/` somewhere else · `Space` keep for later · `e` edit · `d` delete · `s` suggest a home · `z` undo · `Esc` stop |
-| An opened card | `Enter` copy (fill the blanks first) · `e` edit · in the inbox: `m` move · `s` suggest a home · `1`–`3` pick one · `d` delete |
-| Capture window | `#topic`, `#today` or `>Note` says where it goes · `Tab` choose from a list · `Ctrl Enter` or `Esc` done (an empty capture is dropped) |
-| Quick picker | type to find · `Enter` copy and close · `Tab` next blank · `Ctrl O` open in Petrel |
+| An opened card | `Enter` copy (fill the blanks first) · `Tab` next blank, then next version · `↑` earlier answers · `1`–`9` pick a choice · `e` edit · in the inbox: `m` move · `s` suggest a home · `1`–`3` pick one · `d` delete |
+| To settle | `1` keep the note · `2` keep the other text · `b` keep both · `Esc` later |
+| Capture window | `#topic`, `#today`, `#fri`, `#nov20` or `>Note` says where it goes · `Tab` choose from a list · `Esc` done (an empty capture is dropped) · `Ctrl Enter` done, or a new capture when adding to the last one |
+| Quick picker | type to find · `Enter` copy and close · `Tab` next version, then next blank · `Ctrl O` open in Petrel |
 
 The design: [docs/design/petrel.md](docs/design/petrel.md). Notes rules: [docs/design/notes.md](docs/design/notes.md).
 Command line: [docs/cli.md](docs/cli.md).
@@ -94,6 +104,7 @@ windowrulev2 = center, title:^(Petrel capture)$
 ```
 
 `Esc` or `Ctrl Enter` saves and closes it; `Tab` picks a note or collection to file it in. The capture window stays on top.
+Opened again within two minutes, it adds to the last capture; `Ctrl Enter` makes the new text its own.
 In `npm run dev` the capture window is [http://localhost:1420/?capture](http://localhost:1420/?capture).
 
 Petrel keeps running in the tray: closing the window hides it, and the tray menu has Capture, Quick picker, Show,

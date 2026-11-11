@@ -5,7 +5,7 @@ Markdown files in one folder; a Rust engine (`crates/petrel-core`) indexes them 
 (`src-tauri`) adds windows, tray, hotkeys and AI, and a SolidJS UI (`src`) draws it. The README covers setup and
 keys; `docs/design/petrel.md` is the design; this file covers state and decisions that aren't visible from the code.
 
-## Where things stand (2026-11-11, later)
+## Where things stand (2026-11-11, evening)
 
 - **Redesign implemented (owner decisions 2026-11-09/10, canvas https://claude.ai/artifact/2iMBXDeW8F2UVV1tLguc7g),
   on a PR based on the notes PR (#9).** No actions, no drafts UI, no `petrel://` links, no `petrel run`: those
@@ -27,6 +27,18 @@ keys; `docs/design/petrel.md` is the design; this file covers state and decision
   writing font, the petrel, an optional typing sound, the week on Ctrl J (`ai_week`). Left out by the owner: one line
   from a terminal, the greeting page. Not tried: the selection quote and the browser address in a real window on
   either OS. The owner chose to keep this work on `main` (no PR), 2026-11-11.
+- **Twenty more (owner picks 2026-11-11, page https://claude.ai/artifact/Kan675aYKsn9pvSgDMGRqq), on `main`:**
+  1, 2, 4–12, 14, 16–19 built; 3, 13, 15, 20 left out. Capture for a day (`dayWord`), keep going
+  (`ui.capture.last`), clean paste (`src/editor/paste.ts`), headings in the margin (`src/note/outline.ts`), a note
+  beside (`src/note/Beside.tsx`, `Ctrl \`), Back (`Ctrl Tab`, `ui.recent`), paragraph focus (`ui.focus`), blanks
+  that fill themselves, choose and remember (`src/blanks.ts`, `src/collection/BlankFields.tsx`, `ui.blanks`),
+  versions on one card (`src/collection/versions.ts`, `ui.versions`), picker counts per app (`copied_in.` settings,
+  `picker_context`), your prompts on Ctrl J (AI task `prompt`), ask again (`ai_ask` with `earlier` and `notes`),
+  the live folder (`src-tauri/src/watch.rs`, `Store::scan_paths`, event `petrel-folder`), settle a conflict
+  (`Store::conflicts`/`settle_conflict`, `src/library/Settle.tsx`), open tasks (`Store::open_tasks`/`tick_task`,
+  `src/palette/Tasks.tsx`). Engine submodules live in `crates/petrel-core/src/notes/`. Tried in a browser against
+  the fake store; not tried: the watcher with Drive for desktop, `Ctrl \` on a Bosnian keyboard (it also matches
+  the physical Backslash key), the picker's app ranking and `{{selection}}` in a real window.
 - Resources read under App's `<Suspense>` suspend the whole page (focus leaves the editor): new screens use signals.
 - Tried headless: the debug build boots under `xvfb-run -a dbus-run-session` (capture, `--new`, `--stdin` and the
   picker work); the UI was driven with Playwright against the fake store (`src/fake.ts`). Not tried: a real
@@ -61,7 +73,7 @@ documented in the README), global shortcuts are the compositor's job on Wayland 
 - Rust: `anyhow::Result` in the engine; commands return `Result<T, String>`; serde `camelCase` on the wire; store
   methods synchronous behind a `Mutex`, `spawn_blocking` when slow.
 - UI: SolidJS signals, no state library; keyboard handling in `App.tsx`; tokens only; JS bundle budget 300 kB gz
-  including CodeMirror (225 kB on 2026-11-10).
+  including CodeMirror (225 kB on 2026-11-10, 270 kB on 2026-11-11 after the twenty more, 276 kB with the fake store).
 - Comments explain why, not what. Short, plain sentences in docs and UI text.
 
 ## Roadmap
