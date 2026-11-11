@@ -39,6 +39,7 @@ export default function TitleBar(p: {
   title: string;
   sidebar: boolean;
   onSidebar(): void;
+  onSettings(): void;
   onNew(): void;
   onSearch(): void;
 }) {
@@ -80,6 +81,13 @@ export default function TitleBar(p: {
       <div class="titlebar-end">
         <button type="button" class="icon-btn" onClick={p.onSearch} title="Find or ask (Ctrl K)" aria-label="Find or ask">
           {Icon.search}
+        </button>
+        <button type="button" class="icon-btn" onClick={p.onSettings} title="Settings (Ctrl ,)" aria-label="Settings">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 7h10M18 7h2M4 17h2M10 17h10" />
+            <circle cx="16" cy="7" r="2" />
+            <circle cx="8" cy="17" r="2" />
+          </svg>
         </button>
         <Show when={ownFrame}>
           <div class="window-buttons">

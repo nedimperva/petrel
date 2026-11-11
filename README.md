@@ -42,6 +42,8 @@ shorten, continue or explain your text and answer questions from your notes, but
 | Where | Keys |
 |---|---|
 | Anywhere | `Ctrl K` search, commands or ask (`in:travel`, `pinned`, `today`, `this week`, `has:link`, `has:picture`, `has:task`) · `Ctrl P` find a note · `Ctrl N` new note · `Ctrl D` today's page · `Ctrl L` library · `Ctrl 0` the sidebar · `Ctrl Tab` the note before (hold `Ctrl` for the last few) · `Ctrl Shift Enter` a note beside · `Ctrl ,` settings |
+| Settings | `Ctrl ,` or the sliders in the title bar: General, Writing, Look, Capture, Keys (click a shortcut, press the new keys; on Omarchy the capture and picker show the `bind` line to copy), AI, About |
+| Shortcuts | `Ctrl /`, or `?` when not typing: every shortcut on this computer |
 | Sidebar | click a collection to open it · `F2` or a double-click renames it · right-click or `⋯`: colour and mark, pages or to copy, a collection inside, show in the folder, the trash · "New collection" makes one |
 | Ctrl K | the last row asks your notes · an answer: `Tab` ask again · `Ctrl Enter` save the exchange · "Open tasks in every note": `x` tick · `Enter` open · `Esc` in a panel goes back to Ctrl K |
 | Today's page | opens on a new line with the time · `Alt ←` `Alt →` other days · `Enter` on an empty line stamps the time · the week is in `Ctrl K` |

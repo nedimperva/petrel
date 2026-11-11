@@ -1,27 +1,66 @@
-// Settings (`Ctrl ,`): the Petrel folder (put it inside Google Drive to sync), AI with your own Claude key, the
-// two hotkeys, start at login, how the page looks and feels.
+// Settings (`Ctrl ,`, or the sliders in the title bar): a screen of its own, the categories on the left. General
+// (the folder, start at login), Writing, Look, Capture, Keys (every shortcut on this computer, changeable), AI and
+// About. Each change is saved at once; Esc goes back.
 
-import { createResource, createSignal, For, Show } from "solid-js";
+import { createResource, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { api, errText, type AiStatus, type DesktopSettings } from "../api";
-import { say } from "../ui";
+import { comboOf, conflicts, customKeys, hyprBind, keyOf, platform, setCustomKeys, SHORTCUTS, typesCharacter, type Shortcut } from "../keys";
+import { keyChips } from "../Shortcuts";
+import { Kbd, say } from "../ui";
 import { tick } from "../joy/sound";
 import { applyPrefs, FONTS, prefs, setPrefs, SIZES, storedValue, THEMES, type Prefs } from "./prefs";
 
-/** Ctrl+Alt with a letter, digit or sign is AltGr+that key to Windows, which types a character on many layouts. */
-export function typesCharacter(hotkey: string): boolean {
-  const parts = hotkey.split("+").map((x) => x.trim().toLowerCase());
-  const key = parts[parts.length - 1] ?? "";
-  const mods = parts.slice(0, -1);
-  const altGr = mods.includes("alt") && (mods.includes("ctrl") || mods.includes("control"));
-  return altGr && !mods.includes("shift") && (key.length === 1 || /^(key|digit)[a-z0-9]$/.test(key));
+export { typesCharacter };
+
+export type Section = "general" | "writing" | "look" | "capture" | "keys" | "ai" | "about";
+
+const SECTIONS: { id: Section; label: string; icon: string }[] = [
+  { id: "general", label: "General", icon: "M3 7h18M3 12h18M3 17h18" },
+  { id: "writing", label: "Writing", icon: "M4 20h4L19 9l-4-4L4 16z" },
+  { id: "look", label: "Look", icon: "M12 3a9 9 0 1 0 9 9c0-1-1-2-2-2h-2a2 2 0 0 1-2-2V6c0-1-1-3-3-3z" },
+  { id: "capture", label: "Capture", icon: "M4 13h4l2 3h4l2-3h4M4 13l2-8h12l2 8v6H4z" },
+  { id: "keys", label: "Keys", icon: "M3 7h18v10H3zM7 11h1M11 11h1M15 11h2M7 14h10" },
+  { id: "ai", label: "AI", icon: "M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6" },
+  { id: "about", label: "About", icon: "M12 8h.01M11 12h1v5h1M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z" },
+];
+
+function Row(p: { label: string; hint?: string; children: JSX.Element }) {
+  return (
+    <div class="set-row">
+      <div class="set-label">
+        <span>{p.label}</span>
+        <Show when={p.hint}>
+          <span class="muted small">{p.hint}</span>
+        </Show>
+      </div>
+      <div class="set-control">{p.children}</div>
+    </div>
+  );
 }
 
-export default function Settings(p: { section?: "ai"; onClose(): void; onRoot(root: string): void; onAi(s: AiStatus): void }) {
+function Toggle(p: { on: boolean; label: string; hint?: string; onChange(on: boolean): void }) {
+  return (
+    <label class="set-row set-toggle">
+      <div class="set-label">
+        <span>{p.label}</span>
+        <Show when={p.hint}>
+          <span class="muted small">{p.hint}</span>
+        </Show>
+      </div>
+      <input type="checkbox" role="switch" checked={p.on} onChange={(e) => p.onChange(e.currentTarget.checked)} />
+    </label>
+  );
+}
+
+export default function Settings(p: { section?: Section | "all"; onClose(): void; onRoot(root: string): void; onAi(s: AiStatus): void }) {
+  const [at, setAt] = createSignal<Section>(p.section && p.section !== "all" ? p.section : "general");
   const [info, { refetch: refetchInfo }] = createResource(async () => (await api()).notesInfo());
+  const [app] = createResource(async () => (await api()).appInfo());
   const [desk, { mutate: setDesk }] = createResource<DesktopSettings>(async () => (await api()).desktopSettings());
   const [ai, { mutate: setAi }] = createResource<AiStatus>(async () => (await api()).aiStatus());
   const [key, setKey] = createSignal("");
-  const [hk, setHk] = createSignal<{ capture?: string; picker?: string }>({});
+  // The shortcut waiting for its new key.
+  const [listening, setListening] = createSignal<string | null>(null);
 
   const pref = async <K extends keyof Prefs>(k: K, v: Prefs[K]) => {
     const next = { ...prefs(), [k]: v };
@@ -57,210 +96,310 @@ export default function Settings(p: { section?: "ai"; onClose(): void; onRoot(ro
     }
   }
 
-  async function setHotkey(which: "capture" | "picker") {
-    const v = hk()[which];
-    if (v === undefined) return;
-    try {
-      setDesk(await (await api()).setHotkey(which, v.trim() || null));
-      setHk({ ...hk(), [which]: undefined });
-    } catch (e) {
-      say(errText(e), { error: true });
+  // ---- keys -----------------------------------------------------------------------------------------------------
+
+  /** Global hotkeys are registered by Petrel on Windows and X11; on Wayland the compositor binds them. */
+  const systemBinds = () => desk()?.hotkeySupported !== false;
+  const shown = (s: Shortcut) => {
+    if (s.global === "capture" && systemBinds()) return desk()?.hotkey ?? "off";
+    if (s.global === "picker" && systemBinds()) return desk()?.pickerHotkey ?? "off";
+    return keyOf(s.id);
+  };
+
+  async function setShortcut(s: Shortcut, combo: string | null) {
+    setListening(null);
+    if (s.global && systemBinds()) {
+      try {
+        setDesk(await (await api()).setHotkey(s.global, combo));
+      } catch (e) {
+        say(errText(e), { error: true });
+      }
+      return;
     }
+    const mine = { ...(customKeys()[platform] ?? {}) };
+    if (combo === null || combo === s.keys[platform]) delete mine[s.id];
+    else mine[s.id] = combo;
+    const next = { ...customKeys(), [platform]: mine };
+    setCustomKeys(next);
+    await (await api()).setUiSetting("ui.keys", JSON.stringify(next)).catch((e) => say(errText(e), { error: true }));
   }
+
+  const listen = (e: KeyboardEvent) => {
+    const id = listening();
+    if (!id) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.key === "Escape") return setListening(null);
+    if (["Control", "Shift", "Alt", "Meta"].includes(e.key)) return;
+    const combo = comboOf(e);
+    if (!combo.includes("+")) return say("A shortcut needs Ctrl, Alt or Shift with the key");
+    const s = SHORTCUTS.find((x) => x.id === id);
+    if (s) void setShortcut(s, combo);
+  };
+  const escape = (e: KeyboardEvent) => {
+    if (e.key === "Escape" && !listening() && !(e.target instanceof HTMLInputElement && e.target.value)) {
+      e.preventDefault();
+      p.onClose();
+    }
+  };
+  onMount(() => {
+    document.addEventListener("keydown", listen, true);
+    document.addEventListener("keydown", escape);
+  });
+  onCleanup(() => {
+    document.removeEventListener("keydown", listen, true);
+    document.removeEventListener("keydown", escape);
+  });
+
+  const clash = () => conflicts(platform);
+  const copyBind = async (line: string) => {
+    await (await api()).copyText(line, false).catch(() => {});
+    say("Copied. Paste it into your Hyprland config (Omarchy: ~/.config/hypr/bindings.conf).");
+  };
 
   const drive = () => /google drive|googledrive|my drive/i.test(info()?.root ?? "");
 
   return (
-    <div class="scrim" onMouseDown={(e) => e.target === e.currentTarget && p.onClose()} onKeyDown={(e) => e.key === "Escape" && p.onClose()}>
-      <div class="dialog settings" tabindex={-1} ref={(el) => setTimeout(() => el.focus())}>
-        <header class="dialog-head">
-          <h2>Settings</h2>
-          <span class="grow" />
-          <button class="btn" onClick={p.onClose}>
-            Done <kbd>Esc</kbd>
-          </button>
-        </header>
-
-        <section>
-          <h3>Your Petrel folder</h3>
-          <p class="muted">Every note, capture and collection is a Markdown file here. Put it inside your Google Drive folder and Drive keeps a copy on every computer.</p>
-          <div class="row">
-            <code class="path">{info()?.root ?? "…"}</code>
-            <button class="btn" onClick={chooseFolder}>
-              Change…
+    <div class="settings-page" role="dialog" aria-label="Settings">
+      <nav class="set-nav" aria-label="Settings sections">
+        <h2>Settings</h2>
+        <For each={SECTIONS}>
+          {(s) => (
+            <button type="button" class="side-row" classList={{ on: at() === s.id }} onClick={() => setAt(s.id)}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d={s.icon} />
+              </svg>
+              <span class="side-name">{s.label}</span>
             </button>
-          </div>
-          <Show when={!drive()}>
-            <p class="muted small">
-              Windows: Google Drive for desktop, "Mirror files", then a folder under <code>My Drive</code>. Linux: rclone bisync or Syncthing to the same folder.
-            </p>
-          </Show>
-          <p class="muted small">If a note changes in two places, Petrel keeps both copies and tells you. The index lives outside the folder and is rebuilt from it.</p>
-        </section>
+          )}
+        </For>
+        <span class="grow" />
+        <button type="button" class="btn wide" onClick={p.onClose}>
+          Back to writing <kbd>Esc</kbd>
+        </button>
+      </nav>
 
-        <section classList={{ highlight: p.section === "ai" }}>
-          <h3>
-            <span class="spark">✦</span> AI
-          </h3>
-          <p class="muted">Claude runs only when you ask: Ctrl J on a selection, / on an empty line, S in the inbox, a question in Ctrl K. It uses your own Claude API key, kept in the system keyring.</p>
-          <Show
-            when={ai()?.ready}
-            fallback={
-              <form
-                class="row"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (key().trim()) void saveKey(key().trim());
-                }}
-              >
-                <input class="grow" type="password" placeholder="sk-ant-…" value={key()} onInput={(e) => setKey(e.currentTarget.value)} autocomplete="off" />
-                <button class="btn primary" type="submit" disabled={!key().trim()}>
-                  Save key
-                </button>
-              </form>
-            }
-          >
-            <div class="row">
-              <span class="ok">On · {ai()!.model}</span>
-              <span class="grow" />
-              <button class="btn" onClick={() => saveKey(null)}>
-                Remove key
+      <div class="set-body">
+        <Show when={at() === "general"}>
+          <h1>General</h1>
+          <section class="set-card">
+            <Row label="Your Petrel folder" hint="Every note is a Markdown file here. Put it in Google Drive and every computer has it.">
+              <code class="path">{info()?.root ?? "…"}</code>
+              <button class="btn" onClick={chooseFolder}>
+                Change…
               </button>
-            </div>
-          </Show>
-          <Show when={ai()?.error}>
-            <p class="bad small">{ai()!.error}</p>
-          </Show>
-          <p class="muted small">Get a key at console.anthropic.com. A short rewrite costs well under a cent.</p>
-        </section>
-
-        <section>
-          <h3>Hotkeys</h3>
-          <Show
-            when={desk()?.hotkeySupported !== false}
-            fallback={
-              <p class="muted">
-                On Wayland your compositor binds keys. In Hyprland: <code>bind = SUPER, N, exec, petrel --capture</code> and <code>bind = SUPER, V, exec, petrel --picker</code>.
+            </Row>
+            <Show when={!drive()}>
+              <p class="muted small set-note">
+                Windows: Google Drive for desktop, "Mirror files", then a folder under <code>My Drive</code>. Linux: rclone bisync or Syncthing to the same folder.
               </p>
-            }
-          >
-            <For each={["capture", "picker"] as const}>
-              {(w) => {
-                const cur = () => (w === "capture" ? desk()?.hotkey : desk()?.pickerHotkey) ?? "";
-                const err = () => (w === "capture" ? desk()?.hotkeyError : desk()?.pickerHotkeyError);
-                return (
-                  <div class="row">
-                    <span class="label">{w === "capture" ? "Quick capture" : "Quick picker"}</span>
-                    <input
-                      value={hk()[w] ?? cur()}
-                      placeholder="off"
-                      onInput={(e) => setHk({ ...hk(), [w]: e.currentTarget.value })}
-                      onKeyDown={(e) => e.key === "Enter" && setHotkey(w)}
-                    />
-                    <button class="btn" disabled={hk()[w] === undefined} onClick={() => setHotkey(w)}>
-                      Set
-                    </button>
-                    <Show when={err()}>
-                      <span class="bad small">{err()}</span>
-                    </Show>
-                    <Show when={!err() && typesCharacter(hk()[w] ?? cur())}>
-                      <span class="bad small">Ctrl Alt with a key is AltGr on many keyboards (AltGr V is @ in Bosnian): it would take that character from every app.</span>
-                    </Show>
-                  </div>
-                );
-              }}
-            </For>
-          </Show>
-          <label class="row check">
-            <input
-              type="checkbox"
-              checked={desk()?.autostart ?? false}
-              onChange={async (e) => {
+            </Show>
+            <p class="muted small set-note">If a note changes in two places, Petrel keeps both and shows a card to settle it. The index lives outside the folder and is rebuilt from it.</p>
+          </section>
+          <section class="set-card">
+            <Toggle
+              label="Start Petrel at login"
+              hint="In the tray, so capture is instant."
+              on={desk()?.autostart ?? false}
+              onChange={async (on) => {
                 try {
-                  setDesk(await (await api()).setAutostart(e.currentTarget.checked));
+                  setDesk(await (await api()).setAutostart(on));
                 } catch (err) {
                   say(errText(err), { error: true });
                 }
               }}
             />
-            Start Petrel at login, in the tray, so capture is instant
-          </label>
-          <label class="row check">
-            <input type="checkbox" checked={prefs().captureSelection} onChange={(e) => pref("captureSelection", e.currentTarget.checked)} />
-            Bring the text selected in the app you were in into a capture, as a quote with where it came from
-          </label>
-        </section>
+            <Toggle label="The petrel" hint="It crosses the page once when the inbox is clear." on={prefs().petrel} onChange={(on) => void pref("petrel", on)} />
+          </section>
+        </Show>
 
-        <section>
-          <h3>Look</h3>
-          <div class="row">
-            <span class="label">Paper</span>
-            <div class="seg">
-              <For each={THEMES}>
-                {(t) => (
-                  <button classList={{ on: prefs().theme === t.id }} onClick={() => pref("theme", t.id)}>
-                    {t.label}
-                  </button>
-                )}
-              </For>
-            </div>
-          </div>
-          <Show when={prefs().theme === "clock"}>
-            <p class="muted small">Paper by day, Linen from 19:00, Night from 23:00 until 7:00.</p>
-          </Show>
-          <div class="row">
-            <span class="label">Writing font</span>
-            <div class="seg">
-              <For each={FONTS}>
-                {(f) => (
-                  <button classList={{ on: prefs().writeFont === f.id }} style={{ "font-family": f.css }} onClick={() => pref("writeFont", f.id)}>
-                    {f.label}
-                  </button>
-                )}
-              </For>
-            </div>
-          </div>
-          <div class="row">
-            <span class="label">Writing size</span>
-            <div class="seg">
-              <For each={SIZES}>
-                {(s) => (
-                  <button classList={{ on: prefs().editorSize === s }} onClick={() => pref("editorSize", s)}>
-                    {s}
-                  </button>
-                )}
-              </For>
-            </div>
-          </div>
-          <label class="row check">
-            <input type="checkbox" checked={prefs().typewriter} onChange={(e) => pref("typewriter", e.currentTarget.checked)} />
-            Typewriter scrolling: the line you type stays in the middle
-          </label>
-          <label class="row check">
-            <input type="checkbox" checked={prefs().focus} onChange={(e) => pref("focus", e.currentTarget.checked)} />
-            Paragraph focus: the other paragraphs fade while you type
-          </label>
-        </section>
-
-        <section>
-          <h3>Feel</h3>
-          <label class="row check">
-            <input type="checkbox" checked={prefs().petrel} onChange={(e) => pref("petrel", e.currentTarget.checked)} />
-            The petrel crosses the page when the Inbox is clear
-          </label>
-          <label class="row check">
-            <input
-              type="checkbox"
-              checked={prefs().sound}
-              onChange={(e) => {
-                void pref("sound", e.currentTarget.checked);
-                if (e.currentTarget.checked) tick();
+        <Show when={at() === "writing"}>
+          <h1>Writing</h1>
+          <section class="set-card">
+            <Row label="Font">
+              <div class="seg wrap">
+                <For each={FONTS}>
+                  {(f) => (
+                    <button classList={{ on: prefs().writeFont === f.id }} style={{ "font-family": f.css }} onClick={() => pref("writeFont", f.id)}>
+                      {f.label}
+                    </button>
+                  )}
+                </For>
+              </div>
+            </Row>
+            <Row label="Size">
+              <div class="seg">
+                <For each={SIZES}>
+                  {(s) => (
+                    <button classList={{ on: prefs().editorSize === s }} onClick={() => pref("editorSize", s)}>
+                      {s}
+                    </button>
+                  )}
+                </For>
+              </div>
+            </Row>
+            <p class="set-sample" style={{ "font-family": FONTS.find((f) => f.id === prefs().writeFont)?.css, "font-size": `${prefs().editorSize}px` }}>
+              Three days in May, by car from Sarajevo. Lejla knows a place by the river.
+            </p>
+          </section>
+          <section class="set-card">
+            <Toggle label="Paragraph focus" hint="The other paragraphs fade while you type." on={prefs().focus} onChange={(on) => void pref("focus", on)} />
+            <Toggle label="Typewriter scrolling" hint="The line you type stays in the middle of the window." on={prefs().typewriter} onChange={(on) => void pref("typewriter", on)} />
+            <Toggle
+              label="A pencil sound as you type"
+              hint="Soft, and only while the window is in front."
+              on={prefs().sound}
+              onChange={(on) => {
+                void pref("sound", on);
+                if (on) tick();
               }}
             />
-            A soft pencil sound as you type
-          </label>
-          <p class="muted small">No streaks, no badges, nothing that counts against you.</p>
-        </section>
+          </section>
+        </Show>
+
+        <Show when={at() === "look"}>
+          <h1>Look</h1>
+          <section class="set-card">
+            <Row label="Paper" hint={prefs().theme === "clock" ? "Paper by day, Linen from 19:00, Night from 23:00 until 7:00." : undefined}>
+              <div class="papers">
+                <For each={THEMES}>
+                  {(t) => (
+                    <button class="paper" classList={{ on: prefs().theme === t.id }} data-paper={t.id} onClick={() => pref("theme", t.id)}>
+                      <span class="paper-swatch" aria-hidden="true" />
+                      {t.label}
+                    </button>
+                  )}
+                </For>
+              </div>
+            </Row>
+          </section>
+        </Show>
+
+        <Show when={at() === "capture"}>
+          <h1>Capture</h1>
+          <section class="set-card">
+            <Toggle
+              label="Bring the selection along"
+              hint="Text selected in the app you were in comes into a capture as a quote, with where it came from. The picker uses it for {{selection}}."
+              on={prefs().captureSelection}
+              onChange={(on) => void pref("captureSelection", on)}
+            />
+          </section>
+          <section class="set-card">
+            <p class="set-note">
+              In the capture window, <kbd>@</kbd> says where it goes: <code>@recipes</code> a collection, <code>@today</code> or <code>@fri</code> a day's page, <code>@Groceries</code> the end of a note. A list
+              offers places as you type after the <kbd>@</kbd>; <kbd>Ctrl K</kbd> there picks one from a list. Opened again within two minutes, the window adds to the last capture.
+            </p>
+            <p class="muted small set-note">The keys that open the capture window and the picker are under Keys.</p>
+          </section>
+        </Show>
+
+        <Show when={at() === "keys"}>
+          <h1>Keys</h1>
+          <p class="muted">
+            The shortcuts on this computer ({platform === "linux" ? "Omarchy" : "Windows"}). Click one and press the new keys; <kbd>Esc</kbd> cancels. All of them, with the fixed ones, are on <kbd>Shift</kbd> <kbd>?</kbd>.
+          </p>
+          <section class="set-card">
+            <For each={SHORTCUTS.filter((s) => s.editable)}>
+              {(s) => (
+                <div class="set-row key-row">
+                  <div class="set-label">
+                    <span>{s.label}</span>
+                    <Show when={s.global && !systemBinds()}>
+                      <span class="muted small">Hyprland owns keys on Wayland: add this line to its config.</span>
+                    </Show>
+                    <Show when={clash()[s.id]}>
+                      <span class="bad small">Same keys as “{SHORTCUTS.find((x) => x.id === clash()[s.id])?.label}”</span>
+                    </Show>
+                    <Show when={platform === "win" && typesCharacter(shown(s))}>
+                      <span class="bad small">Ctrl Alt with a key is AltGr: it would take that character (AltGr V is @ in Bosnian).</span>
+                    </Show>
+                    <Show when={s.global === "capture" && systemBinds() && desk()?.hotkeyError}>
+                      <span class="bad small">{desk()!.hotkeyError}</span>
+                    </Show>
+                    <Show when={s.global === "picker" && systemBinds() && desk()?.pickerHotkeyError}>
+                      <span class="bad small">{desk()!.pickerHotkeyError}</span>
+                    </Show>
+                  </div>
+                  <div class="set-control">
+                    <Show when={s.global && !systemBinds()}>
+                      <code class="bind-line">{hyprBind(s, keyOf(s.id))}</code>
+                      <button class="btn small" onClick={() => void copyBind(hyprBind(s, keyOf(s.id)))}>
+                        Copy
+                      </button>
+                    </Show>
+                    <button class="key-btn" classList={{ listening: listening() === s.id }} onClick={() => setListening(listening() === s.id ? null : s.id)}>
+                      <Show when={listening() !== s.id} fallback={<span class="muted">Press the keys…</span>}>
+                        <Kbd keys={keyChips(shown(s))} />
+                      </Show>
+                    </button>
+                    <Show when={!s.global && customKeys()[platform]?.[s.id]}>
+                      <button class="link small" onClick={() => void setShortcut(s, null)}>
+                        Reset
+                      </button>
+                    </Show>
+                    <Show when={s.global && systemBinds()}>
+                      <button class="link small" onClick={() => void setShortcut(s, s.keys.win)}>
+                        Reset
+                      </button>
+                    </Show>
+                  </div>
+                </div>
+              )}
+            </For>
+          </section>
+        </Show>
+
+        <Show when={at() === "ai"}>
+          <h1>
+            <span class="spark">✦</span> AI
+          </h1>
+          <section class="set-card">
+            <p class="set-note">
+              Claude runs only when you ask: <kbd>Ctrl J</kbd> or <kbd>/</kbd> in a note, a question in <kbd>Ctrl K</kbd>, <kbd>s</kbd> on a capture. It uses your own Claude API key, kept in the system keyring.
+            </p>
+            <Show
+              when={ai()?.ready}
+              fallback={
+                <form
+                  class="set-row"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (key().trim()) void saveKey(key().trim());
+                  }}
+                >
+                  <input class="grow" type="password" placeholder="sk-ant-…" aria-label="Claude API key" value={key()} onInput={(e) => setKey(e.currentTarget.value)} autocomplete="off" />
+                  <button class="btn primary" type="submit" disabled={!key().trim()}>
+                    Save key
+                  </button>
+                </form>
+              }
+            >
+              <Row label="On" hint={ai()!.model}>
+                <button class="btn" onClick={() => saveKey(null)}>
+                  Remove key
+                </button>
+              </Row>
+            </Show>
+            <Show when={ai()?.error}>
+              <p class="bad small set-note">{ai()!.error}</p>
+            </Show>
+            <p class="muted small set-note">Get a key at console.anthropic.com. A short rewrite costs well under a cent.</p>
+          </section>
+        </Show>
+
+        <Show when={at() === "about"}>
+          <h1>About</h1>
+          <section class="set-card">
+            <Row label="Petrel" hint="Quick notes and the things you copy, as Markdown files in one folder.">
+              <span class="muted">{app()?.version ?? ""}</span>
+            </Row>
+            <Row label="Index" hint="Rebuilt from the folder whenever it is missing.">
+              <code class="path">{app()?.dbPath ?? ""}</code>
+            </Row>
+            <p class="muted small set-note">No account, no telemetry. Nothing leaves this computer except what you send to Claude.</p>
+          </section>
+        </Show>
       </div>
     </div>
   );

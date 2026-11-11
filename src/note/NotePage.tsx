@@ -18,11 +18,15 @@ import { pictureExtensions } from "../editor/pictures";
 import { addDays, clock, dayTitle, isDayNote, JOURNAL, monthGrid, today } from "../journal/days";
 import { dayExtensions } from "../journal/stamps";
 import { linkExtensions } from "../notes/links";
+import { parseLinks } from "../notes/parse";
 import { createNoteSaver, type NoteSaver, type SaveState } from "../notes/saver";
 import { prefs } from "../settings/prefs";
 import { wordCount } from "../copy";
 import { folderName, KeyHints, say } from "../ui";
 import { rank } from "../palette/match";
+import { keyOf, matches } from "../keys";
+
+const chips = (id: string) => keyOf(id).replace(/\+/g, " ");
 import { aiPreview, keepPreview, previewOf, setPreview, type Preview } from "./aiPreview";
 import { currentHeading, outline, type Heading } from "./outline";
 import { EditorView } from "@codemirror/view";
@@ -424,6 +428,13 @@ export default function NotePage(p: Props) {
   // ---- headings in the margin ---------------------------------------------------------------------------------
 
   const [heads, setHeads] = createSignal<Heading[]>([]);
+  // The [[links]] going out of the note, for the margin.
+  const [outLinks, setOutLinks] = createSignal<string[]>([]);
+  const followLink = async (inner: string) => {
+    const r = await (await api()).resolveLink(inner);
+    if (r.kind === "note") p.onOpen(r.id);
+    else say("That note does not exist yet. Alt Enter on the link makes it.");
+  };
   const [here, setHere] = createSignal(-1);
   // The margin steps back while you type, and comes back when you stop.
   const [typingNow, setTypingNow] = createSignal(false);
@@ -432,6 +443,7 @@ export default function NotePage(p: Props) {
     const t = editor?.text() ?? "";
     setWords(wordCount(t));
     setHeads(outline(t));
+    setOutLinks([...new Set(parseLinks(t).map((l) => l.inner.split("|")[0].trim()))].slice(0, 30));
     setHere(currentHeading(heads(), editor?.cursor() ?? 0));
   };
   const hasLinks = () => !!(links().linked.length || links().mentioned.length || related());
@@ -570,7 +582,7 @@ export default function NotePage(p: Props) {
       setExplain(null);
       return editor?.view.focus();
     }
-    if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "j") {
+    if (matches(e, "ai")) {
       e.preventDefault();
       if (menu()) closeMenu();
       else openMenu();
@@ -725,9 +737,10 @@ export default function NotePage(p: Props) {
               </section>
             )}
           </Show>
-          <Show when={!dayPage() && heads().length >= 2}>
+          <Show when={!dayPage()}>
             <section aria-label="On this page">
               <h4>On this page</h4>
+              <Show when={heads().length} fallback={<p class="margin-empty">No headings yet. A line that starts with # shows here.</p>}>
               <For each={heads()}>
                 {(h, i) => (
                   <button
@@ -741,6 +754,25 @@ export default function NotePage(p: Props) {
                   </button>
                 )}
               </For>
+              </Show>
+            </section>
+          </Show>
+          <section aria-label="Links in this note">
+            <h4>Links in this note</h4>
+            <Show when={outLinks().length} fallback={<p class="margin-empty">None yet. Type [[ to link a note.</p>}>
+              <For each={outLinks()}>
+                {(l) => (
+                  <button class="link-row" onClick={() => void followLink(l)}>
+                    <span class="link-title">{l}</span>
+                  </button>
+                )}
+              </For>
+            </Show>
+          </section>
+          <Show when={!hasLinks() && note()}>
+            <section aria-label="Linked from">
+              <h4>Linked from</h4>
+              <p class="margin-empty">Nothing links here yet.</p>
             </section>
           </Show>
           <Show when={hasLinks()}>
@@ -798,7 +830,7 @@ export default function NotePage(p: Props) {
         <Show when={words()}>
           <span>{words()} words</span>
         </Show>
-        <KeyHints hints={[!!dayPage() && ["Alt ← →", "other days"], ["Ctrl K", "find"], ["Ctrl J", "AI"], ["Ctrl L", "library"]]} />
+        <KeyHints hints={[!!dayPage() && ["Alt ← →", "other days"], [chips("find"), "find"], [chips("ai"), "AI"], [chips("library"), "library"], [chips("shortcuts"), "all keys"]]} />
         <Show when={p.notice}>
           <span class="notice">{p.notice}</span>
         </Show>

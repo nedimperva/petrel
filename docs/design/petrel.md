@@ -41,7 +41,8 @@ something closes, the focus goes back where it was; every overlay comes and goes
 No global hotkey is Ctrl Alt with a key: that is AltGr on many keyboards (AltGr V is `@` in Bosnian), so it would
 take a character from every app. The picker is `Ctrl Shift Space`, the note beside `Ctrl Shift Enter`.
 
-Every screen ends with the same one-line footer of its keys (`src/ui.tsx`, `KeyHints`).
+Every screen ends with the same one-line footer of its keys (`src/ui.tsx`, `KeyHints`). Every shortcut is listed in
+`src/keys.ts`; Settings › Keys changes the app's own for this computer, `Ctrl /` (or `?` outside text) shows them all.
 
 In the capture window `@` says where a capture goes: `@recipes` (a collection), `@today`, `@fri`, `@nov20` (a day),
 `@Groceries` (a note). `#` is only ever a heading and `>` only a quote. Old `#word` and `>Note` routing is gone.

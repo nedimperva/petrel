@@ -53,10 +53,12 @@ mod linux {
             let clients: Value = serde_json::from_slice(&out.stdout).context("reading hyprctl clients")?;
             let list = clients.as_array().cloned().unwrap_or_default();
             // Ours by pid when Hyprland says so; by title alone otherwise (some setups report the webview's pid).
+            // The webview may retitle the window from the page: the title it opened with counts too.
+            let named = |c: &&Value| c["title"] == title || c["initialTitle"] == title;
             let found = list
                 .iter()
-                .find(|c| c["title"] == title && c["pid"].as_u64() == Some(me))
-                .or_else(|| list.iter().find(|c| c["title"] == title));
+                .find(|c| named(c) && c["pid"].as_u64() == Some(me))
+                .or_else(|| list.iter().find(named));
             if let Some(c) = found {
                 let address = c["address"].as_str().context("a client without an address")?;
                 let cmd = super::batch(

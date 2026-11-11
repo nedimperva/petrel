@@ -15,6 +15,11 @@ keys; `docs/design/petrel.md` is the design; this file covers state and decision
   are panels like Ctrl K, Esc from a panel goes back to Ctrl K, conflicts are inbox cards. `KeyHints` in `ui.tsx`
   is the key line on every screen. On Hyprland `src-tauri/src/hypr.rs` floats, sizes, centres and pins the capture
   window and the picker through `hyprctl` (not tried on Linux).
+- **Settings and keys (owner asked 2026-11-12), same branch:** Settings is a screen of its own with categories
+  (`src/settings/Settings.tsx`); every shortcut is in `src/keys.ts` with Windows and Linux defaults, changeable in
+  Settings › Keys for this computer only (`ui.keys`; on Wayland the global ones show a Hyprland `bind` line to copy);
+  `Ctrl /` or `?` shows them all (`src/Shortcuts.tsx`). The margin always shows its sections, with empty states, and
+  the links going out of the note. hypr.rs also matches a window by `initialTitle`.
 - **The next look (owner approved 2026-11-11, canvas https://claude.ai/artifact/6YTYsvgRztVuzNvHvFP2GS, margin
   wider than drawn), same branch:** the sidebar (`src/Sidebar.tsx`: collections made, renamed, trashed through
   `Store::create_folder`/`rename_folder`/`trash_folder` in `crates/petrel-core/src/notes/folders.rs`), the right
