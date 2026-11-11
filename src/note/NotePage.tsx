@@ -314,8 +314,8 @@ export default function NotePage(p: Props) {
     );
   }
 
-  /** One of your prompts on the selection, or on the whole note when nothing was selected. Blanks other than
-   * the self-filling ones are asked first. */
+  /** One of your prompts on the selection, or on the whole note when nothing was selected. `{{text}}`,
+   * `{{code}}`, `{{selection}}` and `{{note}}` are that text; other blanks are asked first. */
   async function runPrompt(n: NoteSummary) {
     if (!p.aiReady) return p.onAiSetup();
     const v = view();
@@ -326,8 +326,10 @@ export default function NotePage(p: Props) {
     const vs = lastFirst(versionsOf(body), (await lastVersions())[n.path]);
     const text = vs.length ? vs[0].text : body;
     const selected = v.state.sliceDoc(r.from, r.to);
-    if (blanks(text).some((b) => b.auto !== "selection" && b.auto !== "today")) return setFilling({ title: n.title, text, ...r, selected });
-    void run("prompt", r.from, r.to, fill(text, { selection: selected, today: todayText() }), n.title);
+    // A blank for the text itself is the text the prompt runs on; only the others are asked.
+    const pre = fill(text, { selection: selected, text: selected, code: selected, note: selected, today: todayText() });
+    if (blanks(pre).length) return setFilling({ title: n.title, text: pre, ...r, selected });
+    void run("prompt", r.from, r.to, pre, n.title);
   }
 
   function openSlash() {

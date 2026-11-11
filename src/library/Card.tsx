@@ -41,7 +41,8 @@ export default function Card(p: {
   const kind = () => kindOf(p.n.folder);
   const inbox = () => p.n.folder === "inbox";
   const title = () => (inbox() ? "" : p.n.title);
-  const blanks = () => parts(p.n.preview).filter((x) => x.blank).length;
+  // The same blank used twice is asked once, so it counts once.
+  const blanks = () => new Set(parts(p.n.preview).filter((x) => x.blank).map((x) => x.text)).size;
   const meta = () => {
     const out: string[] = [];
     if (p.copies) out.push(`Copied ${p.copies} ${p.copies === 1 ? "time" : "times"}`);

@@ -15,6 +15,8 @@ export function fakeApi(): Api {
   const undos = new Map<string, () => void>();
   const copies: Record<string, number> = {};
   const copiesIn: Record<string, Record<string, number>> = {};
+  // The UI settings, in memory; `?keep` in the capture window pretends the last capture was a minute ago.
+  const ui: Record<string, string> = location.search.includes("keep") ? { "ui.capture.last": `1:${Date.now() - 60_000}` } : {};
   let nextId = 1;
   let nextVersion = 1;
   let aiKey: string | null = "fake";
@@ -79,6 +81,14 @@ export function fakeApi(): Api {
 
   add("Prompts", "Code review", "Review this {{language}} code for bugs, unclear names and missing tests. Be direct and list the worst problem first.\n\n{{code}}\n", ["ai"], 4 * DAY);
   add("Prompts", "Explain like a colleague", "Explain {{topic}} to me as a senior colleague would over coffee: the idea first, then one example, then the trap people fall into.\n", ["ai"], 9 * DAY);
+  add(
+    "Prompts",
+    "Commit message",
+    "## Short\nWrite a one-line commit message for this diff:\n\n{{clipboard}}\n\n## Long\nWrite a commit message in the {{style: conventional / plain / gitmoji}} style, dated {{today}}, for:\n\n{{clipboard}}\n",
+    ["ai"],
+    2 * DAY,
+  );
+  add("", "Tern release (conflict 2026-11-11 2114)", "The Linux beta is out. Next is the macOS build.\n\n## Open questions\n\n- Do we ship the AUR package the same day?\n", [], 2 * HOUR);
   add("Prompts", "Release notes", "Write release notes for {{product}} {{version}} from these commits. Group them as New, Fixed and Changed. Plain words, no marketing.\n\n{{commits}}\n", ["ai"], 12 * DAY);
   add("Prompts", "Translate to Bosnian", "Translate this into natural Bosnian, keeping the tone:\n\n{{text}}\n", ["ai"], 20 * DAY);
   add("Snippets", "Email sign-off", "Thanks, and talk soon,\nNedim\n", [], 30 * DAY);
@@ -163,8 +173,8 @@ export function fakeApi(): Api {
       }
     },
     desktopSettings: () => wait({ ...desktop }),
-    uiSettings: () => wait({}),
-    setUiSetting: () => wait(undefined),
+    uiSettings: () => wait({ ...ui }),
+    setUiSetting: async (k, v) => void (ui[k] = v),
     setHotkey: async (which, hotkey) => {
       if (which === "capture") desktop.hotkey = hotkey;
       else desktop.pickerHotkey = hotkey;

@@ -157,8 +157,10 @@ export default function CommandBar(p: {
   const choose = (r: Row | undefined) => {
     if (!r) return;
     if (r.kind === "ask") return void ask();
+    // Read before closing: the bar's owner may hand a different onOpen while it is open (a note beside).
+    const open = p.onOpen;
     p.onClose();
-    if (r.kind === "note") p.onOpen(r.n.id);
+    if (r.kind === "note") open(r.n.id);
     else r.c.run();
   };
 

@@ -44,11 +44,13 @@ export default function Beside(p: {
     await saver.flush();
     try {
       const n = await (await api()).openNote(id);
+      // Loading focuses the editor; the main note keeps the focus.
+      const had = document.activeElement as HTMLElement | null;
       saver.load(n);
       editor?.setReadOnly(true);
       setEditing(false);
-      // Loading focuses the editor; the main note keeps the focus.
       editor?.view.contentDOM.blur();
+      if (had && had !== document.body && !host.contains(had)) had.focus();
     } catch (e) {
       say(errText(e), { error: true });
       p.onClose();
