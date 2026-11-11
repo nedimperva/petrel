@@ -216,7 +216,8 @@ export function fakeApi(): Api {
       for (const f of folders) if (!count.has(f)) count.set(f, 0);
       return [...count.entries()]
         .sort(([a], [b]) => a.localeCompare(b))
-        .map(([path, c]) => ({ path, name: path.split("/").pop() || "Notes", depth: path ? path.split("/").length : 0, count: c }));
+        .filter(([path]) => path !== "")
+        .map(([path, c]) => ({ path, name: path.split("/").pop() || "Notes", depth: path.split("/").length - 1, count: c }));
     },
     openNote: async (id) => ({ ...get(id) }),
     peekNote: async (id) => ({ ...get(id) }),

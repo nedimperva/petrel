@@ -13,7 +13,12 @@ anything that does not stays hidden until asked for.
 - **Find**: `Ctrl K`, the one door. Notes, commands, a question for your notes, the recent notes (Back), open tasks,
   the week. `Ctrl P` is `Ctrl K` on notes only. Panels it opens (tasks, the week, history, an answer) look and move
   the same, and `Esc` goes back to `Ctrl K`.
-- **Copy**: the library and the quick picker are the same thing: cards of what you copy. A collection is either
+- **Where you are**: the sidebar (as in Tern): New note, Today, Inbox, Open tasks, then the collections to copy
+  and the pages. Collections are made, renamed (`F2`), given a look, set to pages or to copy, and trashed there.
+  Docked from 1000 px, over the page below; `Ctrl 0` hides it. The right margin (320 px) holds what is about the
+  note: its headings, what links to it, related notes, the month on a day's page.
+- **Copy**: the library and the quick picker are the same thing: what you copy. The library is a list beside the
+  item, always open (canvas https://claude.ai/artifact/6YTYsvgRztVuzNvHvFP2GS). A collection is either
   **pages** (Travel, Journal: found with `Ctrl K`) or **to copy** (Prompts, Snippets: cards in the library and the
   picker). Set once per collection (`t`), kept in its `.petrel` file (`copy: yes`). The inbox is cards too, until filed.
 
@@ -31,7 +36,10 @@ something closes, the focus goes back where it was; every overlay comes and goes
 | `Alt ←` `Alt →` | the sibling before or after: another day, another version |
 | `↑` `↓` | move through a list |
 | `1`–`9` | pick from a short numbered list (a place, a choice, a side to keep) |
-| `Ctrl K` | find; `Ctrl P` notes only; `Ctrl J` AI; `Ctrl L` the library; `Ctrl Tab` back |
+| `Ctrl K` | find; `Ctrl P` notes only; `Ctrl J` AI; `Ctrl L` the library; `Ctrl 0` the sidebar; `Ctrl Tab` back |
+
+No global hotkey is Ctrl Alt with a key: that is AltGr on many keyboards (AltGr V is `@` in Bosnian), so it would
+take a character from every app. The picker is `Ctrl Shift Space`, the note beside `Ctrl Shift Enter`.
 
 Every screen ends with the same one-line footer of its keys (`src/ui.tsx`, `KeyHints`).
 

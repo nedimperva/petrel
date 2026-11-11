@@ -3,7 +3,7 @@
 // is a new page, Ctrl D today's page (Alt ← and Alt → the days around it), Ctrl H history, Ctrl , settings. The
 // inbox review is a mode of the inbox's cards in the library. Panels opened from Ctrl K (tasks, the week, history)
 // go back to Ctrl K on Esc. The title bar is Petrel's own (TitleBar.tsx).
-// Ctrl Tab goes back to the note before (held, it lists the last few); Ctrl \ opens a second note beside.
+// Ctrl Tab goes back to the note before (held, it lists the last few); Ctrl Shift Enter opens a second note beside.
 
 import { createResource, createSignal, For, lazy, onCleanup, onMount, Show, Suspense } from "solid-js";
 import { api, errText, inTauri, type AiStatus, type Note, type NoteSummary, type ScanReport } from "./api";
@@ -72,10 +72,15 @@ export default function App() {
   const [sideOn, setSideOn] = createSignal(true);
   const [wide, setWide] = createSignal(innerWidth >= SIDEBAR_DOCK_PX);
   const docked = () => sideOn() && wide();
+  // What the owner chose for a wide window; a narrow one starts with the sidebar out of the way.
+  let sidePref = true;
   const toggleSide = () => {
     const on = !sideOn();
     setSideOn(on);
-    void api().then((s) => s.setUiSetting("ui.sidebar", on ? "1" : "0")).catch(() => {});
+    if (wide()) {
+      sidePref = on;
+      void api().then((s) => s.setUiSetting("ui.sidebar", on ? "1" : "0")).catch(() => {});
+    }
   };
   let besideH: BesideHandle | undefined;
   const [recent, setRecent] = createSignal<number[]>([]);
@@ -330,7 +335,7 @@ export default function App() {
     { id: "related", label: "AI: Find related notes", when: onNote, run: () => page?.findRelated() },
     { id: "move", label: "Move to a note or collection…", when: onNote, run: () => setMoving(true) },
     { id: "task", label: "Add a task, or tick one", keys: "Ctrl Shift X", when: () => view().kind === "note", run: () => page?.task() },
-    { id: "beside", label: "Open a note beside this one", keys: "Ctrl \\", run: () => setTimeout(() => setBar("beside")) },
+    { id: "beside", label: "Open a note beside this one", keys: "Ctrl Shift Enter", run: () => setTimeout(() => setBar("beside")) },
     { id: "beside-close", label: "Close the note beside", when: () => beside() !== null, run: () => void closeBeside() },
     { id: "back", label: "Back to the note before", keys: "Ctrl Tab", when: () => others().length > 0, run: () => void openNote(others()[0]) },
     {
@@ -391,7 +396,8 @@ export default function App() {
       e.preventDefault();
       e.stopPropagation();
       switchDone(false);
-    } else if (mod && !e.altKey && (e.key === "\\" || e.code === "Backslash") && !overlay()) {
+    } else if (mod && !e.altKey && ((e.shiftKey && e.key === "Enter") || e.key === "\\" || e.code === "Backslash") && !overlay()) {
+      // Ctrl Shift Enter, since Ctrl \ needs AltGr on many keyboards; Ctrl \ stays for those that have the key.
       e.preventDefault();
       e.stopPropagation();
       if (beside() !== null) void closeBeside();
@@ -444,7 +450,11 @@ export default function App() {
     document.addEventListener("keydown", dayKey, true);
     document.addEventListener("keydown", earlyKey, true);
     document.addEventListener("keyup", keyUp, true);
-    window.addEventListener("resize", () => setWide(innerWidth >= SIDEBAR_DOCK_PX));
+    window.addEventListener("resize", () => {
+      const w = innerWidth >= SIDEBAR_DOCK_PX;
+      if (w !== wide()) setSideOn(w && sidePref);
+      setWide(w);
+    });
     window.addEventListener("blur", () => switcher() && switchDone(false));
     void loadFaces();
     const s = await api();
@@ -457,7 +467,8 @@ export default function App() {
     }
     setRoot((await s.notesInfo().catch(() => ({ root: "" }))).root);
     const stored = await s.uiSettings().catch(() => ({}) as Record<string, string>);
-    setSideOn(stored["ui.sidebar"] !== "0" && innerWidth >= SIDEBAR_DOCK_PX);
+    sidePref = stored["ui.sidebar"] !== "0";
+    setSideOn(sidePref && innerWidth >= SIDEBAR_DOCK_PX);
     try {
       const r = JSON.parse(stored["ui.recent"] ?? "[]");
       if (Array.isArray(r)) setRecent(r.filter((x) => typeof x === "number").slice(0, RECENT_MAX));

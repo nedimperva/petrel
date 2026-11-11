@@ -21,12 +21,16 @@ interface Data {
 
 async function load(): Promise<Data> {
   const s = await api();
-  const [folders, inbox, tasks] = await Promise.all([
+  const [folders, inbox, tasks, loose] = await Promise.all([
     s.noteFolders(),
     s.listNotes({ folder: "inbox", limit: 1000 }).then((n) => n.length, () => 0),
     s.openTasks().then((t) => t.length, () => 0),
+    s.listNotes({ folder: "", limit: 1000 }).then((n) => n.length, () => 0),
   ]);
-  return { folders: folders.filter((f) => f.path !== "inbox" && !f.path.startsWith(".")), inbox, tasks };
+  const shown = folders.filter((f) => f.path && f.path !== "inbox" && !f.path.startsWith("."));
+  // Notes at the top of the folder are a collection of pages too: "Notes".
+  if (loose) shown.unshift({ path: "", name: "Notes", depth: 0, count: loose });
+  return { folders: shown, inbox, tasks };
 }
 
 export default function Sidebar(p: {
@@ -47,8 +51,8 @@ export default function Sidebar(p: {
   const [data, { refetch }] = createResource(() => p.rev, load);
   const [now, setNow] = createSignal(clock());
   const [renaming, setRenaming] = createSignal<string | null>(null);
-  // `""` makes a top collection; a path makes one inside it.
-  const [making, setMaking] = createSignal<string | null>(null);
+  // Making a collection: at the top (`parent: null`) or inside one.
+  const [making, setMaking] = createSignal<{ parent: string | null } | null>(null);
   const [menu, setMenu] = createSignal<{ folder: string; x: number; y: number; sure: boolean } | null>(null);
   const [facing, setFacing] = createSignal<string | null>(null);
 
@@ -61,8 +65,9 @@ export default function Sidebar(p: {
   });
 
   const tops = () => (data()?.folders ?? []).filter((f) => f.depth === 0);
-  const kids = (top: string) => (data()?.folders ?? []).filter((f) => f.depth === 1 && f.path.startsWith(`${top}/`));
-  const count = (path: string) => (data()?.folders ?? []).filter((f) => f.path === path || f.path.startsWith(`${path}/`)).reduce((a, f) => a + f.count, 0);
+  const kids = (top: string) => (top ? (data()?.folders ?? []).filter((f) => f.depth === 1 && f.path.startsWith(`${top}/`)) : []);
+  const count = (path: string) =>
+    (data()?.folders ?? []).filter((f) => f.path === path || (path !== "" && f.path.startsWith(`${path}/`))).reduce((a, f) => a + f.count, 0);
   const copyTops = () => tops().filter((f) => toCopy(f.path, faces()));
   const pageTops = () => tops().filter((f) => !toCopy(f.path, faces()));
   const open = (folder: string) => p.here === `c:${folder}` || (p.here?.startsWith(`c:${folder}/`) ?? false);
@@ -176,9 +181,9 @@ export default function Sidebar(p: {
           </span>
         </button>
       </Show>
-      <Show when={!child && (open(f.path) || making() === f.path)}>
+      <Show when={!child && (open(f.path) || making()?.parent === f.path)}>
         <For each={kids(f.path)}>{(k) => row(k, true)}</For>
-        <Show when={making() === f.path}>
+        <Show when={making()?.parent === f.path}>
           <div class="side-row editing child">{nameInput("", (v) => void make(f.path, v), () => setMaking(null), `New collection inside ${folderName(f.path)}`)}</div>
         </Show>
       </Show>
@@ -231,9 +236,9 @@ export default function Sidebar(p: {
           <For each={pageTops()}>{(f) => row(f)}</For>
         </Show>
         <Show
-          when={making() === ""}
+          when={making() && making()!.parent === null}
           fallback={
-            <button type="button" class="side-row side-add" onClick={() => setMaking("")}>
+            <button type="button" class="side-row side-add" onClick={() => setMaking({ parent: null })}>
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
                 <path d="M12 5v14M5 12h14" />
               </svg>
@@ -282,7 +287,7 @@ export default function Sidebar(p: {
               </div>
             </Show>
             <Show when={!m().folder.includes("/")}>
-              <button type="button" class="menu-item" role="menuitem" onClick={() => (setMaking(m().folder), setMenu(null))}>
+              <button type="button" class="menu-item" role="menuitem" onClick={() => (setMaking({ parent: m().folder }), setMenu(null))}>
                 <span>New collection inside</span>
               </button>
             </Show>

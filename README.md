@@ -41,11 +41,12 @@ shorten, continue or explain your text and answer questions from your notes, but
 
 | Where | Keys |
 |---|---|
-| Anywhere | `Ctrl K` search, commands or ask (`in:travel`, `pinned`, `today`, `this week`, `has:link`, `has:picture`, `has:task`) · `Ctrl P` find a note · `Ctrl N` new note · `Ctrl D` today's page · `Ctrl L` library · `Ctrl Tab` the note before (hold `Ctrl` for the last few) · `Ctrl \` a note beside · `Ctrl ,` settings |
+| Anywhere | `Ctrl K` search, commands or ask (`in:travel`, `pinned`, `today`, `this week`, `has:link`, `has:picture`, `has:task`) · `Ctrl P` find a note · `Ctrl N` new note · `Ctrl D` today's page · `Ctrl L` library · `Ctrl 0` the sidebar · `Ctrl Tab` the note before (hold `Ctrl` for the last few) · `Ctrl Shift Enter` a note beside · `Ctrl ,` settings |
+| Sidebar | click a collection to open it · `F2` or a double-click renames it · right-click or `⋯`: colour and mark, pages or to copy, a collection inside, show in the folder, the trash · "New collection" makes one |
 | Ctrl K | the last row asks your notes · an answer: `Tab` ask again · `Ctrl Enter` save the exchange · "Open tasks in every note": `x` tick · `Enter` open · `Esc` in a panel goes back to Ctrl K |
-| Today's page | `Alt ←` `Alt →` other days · `Enter` on an empty line stamps the time · the week is in `Ctrl K` |
-| A note | `Ctrl J` or `/` on an empty line: the AI menu (`1`–`9` pick, type to narrow or to ask; your prompts at the end) · `Ctrl Shift C` copy as Markdown · `Ctrl H` history · `[[` link · `Alt Enter` follow it · `Shift Enter` open it beside · `Esc` close the note beside |
-| Library | cards of what you copy, pages as tiles · arrows or `h` `j` `k` `l` move · `Enter` open · `c` copy · `e` edit · `p` pin · `t` look, and pages or things to copy · `/` filter · `m` file an inbox card · `r` the inbox one card at a time · `z` undo · `Esc` back to writing |
+| Today's page | opens on a new line with the time · `Alt ←` `Alt →` other days · `Enter` on an empty line stamps the time · the week is in `Ctrl K` |
+| A note | headings, links and related notes in the right margin · `Ctrl J` or `/` on an empty line: the AI menu (`↑` `↓` choose, type to narrow or to ask; your prompts at the end) · `Ctrl Shift C` copy as Markdown · `Ctrl H` history · `[[` link · `Alt Enter` follow it · `Shift Enter` open it beside · `Esc` close the note beside |
+| Library | a list beside the item, always open · `↑` `↓` or `j` `k` move · `Enter` copy (in the inbox: file) · `c` copy · `e` edit · `p` pin · `t` look, and pages or things to copy · `/` filter · `m` move, `d` delete, `r` one at a time in the inbox · `z` undo · `Esc` back to writing |
 | Inbox review | `1`–`6` file · `/` somewhere else · `Space` keep for later · `e` edit · `d` delete · `s` suggest a home · `z` undo · `Esc` stop |
 | An opened card | `Enter` copy (fill the blanks first) · `Tab` next blank · `Alt ←` `Alt →` other versions · `↑` earlier answers · `1`–`9` pick a choice · `e` edit · in the inbox: `m` move · `s` suggest a home · `1`–`3` pick one · `d` delete |
 | To settle (a card in the inbox) | `1` keep the note · `2` keep the other text · `3` or `b` keep both · `Esc` later |
