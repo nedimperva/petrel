@@ -2484,3 +2484,52 @@ kbd {
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
+
+/* ---- the one AI menu: Ctrl J, or / on an empty line ----------------------------------------------------- */
+
+.ai-menu {
+  width: 360px;
+  padding: 0;
+  overflow: hidden;
+}
+.ai-menu-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.ai-menu-field input {
+  flex: 1;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 2px 0 !important;
+}
+.ai-menu-list {
+  max-height: 320px;
+  overflow: auto;
+  padding: 4px;
+}
+.ai-menu .menu-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+}
+.ai-menu .menu-item kbd {
+  min-width: 16px;
+  text-align: center;
+}
+.ai-menu .menu-item .muted {
+  margin-left: auto;
+  font-size: var(--t-xs);
+  white-space: nowrap;
+}
+.ai-menu-foot {
+  display: flex;
+  gap: var(--s-3);
+  padding: 6px 10px;
+  border-top: 1px solid var(--line);
+  font-size: var(--t-xs);
+}

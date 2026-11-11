@@ -487,7 +487,6 @@ export default function App() {
                 onTitle={setTitle}
                 day={v().day ?? null}
                 onDay={(d) => void openDay(d)}
-                onWeek={() => setWeek(true)}
                 onNoteId={seen}
                 onBeside={(id) => void openBeside(id)}
                 besideOpen={beside() !== null}

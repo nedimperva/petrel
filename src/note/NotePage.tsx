@@ -21,7 +21,8 @@ import { linkExtensions } from "../notes/links";
 import { createNoteSaver, type NoteSaver, type SaveState } from "../notes/saver";
 import { prefs } from "../settings/prefs";
 import { wordCount } from "../copy";
-import { folderName, say } from "../ui";
+import { folderName, KeyHints, say } from "../ui";
+import { rank } from "../palette/match";
 import { aiPreview, keepPreview, previewOf, setPreview, type Preview } from "./aiPreview";
 import { currentHeading, outline, type Heading } from "./outline";
 import { EditorView } from "@codemirror/view";
@@ -68,26 +69,9 @@ interface Props {
   day?: string | null;
   /** Go to another day's page. */
   onDay?(day: string): void;
-  /** "The week, when you ask". */
-  onWeek?(): void;
   onAiSetup(): void;
   ref(h: NotePageHandle): void;
 }
-
-const BAR: { task: AiTask; label: string }[] = [
-  { task: "tidy", label: "Tidy" },
-  { task: "shorten", label: "Shorten" },
-  { task: "list", label: "Make a list" },
-  { task: "explain", label: "Explain" },
-];
-
-const SLASH: { task: AiTask | "week"; label: string; hint: string }[] = [
-  { task: "continue", label: "Continue writing", hint: "from where the text stops" },
-  { task: "summarize", label: "Summarize the text above", hint: "a few sentences" },
-  { task: "checklist", label: "Turn into a checklist", hint: "the paragraph above" },
-  { task: "title", label: "Suggest a title", hint: "renames the note if you keep it" },
-];
-const WEEK = { task: "week" as const, label: "Look back on the week", hint: "what the last seven days went to" };
 
 const LABELS: Record<AiTask, string> = {
   tidy: "Tidied",
@@ -113,17 +97,13 @@ export default function NotePage(p: Props) {
   const [words, setWords] = createSignal(0);
   const [links, setLinks] = createSignal<Backlinks>({ linked: [], mentioned: [] });
   const [related, setRelated] = createSignal<AiRelated[] | "loading" | null>(null);
-  const [bar, setBar] = createSignal<{ x: number; y: number; ask: boolean } | null>(null);
-  const [slash, setSlash] = createSignal<{ x: number; y: number; i: number } | null>(null);
+  // The one AI menu (Ctrl J, or `/` on an empty line). `whole`: nothing was selected when it opened.
+  const [menu, setMenu] = createSignal<{ x: number; y: number; i: number; q: string; whole: boolean; from: number; to: number; head: number } | null>(null);
   const [explain, setExplain] = createSignal<{ x: number; y: number; text: string | null; at: number } | null>(null);
-  const [asking, setAsking] = createSignal("");
   // The last AI request, for Try again.
   let last: { task: AiTask; from: number; to: number; instruction?: string; label?: string } | null = null;
   // Ctrl J's own prompts: the Prompts collection, the most copied first.
   const [prompts, setPrompts] = createSignal<NoteSummary[]>([]);
-  const [pi, setPi] = createSignal(-1);
-  // Nothing was selected when Ctrl J was pressed: a prompt reads the whole note.
-  const [barWhole, setBarWhole] = createSignal(false);
   const [filling, setFilling] = createSignal<{ title: string; text: string; from: number; to: number; selected: string } | null>(null);
   let seq = 0;
 
@@ -133,7 +113,6 @@ export default function NotePage(p: Props) {
     const n = note();
     return n && isDayNote(n.folder, n.title) ? n.title : null;
   };
-  const slashItems = () => (dayPage() ? [...SLASH, WEEK] : SLASH);
   // The days that have a page, for the month. A signal, not a resource: a resource read here would suspend the
   // whole page (App's Suspense) on every day change and take the focus out of the text.
   const [journal, setJournal] = createSignal<Set<string>>(new Set());
@@ -154,8 +133,7 @@ export default function NotePage(p: Props) {
   async function load(id: number | null) {
     await saver?.flush();
     setRelated(null);
-    setBar(null);
-    setSlash(null);
+    setMenu(null);
     setExplain(null);
     if (id === null) {
       saver.load(null);
@@ -211,8 +189,7 @@ export default function NotePage(p: Props) {
 
   async function run(task: AiTask, from: number, to: number, instruction?: string, label?: string) {
     if (!p.aiReady) return p.onAiSetup();
-    setBar(null);
-    setSlash(null);
+    setMenu(null);
     const v = view();
     const doc = v.state.doc;
     const text = task === "continue" || task === "summarize" ? doc.sliceString(0, to) : task === "title" ? doc.toString() : doc.sliceString(from, to);
@@ -288,20 +265,25 @@ export default function NotePage(p: Props) {
     return { from: doc.line(a).from, to: doc.line(b).to };
   }
 
-  function openBar() {
+  /** Ctrl J, or `/` on an empty line: the one AI menu, below the text it will work on. The rewrites read the
+   * selection (or the paragraph at the cursor); your prompts read the selection, or the whole note when nothing
+   * was selected. */
+  function openMenu() {
     if (!editor || previewOf(view().state)) return;
-    // On a day's page with nothing selected, Ctrl J is the week; select text for the writing tasks.
-    if (dayPage() && p.onWeek && view().state.selection.main.empty) return p.onWeek();
-    setBarWhole(view().state.selection.main.empty);
-    setPi(-1);
-    void loadPrompts();
+    const v = view();
+    const sel = v.state.selection.main;
+    if (!v.state.doc.length) return say("Write something first");
     const r = range();
-    if (r.from === r.to && !view().state.doc.length) return say("Write something first");
-    // On an empty line the bar still opens: your prompts can read the whole note.
-    if (r.from !== r.to) view().dispatch({ selection: { anchor: r.from, head: r.to } });
-    const c = view().coordsAtPos(r.from);
-    setBar({ x: c?.left ?? 0, y: (c?.top ?? 0) - 46, ask: false });
+    if (r.from !== r.to) v.dispatch({ selection: { anchor: r.from, head: r.to } });
+    const c = v.coordsAtPos(r.from !== r.to ? r.to : sel.head);
+    void loadPrompts();
+    setMenu({ x: c?.left ?? 0, y: (c?.bottom ?? 0) + 6, i: 0, q: "", whole: sel.empty, from: r.from, to: r.to, head: sel.head });
   }
+
+  const closeMenu = () => {
+    setMenu(null);
+    view().focus();
+  };
 
   async function loadPrompts() {
     const s = await api();
@@ -316,12 +298,9 @@ export default function NotePage(p: Props) {
 
   /** One of your prompts on the selection, or on the whole note when nothing was selected. `{{text}}`,
    * `{{code}}`, `{{selection}}` and `{{note}}` are that text; other blanks are asked first. */
-  async function runPrompt(n: NoteSummary) {
+  async function runPrompt(n: NoteSummary, r: { from: number; to: number }) {
     if (!p.aiReady) return p.onAiSetup();
     const v = view();
-    const sel = v.state.selection.main;
-    const r = barWhole() ? { from: 0, to: v.state.doc.length } : { from: sel.from, to: sel.to };
-    setBar(null);
     const body = (await (await api()).peekNote(n.id)).body.replace(/\n+$/, "");
     const vs = lastFirst(versionsOf(body), (await lastVersions())[n.path]);
     const text = vs.length ? vs[0].text : body;
@@ -332,69 +311,76 @@ export default function NotePage(p: Props) {
     void run("prompt", r.from, r.to, pre, n.title);
   }
 
-  function openSlash() {
-    const v = view();
-    const head = v.state.selection.main.head;
-    const c = v.coordsAtPos(head);
-    setSlash({ x: c?.left ?? 0, y: (c?.bottom ?? 0) + 4, i: 0 });
+  /** The paragraph above an empty line, for "Turn into a checklist" from `/`. */
+  function paragraphAbove(head: number): { from: number; to: number } | null {
+    const doc = view().state.doc;
+    let n = doc.lineAt(head).number - 1;
+    while (n >= 1 && !doc.line(n).text.trim()) n--;
+    if (n < 1) return null;
+    let a = n;
+    while (a > 1 && doc.line(a - 1).text.trim()) a--;
+    return { from: doc.line(a).from, to: doc.line(n).to };
   }
 
-  function slashRun(task: AiTask | "week") {
-    const v = view();
-    const head = v.state.selection.main.head;
-    setSlash(null);
-    if (task === "week") return p.onWeek?.();
-    if (task === "checklist") {
-      // The paragraph above the empty line.
-      const doc = v.state.doc;
-      let n = doc.lineAt(head).number - 1;
-      while (n >= 1 && !doc.line(n).text.trim()) n--;
-      if (n < 1) return say("There is no paragraph above");
-      let a = n;
-      while (a > 1 && doc.line(a - 1).text.trim()) a--;
-      return void run("checklist", doc.line(a).from, doc.line(n).to);
+  interface MenuItem {
+    label: string;
+    hint: string;
+    go(): void;
+  }
+
+  /** What the menu offers now, narrowed by what is typed. Typed words that match nothing are an ask. */
+  const menuItems = (): MenuItem[] => {
+    const m = menu();
+    if (!m) return [];
+    const has = m.to > m.from;
+    const len = view().state.doc.length;
+    const out: MenuItem[] = [];
+    if (has) {
+      for (const [task, label] of [
+        ["tidy", "Tidy"],
+        ["shorten", "Shorten"],
+        ["list", "Make a list"],
+        ["checklist", "Turn into a checklist"],
+        ["explain", "Explain"],
+      ] as const)
+        out.push({ label, hint: m.whole ? "this paragraph" : "the selection", go: () => void run(task, m.from, m.to) });
+    } else {
+      const above = paragraphAbove(m.head);
+      if (above) out.push({ label: "Turn into a checklist", hint: "the paragraph above", go: () => void run("checklist", above.from, above.to) });
     }
-    void run(task, head, head);
-  }
-
-  const slashKeys = (e: KeyboardEvent) => {
-    const s = slash();
-    if (!s) return;
-    const items = slashItems();
-    if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) setSlash({ ...s, i: (s.i + 1) % items.length });
-    else if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p")) setSlash({ ...s, i: (s.i + items.length - 1) % items.length });
-    else if (e.key === "Enter") slashRun(items[s.i].task);
-    else if (e.key === "Escape") setSlash(null);
-    else return setSlash(null);
-    e.preventDefault();
-    e.stopPropagation();
+    out.push({ label: "Continue writing", hint: "from the cursor", go: () => void run("continue", m.head, m.head) });
+    out.push({ label: "Summarize", hint: "the text above the cursor", go: () => void run("summarize", m.head, m.head) });
+    out.push({ label: "Suggest a title", hint: "renames the note if you keep it", go: () => void run("title", 0, len) });
+    const promptRange = m.whole ? { from: 0, to: len } : { from: m.from, to: m.to };
+    for (const n of prompts())
+      out.push({ label: n.title, hint: m.whole ? "your prompt · the whole note" : "your prompt · the selection", go: () => void runPrompt(n, promptRange) });
+    const q = m.q.trim();
+    if (!q) return out;
+    const found = rank(q, out, (x) => x.label);
+    const target = has ? { from: m.from, to: m.to } : { from: 0, to: len };
+    return [...found, { label: `Ask: “${q}”`, hint: has ? "rewrite it this way" : "rewrite the note this way", go: () => void run("custom", target.from, target.to, q) }];
   };
 
-  const barKeys = (e: KeyboardEvent) => {
-    const b = bar();
-    if (!b || b.ask) return;
-    if ((e.key === "ArrowDown" && prompts().length) || (e.key === "ArrowUp" && pi() >= 0) || (e.key === "Enter" && pi() >= 0)) {
-      e.preventDefault();
-      e.stopPropagation();
-      if (e.key === "Enter") return void runPrompt(prompts()[pi()]);
-      return setPi(e.key === "ArrowDown" ? Math.min(prompts().length - 1, pi() + 1) : pi() - 1);
-    }
-    const i = ["1", "2", "3", "4"].indexOf(e.key);
-    if (i >= 0) {
-      e.preventDefault();
-      const r = range();
-      return void run(BAR[i].task, r.from, r.to);
-    }
-    if (e.key === "a" || e.key === "5") {
-      e.preventDefault();
-      return setBar({ ...b, ask: true });
-    }
-    if (e.key === "Escape") {
-      e.preventDefault();
-      e.stopPropagation();
-      setBar(null);
-      view().focus();
-    }
+  const menuKey = (e: KeyboardEvent) => {
+    const m = menu();
+    if (!m) return;
+    const items = menuItems();
+    const n = items.length;
+    const digit = Number(e.key);
+    if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) setMenu({ ...m, i: (m.i + 1) % Math.max(1, n) });
+    else if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p")) setMenu({ ...m, i: (m.i + n - 1) % Math.max(1, n) });
+    else if (e.key === "Enter") {
+      const it = items[m.i];
+      setMenu(null);
+      if (it) it.go();
+      else view().focus();
+    } else if (e.key === "Escape" || (e.ctrlKey && e.key.toLowerCase() === "j")) closeMenu();
+    else if (!m.q && digit >= 1 && digit <= Math.min(9, n)) {
+      setMenu(null);
+      items[digit - 1].go();
+    } else return;
+    e.preventDefault();
+    e.stopPropagation();
   };
 
   // ---- headings in the margin ---------------------------------------------------------------------------------
@@ -424,7 +410,7 @@ export default function NotePage(p: Props) {
       setTypingNow(true);
       clearTimeout(typingTimer);
       typingTimer = setTimeout(() => setTypingNow(false), 1500);
-      setBar(null);
+      setMenu(null);
       setExplain(null);
     });
     saver = createNoteSaver({
@@ -468,13 +454,12 @@ export default function NotePage(p: Props) {
       }),
     ]);
     editor.view.contentDOM.addEventListener("keydown", (e) => {
-      if (slash()) return slashKeys(e);
       if (e.key === "/" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         const s = view().state;
         const line = s.doc.lineAt(s.selection.main.head);
         if (!line.text.trim() && s.selection.main.empty) {
           e.preventDefault();
-          openSlash();
+          openMenu();
         }
       }
     }, true);
@@ -539,7 +524,6 @@ export default function NotePage(p: Props) {
   });
 
   const onKey = (e: KeyboardEvent) => {
-    if (bar()) return barKeys(e);
     if (explain() && e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
@@ -548,7 +532,8 @@ export default function NotePage(p: Props) {
     }
     if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "j") {
       e.preventDefault();
-      openBar();
+      if (menu()) closeMenu();
+      else openMenu();
     }
   };
   document.addEventListener("keydown", onKey, true);
@@ -734,93 +719,52 @@ export default function NotePage(p: Props) {
         </span>
       </footer>
 
-      <Show when={bar()}>
-        {(b) => (
-          <div class="ai-bar" style={{ left: `${Math.max(12, b().x)}px`, top: `${Math.max(56, b().y)}px` }} onMouseDown={(e) => e.target === e.currentTarget && e.preventDefault()}>
-            <Show
-              when={!b().ask}
-              fallback={
-                <form
-                  class="ai-ask"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    const r = range();
-                    const i = asking().trim();
-                    if (i) void run("custom", r.from, r.to, i);
-                    setAsking("");
-                  }}
-                >
-                  <span class="spark">✦</span>
-                  <input
-                    autofocus
-                    ref={(el) => setTimeout(() => el.focus())}
-                    placeholder="What should Claude do with this?"
-                    value={asking()}
-                    onInput={(e) => setAsking(e.currentTarget.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Escape") {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setBar(null);
-                        view().focus();
-                      }
-                    }}
-                  />
-                </form>
-              }
-            >
+      <Show when={menu()}>
+        {(m) => (
+          <div
+            class="menu ai-menu"
+            style={{ left: `${Math.max(12, Math.min(m().x, innerWidth - 380))}px`, top: `${Math.max(56, Math.min(m().y, innerHeight - 380))}px` }}
+            role="dialog"
+            aria-label="Ask Claude"
+          >
+            <div class="ai-menu-field">
               <span class="spark">✦</span>
-              <For each={BAR}>
+              <input
+                ref={(el) => setTimeout(() => el.focus())}
+                placeholder="Pick one, or say what to do…"
+                value={m().q}
+                onInput={(e) => setMenu({ ...m(), q: e.currentTarget.value, i: 0 })}
+                onKeyDown={menuKey}
+                onBlur={() => setMenu(null)}
+              />
+            </div>
+            <div class="ai-menu-list" role="listbox">
+              <For each={menuItems()}>
                 {(x, i) => (
                   <button
-                    class="ai-bar-btn"
+                    class="menu-item"
+                    role="option"
+                    aria-selected={i() === m().i}
+                    classList={{ on: i() === m().i }}
                     onMouseDown={(e) => e.preventDefault()}
+                    onMouseMove={() => i() !== m().i && setMenu({ ...m(), i: i() })}
                     onClick={() => {
-                      const r = range();
-                      void run(x.task, r.from, r.to);
+                      setMenu(null);
+                      x.go();
                     }}
                   >
-                    {x.label} <kbd>{i() + 1}</kbd>
+                    <Show when={!m().q && i() < 9}>
+                      <kbd>{i() + 1}</kbd>
+                    </Show>
+                    <span>{x.label}</span>
+                    <span class="muted">{x.hint}</span>
                   </button>
                 )}
               </For>
-              <button class="ai-bar-btn" onMouseDown={(e) => e.preventDefault()} onClick={() => setBar({ ...b(), ask: true })}>
-                Ask… <kbd>A</kbd>
-              </button>
-              <Show when={prompts().length}>
-                <div class="ai-prompts">
-                  <div class="menu-head">
-                    Your prompts <span class="muted">{barWhole() ? "on the whole note" : "on the selection"} · ↓ to choose</span>
-                  </div>
-                  <For each={prompts()}>
-                    {(n, i) => (
-                      <button class="menu-item" classList={{ on: i() === pi() }} onMouseDown={(e) => e.preventDefault()} onClick={() => void runPrompt(n)}>
-                        <span>{n.title}</span>
-                        <span class="muted">{n.preview.split("\n")[0].slice(0, 60)}</span>
-                      </button>
-                    )}
-                  </For>
-                </div>
-              </Show>
-            </Show>
-          </div>
-        )}
-      </Show>
-
-      <Show when={slash()}>
-        {(s) => (
-          <div class="menu slash" style={{ left: `${s().x}px`, top: `${s().y}px` }}>
-            <div class="menu-head">
-              <span class="spark">✦</span> Ask Claude
             </div>
-            <For each={slashItems()}>
-              {(x, i) => (
-                <button class="menu-item" classList={{ on: i() === s().i }} onMouseDown={(e) => e.preventDefault()} onClick={() => slashRun(x.task)}>
-                  <span>{x.label}</span>
-                  <span class="muted">{x.hint}</span>
-                </button>
-              )}
-            </For>
+            <footer class="ai-menu-foot">
+              <KeyHints hints={[["1–9", "pick"], ["Enter", "run"], ["Esc", "close"]]} />
+            </footer>
           </div>
         )}
       </Show>
