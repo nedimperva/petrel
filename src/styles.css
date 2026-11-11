@@ -2444,3 +2444,12 @@ kbd {
 .task-row.on .task-box {
   border-color: var(--accent);
 }
+
+/* The one-line key footer: the same on every screen. */
+.key-hint {
+  white-space: nowrap;
+  color: var(--faint);
+}
+.key-hint .keys kbd + kbd {
+  margin-left: 2px;
+}

@@ -1,15 +1,15 @@
-// Sending a capture with a word: `#recipes` files it in that collection, `#today` on today's page (`#fri`,
-// `#tomorrow`, `#nov20` on that day's), `>Groceries` adds it to the end of that note. The word is taken out of the
-// text. Pure, for `npm test`; the capture window does the looking up and passes `dayWord` (journal/days.ts).
+// Where a capture goes, said with one sign: `@recipes` files it in that collection, `@today`, `@fri`, `@nov20`
+// on that day's page, `@Groceries` (or `@trip-to-mostar`) adds it to the end of that note. `#` stays a heading and
+// `>` a quote: they never route. The word is taken out of the text. Pure, for `npm test`; the capture window does
+// the looking up and passes `dayWord` (journal/days.ts).
 
 export interface Token {
-  sign: "#" | ">";
   word: string;
   from: number;
   to: number;
 }
 
-/** The `#word` and `>word` in a text, outside code. `# Heading` (with a space) and `> quote` are Markdown, not words. */
+/** The `@word`s in a text, outside code. An address like `ana@example.com` has no space before the `@`. */
 export function tokens(text: string): Token[] {
   const out: Token[] = [];
   let fence = false;
@@ -18,11 +18,11 @@ export function tokens(text: string): Token[] {
     if (/^\s*(```|~~~)/.test(line)) fence = !fence;
     else if (!fence) {
       const code = codeSpans(line);
-      const re = /(^|\s)([#>])([\p{L}\p{N}][\p{L}\p{N}_-]*)/gu;
+      const re = /(^|\s)@([\p{L}\p{N}][\p{L}\p{N}_-]*)/gu;
       for (let m = re.exec(line); m; m = re.exec(line)) {
         const from = m.index + m[1].length;
         if (code.some(([a, b]) => from >= a && from < b)) continue;
-        out.push({ sign: m[2] as "#" | ">", word: m[3], from: at + from, to: at + from + 1 + m[3].length });
+        out.push({ word: m[2], from: at + from, to: at + from + 1 + m[2].length });
       }
     }
     at += line.length + 1;
@@ -45,18 +45,17 @@ export function strip(text: string, t: { from: number; to: number }): string {
   return text.slice(0, from) + text.slice(to);
 }
 
-/** The token being typed just before the cursor, for the suggestion list. */
-export function typingToken(lineBefore: string): { sign: "#" | ">"; word: string; back: number } | null {
-  const m = /(?:^|\s)([#>])([\p{L}\p{N}_-]*)$/u.exec(lineBefore);
+/** The `@word` being typed just before the cursor, for the suggestion list. */
+export function typingToken(lineBefore: string): { word: string; back: number } | null {
+  const m = /(?:^|\s)@([\p{L}\p{N}_-]*)$/u.exec(lineBefore);
   if (!m) return null;
-  return { sign: m[1] as "#" | ">", word: m[2], back: m[2].length + 1 };
+  return { word: m[1], back: m[1].length + 1 };
 }
 
 export type Route = { kind: "folder"; folder: string } | { kind: "day"; date: string } | { kind: "note"; title: string };
 
-/** Which typed token routes the capture: the last one that names a collection, a day, or a note title (case
- * does not matter; a note's title may use spaces where the word has `-`). A collection named like a day wins,
- * except over `#today`. */
+/** Which `@word` routes the capture: the last one that names something. In order: `@today`, a collection, a day,
+ * a note title (case does not matter; a title may use spaces where the word has `-`). */
 export function pickRoute(
   text: string,
   folders: string[],
@@ -68,16 +67,13 @@ export function pickRoute(
   for (let i = found.length - 1; i >= 0; i--) {
     const t = found[i];
     const w = low(t.word);
-    if (t.sign === "#") {
-      const day = dayWord(w);
-      if (w === "today" && day) return { route: { kind: "day", date: day }, token: t };
-      const f = folders.find((x) => !x.includes("/") && low(x) === w);
-      if (f) return { route: { kind: "folder", folder: f }, token: t };
-      if (day) return { route: { kind: "day", date: day }, token: t };
-    } else {
-      const n = noteTitles.find((x) => low(x) === w || low(x).replace(/\s+/g, "-") === w);
-      if (n) return { route: { kind: "note", title: n }, token: t };
-    }
+    const day = dayWord(w);
+    if (w === "today" && day) return { route: { kind: "day", date: day }, token: t };
+    const f = folders.find((x) => !x.includes("/") && low(x) === w);
+    if (f) return { route: { kind: "folder", folder: f }, token: t };
+    if (day) return { route: { kind: "day", date: day }, token: t };
+    const n = noteTitles.find((x) => low(x) === w || low(x).replace(/\s+/g, "-") === w);
+    if (n) return { route: { kind: "note", title: n }, token: t };
   }
   return null;
 }

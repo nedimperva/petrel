@@ -43,6 +43,20 @@ export function ToastView() {
   );
 }
 
+/** The one-line key footer every screen ends with: `[keys, what]` pairs, in the same look everywhere. A false
+ * entry is left out, so a screen can list keys that only apply now. */
+export function KeyHints(p: { hints: ([string, string] | false | null | undefined)[] }) {
+  return (
+    <For each={p.hints.filter((h): h is [string, string] => !!h)}>
+      {([keys, what]) => (
+        <span class="key-hint">
+          <Kbd keys={keys} /> {what}
+        </span>
+      )}
+    </For>
+  );
+}
+
 export function Kbd(p: { keys: string }) {
   return (
     <span class="keys">
