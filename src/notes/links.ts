@@ -1,4 +1,5 @@
-// `[[links]]` in the editor: drawn as links, `Ctrl Click` or `Alt Enter` follows one, hovering shows what it points
+// `[[links]]` in the editor: drawn as links, `Ctrl Click` or `Alt Enter` follows one (`Shift Enter` opens it
+// beside), hovering shows what it points
 // at, and typing `[[` lists notes and drafts. Used by the draft editor and the note editor alike. The parser
 // mirrors crates/petrel-core/src/links.rs (which has the tests that count); this one only has to find links to
 // draw and follow them.
@@ -31,6 +32,8 @@ export interface LinkOptions {
   targets(text: string): Promise<LinkTarget[]>;
   /** "Create note": makes the note, then the link is typed. */
   create?(title: string): Promise<void>;
+  /** Shift Enter on a link: open it beside the note. */
+  beside?(inner: string): void;
 }
 
 const resolved = StateEffect.define<null>();
@@ -193,7 +196,18 @@ export function linkExtensions(o: LinkOptions): Extension {
     hover,
     autocompletion({ override: [complete], icons: false, activateOnTyping: true }),
     completionTheme,
-    keymap.of([{ key: "Alt-Enter", run: follow }]),
+    keymap.of([
+      { key: "Alt-Enter", run: follow },
+      {
+        key: "Shift-Enter",
+        run: (view) => {
+          const l = o.beside && linkAt(view, view.state.selection.main.head);
+          if (!l) return false;
+          o.beside!(l.inner);
+          return true;
+        },
+      },
+    ]),
     EditorView.domEventHandlers({
       mousedown(e, view) {
         if (!(e.ctrlKey || e.metaKey) || e.button !== 0) return false;

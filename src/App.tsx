@@ -2,16 +2,19 @@
 // ago); Ctrl L swaps the page for the library of cards and Esc brings it back. Ctrl K finds, runs or asks, Ctrl N
 // is a new page, Ctrl D today's page (Alt ← and Alt → the days around it), Ctrl H history, Ctrl , settings. The
 // inbox review takes the page's place while it runs. The title bar is Petrel's own (TitleBar.tsx).
+// Ctrl Tab goes back to the note before (held, it lists the last few); Ctrl \ opens a second note beside.
 
-import { createResource, createSignal, lazy, onCleanup, onMount, Show, Suspense } from "solid-js";
-import { api, errText, inTauri, type AiStatus } from "./api";
+import { createResource, createSignal, For, lazy, onCleanup, onMount, Show, Suspense } from "solid-js";
+import { api, errText, inTauri, type AiStatus, type Note, type NoteSummary } from "./api";
 import { plainText } from "./copy";
 import TitleBar from "./TitleBar";
 import { libraryTabs, loadLibrary } from "./library/Library";
 import NotePage, { type NotePageHandle } from "./note/NotePage";
 import CommandBar, { type Command } from "./palette/CommandBar";
-import { applyPrefs, parsePrefs, prefs, setPrefs } from "./settings/prefs";
+import { applyPrefs, changePref, parsePrefs, prefs, setPrefs } from "./settings/prefs";
 import { folderName, say, ToastView, typing, undoLast } from "./ui";
+import { pushRecent } from "./palette/match";
+import Beside, { type BesideHandle } from "./note/Beside";
 import Destination, { type Target } from "./inbox/Destination";
 import { addDays, JOURNAL, today } from "./journal/days";
 import { typingSound } from "./joy/sound";
@@ -32,12 +35,38 @@ type View =
 const NEW_FOLDER = "inbox";
 /** Coming back within this long opens the note you left instead of an empty page. */
 const RESUME_MS = 10 * 60 * 1000;
+/** Notes remembered for Back and for Ctrl K's empty list. */
+const RECENT_MAX = 12;
+/** Ctrl held this long on Ctrl Tab shows the list; a quick press just swaps. */
+const SWITCH_SHOW_MS = 280;
+
+const summaryOf = (n: Note): NoteSummary => ({
+  id: n.id,
+  path: n.path,
+  folder: n.folder,
+  title: n.title,
+  preview: n.body.slice(0, 200),
+  tags: n.tags,
+  pinned: n.pinned,
+  modifiedAt: n.modifiedAt,
+});
+
+/** The notes for these ids that still exist, in order. */
+async function summaries(ids: number[]): Promise<NoteSummary[]> {
+  const s = await api();
+  const ns = await Promise.all(ids.map((id) => s.peekNote(id).then(summaryOf, () => null)));
+  return ns.filter((n): n is NoteSummary => !!n);
+}
 
 export default function App() {
   const [view, setView] = createSignal<View>({ kind: "note", id: null, folder: NEW_FOLDER });
   const [title, setTitle] = createSignal("");
   const [tab, setTab] = createSignal("all");
-  const [bar, setBar] = createSignal<"all" | "notes" | null>(null);
+  const [bar, setBar] = createSignal<"all" | "notes" | "beside" | null>(null);
+  const [beside, setBeside] = createSignal<number | null>(null);
+  let besideH: BesideHandle | undefined;
+  const [recent, setRecent] = createSignal<number[]>([]);
+  const [switcher, setSwitcher] = createSignal<{ ids: number[]; i: number; shown: boolean; notes: NoteSummary[] } | null>(null);
   const [settings, setSettings] = createSignal<false | "all" | "ai">(false);
   const [history, setHistory] = createSignal(false);
   const [moving, setMoving] = createSignal(false);
@@ -51,6 +80,8 @@ export default function App() {
 
   const go = async (v: View, remember = true) => {
     if (view().kind === "note") await page?.flush();
+    // The note beside is never also the main one.
+    if (v.kind === "note" && v.id !== null && v.id === beside()) await closeBeside(false);
     if (remember) {
       back.push(view());
       if (back.length > 30) back.shift();
@@ -87,6 +118,56 @@ export default function App() {
   };
   const current = () => (view().kind === "note" ? (page?.note() ?? null) : null);
   const onNote = () => view().kind === "note" && !!current();
+
+  // ---- a note beside, and Back -------------------------------------------------------------------------------
+
+  async function openBeside(id: number) {
+    if (current()?.id === id) return say("That note is already open here");
+    if (view().kind !== "note") await writing();
+    await besideH?.flush();
+    setBeside(id);
+  }
+  async function closeBeside(refocus = true) {
+    await besideH?.flush();
+    besideH = undefined;
+    setBeside(null);
+    if (refocus) page?.focus();
+  }
+  /** "Open here": the note beside becomes the main one, and the main one goes beside. */
+  async function swapBeside(id: number) {
+    const main = current()?.id ?? null;
+    await closeBeside(false);
+    await openNote(id);
+    if (main !== null && main !== id) setBeside(main);
+  }
+
+  let recentTimer: ReturnType<typeof setTimeout> | undefined;
+  const seen = (id: number | null) => {
+    if (id === null) return;
+    setRecent(pushRecent(recent().map(String), String(id), RECENT_MAX).map(Number));
+    clearTimeout(recentTimer);
+    recentTimer = setTimeout(() => void api().then((s) => s.setUiSetting("ui.recent", JSON.stringify(recent()))).catch(() => {}), 1000);
+  };
+  /** The recent notes without the one being written on: Ctrl K's empty list. */
+  const others = () => recent().filter((id) => id !== current()?.id);
+
+  /** Ctrl Tab: the note before this one at once; held, the list of the last few to step through. */
+  function switchStep(back: boolean) {
+    const s = switcher();
+    if (s) return setSwitcher({ ...s, i: (s.i + (back ? s.ids.length - 1 : 1)) % s.ids.length });
+    const here = current()?.id;
+    const ids = here !== undefined ? [here, ...others()] : others();
+    if (ids.length < (here !== undefined ? 2 : 1)) return say("No other note yet");
+    const start = here !== undefined ? 1 : 0;
+    setSwitcher({ ids, i: back ? ids.length - 1 : start, shown: false, notes: [] });
+    void summaries(ids.slice(0, 8)).then((notes) => switcher() && setSwitcher({ ...switcher()!, notes }));
+    setTimeout(() => switcher() && setSwitcher({ ...switcher()!, shown: true }), SWITCH_SHOW_MS);
+  }
+  function switchDone(go = true) {
+    const s = switcher();
+    setSwitcher(null);
+    if (go && s && s.ids[s.i] !== current()?.id) void openNote(s.ids[s.i]);
+  }
 
   async function copy(how: "plain" | "markdown" | "html") {
     const n = current();
@@ -168,6 +249,18 @@ export default function App() {
     { id: "related", label: "AI: Find related notes", when: onNote, run: () => page?.findRelated() },
     { id: "move", label: "Move to a note or collection…", when: onNote, run: () => setMoving(true) },
     { id: "task", label: "Add a task, or tick one", keys: "Ctrl Shift X", when: () => view().kind === "note", run: () => page?.task() },
+    { id: "beside", label: "Open a note beside this one", keys: "Ctrl \\", run: () => setTimeout(() => setBar("beside")) },
+    { id: "beside-close", label: "Close the note beside", when: () => beside() !== null, run: () => void closeBeside() },
+    { id: "back", label: "Back to the note before", keys: "Ctrl Tab", when: () => others().length > 0, run: () => void openNote(others()[0]) },
+    {
+      id: "focus",
+      label: "Paragraph focus: fade the other paragraphs (on or off)",
+      run: () => {
+        const on = !prefs().focus;
+        void changePref("focus", on, async (k, v) => (await api()).setUiSetting(k, v));
+        say(on ? "Paragraph focus is on" : "Paragraph focus is off");
+      },
+    },
     { id: "pin", label: "Pin or unpin this note", when: onNote, run: () => void pin() },
     { id: "history", label: "History", keys: "Ctrl H", when: onNote, run: () => setHistory(true) },
     { id: "delete", label: "Delete this note", when: onNote, run: () => void trash() },
@@ -196,6 +289,28 @@ export default function App() {
 
   const overlay = () => !!(bar() || settings() || history() || moving() || week());
 
+  // Ctrl Tab and Ctrl \ come before the editor, which would indent or type them.
+  const earlyKey = (e: KeyboardEvent) => {
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && e.key === "Tab" && !overlay()) {
+      e.preventDefault();
+      e.stopPropagation();
+      switchStep(e.shiftKey);
+    } else if (switcher() && e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      switchDone(false);
+    } else if (mod && !e.altKey && (e.key === "\\" || e.code === "Backslash") && !overlay()) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (beside() !== null) void closeBeside();
+      else setBar("beside");
+    }
+  };
+  const keyUp = (e: KeyboardEvent) => {
+    if (switcher() && (e.key === "Control" || e.key === "Meta")) switchDone();
+  };
+
   const key = (e: KeyboardEvent) => {
     const mod = e.ctrlKey || e.metaKey;
     const k = e.key.toLowerCase();
@@ -213,6 +328,8 @@ export default function App() {
     else if (e.key === "Escape" && view().kind === "library") {
       if (document.querySelector(".scrim")) return;
       void writing();
+    } else if (e.key === "Escape" && beside() !== null && view().kind === "note" && !e.defaultPrevented && !document.querySelector(".scrim, .menu, .ai-bar, .explain")) {
+      void closeBeside();
     } else if (!mod && !typing(e) && e.key === "z" && view().kind === "note") {
       if (!undoLast()) return;
     } else return;
@@ -233,6 +350,9 @@ export default function App() {
   onMount(async () => {
     document.addEventListener("keydown", key);
     document.addEventListener("keydown", dayKey, true);
+    document.addEventListener("keydown", earlyKey, true);
+    document.addEventListener("keyup", keyUp, true);
+    window.addEventListener("blur", () => switcher() && switchDone(false));
     void loadFaces();
     const s = await api();
     try {
@@ -243,7 +363,14 @@ export default function App() {
       applyPrefs(prefs());
     }
     setRoot((await s.notesInfo().catch(() => ({ root: "" }))).root);
-    const [lastId, at] = (((await s.uiSettings().catch(() => ({}) as Record<string, string>))["last.note"] ?? "") as string).split(":").map(Number);
+    const stored = await s.uiSettings().catch(() => ({}) as Record<string, string>);
+    try {
+      const r = JSON.parse(stored["ui.recent"] ?? "[]");
+      if (Array.isArray(r)) setRecent(r.filter((x) => typeof x === "number").slice(0, RECENT_MAX));
+    } catch {
+      // A bad list is no list.
+    }
+    const [lastId, at] = ((stored["last.note"] ?? "") as string).split(":").map(Number);
     if (lastId && Date.now() - at < RESUME_MS) void go({ kind: "note", id: lastId, folder: "" }, false);
     setAi(await s.aiStatus().catch(() => ({ ready: false, model: "", error: null })));
     await s.scanNotes().catch((e) => say(`The Petrel folder cannot be read: ${errText(e)}`, { error: true }));
@@ -277,6 +404,8 @@ export default function App() {
   onCleanup(() => {
     document.removeEventListener("keydown", key);
     document.removeEventListener("keydown", dayKey, true);
+    document.removeEventListener("keydown", earlyKey, true);
+    document.removeEventListener("keyup", keyUp, true);
   });
 
   const noteView = () => {
@@ -297,7 +426,7 @@ export default function App() {
         onSearch={() => setBar("all")}
       />
 
-      <main class="view">
+      <main class="view" classList={{ split: beside() !== null && view().kind === "note" }}>
         <Suspense>
           <Show when={view().kind === "library"}>
             <Library
@@ -337,19 +466,53 @@ export default function App() {
                 day={v().day ?? null}
                 onDay={(d) => void openDay(d)}
                 onWeek={() => setWeek(true)}
+                onNoteId={seen}
+                onBeside={(id) => void openBeside(id)}
+                besideOpen={beside() !== null}
                 ref={(h) => (page = h)}
+              />
+            )}
+          </Show>
+          <Show when={view().kind === "note" && beside()}>
+            {(id) => (
+              <Beside
+                id={id()}
+                onClose={() => void closeBeside()}
+                onSwap={(i) => void swapBeside(i)}
+                onFollow={(i) => (i === current()?.id ? say("That note is already open here") : setBeside(i))}
+                ref={(h) => (besideH = h)}
               />
             )}
           </Show>
         </Suspense>
       </main>
+      <Show when={switcher()?.shown && switcher()}>
+        {(s) => (
+          <div class="switcher" role="listbox" aria-label="Recent notes">
+            <For each={s().ids.slice(0, 8)}>
+              {(id, k) => {
+                const n = () => s().notes.find((x) => x.id === id);
+                return (
+                  <div class="switcher-row" role="option" aria-selected={k() === s().i} classList={{ on: k() === s().i }} onMouseDown={(e) => (e.preventDefault(), setSwitcher({ ...s(), i: k() }), switchDone())}>
+                    <span class="row-label">{n() ? (n()!.folder === "inbox" ? n()!.preview.split("\n")[0] : n()!.title) : "…"}</span>
+                    <span class="row-sub">{n() ? folderName(n()!.folder) : ""}</span>
+                  </div>
+                );
+              }}
+            </For>
+            <p class="muted small">Tab next · Shift Tab back · let go of Ctrl to open</p>
+          </div>
+        )}
+      </Show>
 
       <Show when={bar()}>
         <CommandBar
           commands={commands}
-          notesOnly={bar() === "notes"}
+          notesOnly={bar() === "notes" || bar() === "beside"}
+          placeholder={bar() === "beside" ? "Open a note beside this one…" : undefined}
+          recent={others()}
           aiReady={ai().ready}
-          onOpen={openNote}
+          onOpen={bar() === "beside" ? (id) => void openBeside(id) : openNote}
           onAiSetup={() => setSettings("ai")}
           onClose={() => {
             setBar(null);

@@ -24,6 +24,9 @@ type Row = { kind: "ask" } | { kind: "note"; n: NoteSummary } | { kind: "command
 export default function CommandBar(p: {
   commands: Command[];
   notesOnly?: boolean;
+  placeholder?: string;
+  /** The notes written on last, newest first: the list before anything is typed. */
+  recent?: number[];
   aiReady: boolean;
   onOpen(id: number): void;
   onAiSetup(): void;
@@ -41,7 +44,14 @@ export default function CommandBar(p: {
     const s = await api();
     const f = parseFilters(text);
     if (noFilters(f)) {
-      if (!text.trim()) return p.notesOnly ? s.listNotes({ limit: 12 }) : [];
+      if (!text.trim()) {
+        const ids = (p.recent ?? []).slice(0, 8);
+        const ns = (await Promise.all(ids.map((id) => s.peekNote(id).catch(() => null)))).filter((n) => !!n);
+        const recent: NoteSummary[] = ns.map((n) => ({ id: n.id, path: n.path, folder: n.folder, title: n.title, preview: n.body.slice(0, 200), tags: n.tags, pinned: n.pinned, modifiedAt: n.modifiedAt }));
+        if (!p.notesOnly) return recent;
+        const seen = new Set(recent.map((n) => n.id));
+        return [...recent, ...(await s.listNotes({ limit: 12 })).filter((n) => !seen.has(n.id))].slice(0, 12);
+      }
       const [byTitle, byWords] = await Promise.all([s.findNotes(text, 8), s.searchNotes(text, 12)]);
       const seen = new Set(byTitle.map((n) => n.id));
       return [...byTitle, ...byWords.filter((n) => !seen.has(n.id))].slice(0, 12);
@@ -141,7 +151,7 @@ export default function CommandBar(p: {
           <input
             class="palette-input"
             ref={input}
-            placeholder={p.notesOnly ? "Find a note…" : "Search, run a command, or ask your notes a question…"}
+            placeholder={p.placeholder ?? (p.notesOnly ? "Find a note…" : "Search, run a command, or ask your notes a question…")}
             value={q()}
             onInput={(e) => {
               setQ(e.currentTarget.value);

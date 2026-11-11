@@ -18,6 +18,8 @@ import { prefs } from "../settings/prefs";
 import { wordCount } from "../copy";
 import { folderName, say } from "../ui";
 import { aiPreview, keepPreview, previewOf, setPreview, type Preview } from "./aiPreview";
+import { currentHeading, outline, type Heading } from "./outline";
+import { EditorView } from "@codemirror/view";
 
 export interface NotePageHandle {
   note(): Note | null;
@@ -30,6 +32,10 @@ export interface NotePageHandle {
   /** The line (or the selected lines) becomes a task, or a task is ticked. */
   task(): void;
   reload(): Promise<void>;
+  /** Unsaved typing in it. */
+  dirty(): boolean;
+  /** The file changed on disk: load it again where you were. False when it could not be. */
+  refresh(): Promise<boolean>;
   focus(): void;
 }
 
@@ -45,6 +51,14 @@ interface Props {
   onHistory(): void;
   /** The title as it is typed, for the title bar. */
   onTitle?(title: string): void;
+  /** The note being written on, once it is a file: for Back (Ctrl Tab). */
+  onNoteId?(id: number | null): void;
+  /** Open a note on the right (Shift Enter on a link). */
+  onBeside?(id: number): void;
+  /** A note is open beside: the margin is taken. */
+  besideOpen?: boolean;
+  /** A line in the footer for a moment ("Updated from Drive"). */
+  notice?: string | null;
   /** A day's page (`YYYY-MM-DD`) that may not have a file yet. */
   day?: string | null;
   /** Go to another day's page. */
@@ -138,6 +152,7 @@ export default function NotePage(p: Props) {
       setTitle("");
       setLinks({ linked: [], mentioned: [] });
       setWords(0);
+      setHeads([]);
       if (p.day) {
         // Today's empty page starts with the time; it is not a file until something is written after it.
         if (p.day === today()) editor?.load(`${clock()} `, 6);
@@ -149,7 +164,7 @@ export default function NotePage(p: Props) {
       const n = await (await api()).openNote(id);
       saver.load(n);
       setTitle(n.title);
-      setWords(wordCount(n.body));
+      measure();
       void loadLinks(n.id);
       editor?.view.focus();
     } catch (e) {
@@ -332,10 +347,33 @@ export default function NotePage(p: Props) {
     }
   };
 
+  // ---- headings in the margin ---------------------------------------------------------------------------------
+
+  const [heads, setHeads] = createSignal<Heading[]>([]);
+  const [here, setHere] = createSignal(-1);
+  // The margin steps back while you type, and comes back when you stop.
+  const [typingNow, setTypingNow] = createSignal(false);
+  let typingTimer: ReturnType<typeof setTimeout> | undefined;
+  const measure = () => {
+    const t = editor?.text() ?? "";
+    setWords(wordCount(t));
+    setHeads(outline(t));
+    setHere(currentHeading(heads(), editor?.cursor() ?? 0));
+  };
+  const minLevel = () => Math.min(...heads().map((h) => h.level));
+  const jump = (from: number) => {
+    const v = view();
+    v.dispatch({ selection: { anchor: from }, effects: EditorView.scrollIntoView(from, { y: "start", yMargin: 80 }) });
+    v.focus();
+  };
+
   onMount(() => {
     editor = createEditor(host, () => {
       saver.changed();
-      setWords(wordCount(editor!.text()));
+      measure();
+      setTypingNow(true);
+      clearTimeout(typingTimer);
+      typingTimer = setTimeout(() => setTypingNow(false), 1500);
       setBar(null);
       setExplain(null);
     });
@@ -349,6 +387,9 @@ export default function NotePage(p: Props) {
       conflict: (path) => say(`This note was also changed elsewhere. That copy is kept as ${path}.`, { error: true }),
     });
     editor.setExtra([
+      EditorView.updateListener.of((u) => {
+        if (u.selectionSet || u.docChanged) setHere(currentHeading(heads(), u.state.selection.main.head));
+      }),
       aiPreview(actions),
       cleanPaste(() => say("Pasted as Markdown. Ctrl Z for plain text.")),
       pictureExtensions(() => note()?.folder ?? p.folder),
@@ -369,6 +410,11 @@ export default function NotePage(p: Props) {
           return { title: n.title, where: folderName(n.folder), text: n.body.slice(0, 280) };
         },
         targets: async (text) => (await api()).linkTargets(text, 12),
+        beside: async (inner) => {
+          const r = await (await api()).resolveLink(inner);
+          if (r.kind === "note") p.onBeside?.(r.id);
+          else say("That note does not exist yet. Alt Enter makes it.");
+        },
       }),
     ]);
     editor.view.contentDOM.addEventListener("keydown", (e) => {
@@ -401,12 +447,32 @@ export default function NotePage(p: Props) {
         view().focus();
       },
       reload: () => load(note()?.id ?? null),
+      dirty: () => saver.dirty(),
+      refresh: async () => {
+        const n = note();
+        if (!n || saver.dirty() || !editor || previewOf(view().state)) return false;
+        const fresh = await (await api()).openNote(n.id).catch(() => null);
+        if (!fresh || saver.dirty()) return false;
+        if (fresh.body === editor.text()) {
+          setNote({ ...n, hash: fresh.hash, modifiedAt: fresh.modifiedAt });
+          return true;
+        }
+        const at = editor.cursor();
+        const top = editor.view.scrollDOM.scrollTop;
+        saver.load(fresh);
+        editor.select(at, at);
+        editor.view.scrollDOM.scrollTop = top;
+        measure();
+        return true;
+      },
       focus: () => editor?.view.focus(),
     });
     void load(p.id);
   });
 
   createEffect(() => editor?.setTypewriter(prefs().typewriter));
+  createEffect(() => editor?.setFocusMode(prefs().focus));
+  createEffect(on(() => note()?.id ?? null, (id) => p.onNoteId?.(id)));
   createEffect(() => {
     const d = dayPage();
     p.onTitle?.(d ? (d === today() ? "Today" : dayTitle(d)) : title() || (note() ? note()!.title : ""));
@@ -582,6 +648,23 @@ export default function NotePage(p: Props) {
           </aside>
         )}
       </Show>
+      <Show when={!dayPage() && !p.besideOpen && heads().length >= 3}>
+        <nav class="note-outline" classList={{ quiet: typingNow() }} aria-label="Headings">
+          <For each={heads()}>
+            {(h, i) => (
+              <button
+                class="outline-row"
+                classList={{ on: i() === here() }}
+                style={{ "padding-left": `${(h.level - minLevel()) * 12 + 8}px` }}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => jump(h.from)}
+              >
+                {h.text}
+              </button>
+            )}
+          </For>
+        </nav>
+      </Show>
       <footer class="page-foot">
         <span>{dayPage() ? "Journal" : folderName(note()?.folder ?? p.folder)}</span>
         <Show when={words()}>
@@ -591,6 +674,9 @@ export default function NotePage(p: Props) {
           <span>
             <kbd>Alt ←</kbd> <kbd>Alt →</kbd> other days
           </span>
+        </Show>
+        <Show when={p.notice}>
+          <span class="notice">{p.notice}</span>
         </Show>
         <span class="grow" />
         <span class="state" classList={{ bad: save() === "error", saved: save() === "saved" && !!note() }} title={synced() ? p.root : undefined}>

@@ -224,6 +224,10 @@ export default function Settings(p: { section?: "ai"; onClose(): void; onRoot(ro
             <input type="checkbox" checked={prefs().typewriter} onChange={(e) => pref("typewriter", e.currentTarget.checked)} />
             Typewriter scrolling: the line you type stays in the middle
           </label>
+          <label class="row check">
+            <input type="checkbox" checked={prefs().focus} onChange={(e) => pref("focus", e.currentTarget.checked)} />
+            Paragraph focus: the other paragraphs fade while you type
+          </label>
         </section>
 
         <section>

@@ -13,6 +13,8 @@ export interface Prefs {
   editorSize: number;
   /** Keep the line being typed in the middle of the window. */
   typewriter: boolean;
+  /** Paragraph focus: the other paragraphs fade while you type. */
+  focus: boolean;
   writeFont: WriteFont;
   /** The petrel crosses the page once when the inbox is clear. */
   petrel: boolean;
@@ -26,6 +28,7 @@ export const DEFAULTS: Prefs = {
   theme: "system",
   editorSize: 18,
   typewriter: false,
+  focus: false,
   writeFont: "literata",
   petrel: true,
   sound: false,
@@ -52,6 +55,7 @@ const KEYS: Record<keyof Prefs, string> = {
   theme: "ui.theme",
   editorSize: "ui.editor_size",
   typewriter: "ui.typewriter",
+  focus: "ui.focus",
   writeFont: "ui.write_font",
   petrel: "ui.petrel",
   sound: "ui.sound",
@@ -70,6 +74,7 @@ export function parsePrefs(m: Record<string, string>): Prefs {
     theme: THEMES.some((x) => x.id === t) ? (t as Theme) : DEFAULTS.theme,
     editorSize: size,
     typewriter: m[KEYS.typewriter] === "1",
+    focus: m[KEYS.focus] === "1",
     writeFont: FONTS.some((x) => x.id === f) ? (f as WriteFont) : DEFAULTS.writeFont,
     petrel: flag(m[KEYS.petrel], DEFAULTS.petrel),
     sound: flag(m[KEYS.sound], DEFAULTS.sound),
@@ -107,3 +112,12 @@ export function applyPrefs(p: Prefs) {
 }
 
 export const [prefs, setPrefs] = createSignal<Prefs>(DEFAULTS);
+
+/** Changes one preference everywhere: this window now, the database for the others. */
+export async function changePref<K extends keyof Prefs>(k: K, v: Prefs[K], store: (key: string, value: string) => Promise<void>) {
+  const next = { ...prefs(), [k]: v };
+  setPrefs(next);
+  applyPrefs(next);
+  const [sk, sv] = storedValue(k, v);
+  await store(sk, sv);
+}

@@ -2116,3 +2116,158 @@ kbd {
 .cm-earlier {
   opacity: 0.45;
 }
+
+/* Paragraph focus: the fade is for writing; reading the note (no focus) shows it whole. */
+.cm-editor:not(.cm-focused) .cm-dim {
+  opacity: 1;
+}
+
+/* ---- headings in the margin ------------------------------------------------------------------------------ */
+
+.note-outline {
+  position: absolute;
+  top: var(--s-7);
+  right: var(--s-6);
+  width: 196px;
+  max-height: calc(100% - 140px);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: var(--t-sm);
+  transition: opacity var(--d-slow) var(--ease);
+}
+.note-outline.quiet:not(:hover) {
+  opacity: 0.2;
+}
+.outline-row {
+  padding: 3px 8px;
+  border: 0;
+  border-left: 2px solid transparent;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.outline-row:hover {
+  color: var(--ink);
+}
+.outline-row.on {
+  border-left-color: var(--accent);
+  color: var(--ink);
+  font-weight: 500;
+}
+@media (max-width: 1180px) {
+  .note-outline {
+    display: none;
+  }
+}
+
+/* ---- a note beside ------------------------------------------------------------------------------------- */
+
+.view.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  overflow: hidden;
+}
+.view.split > .page {
+  min-width: 0;
+  overflow: hidden;
+}
+.view.split .day-month {
+  display: none;
+}
+.beside {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-left: 1px solid var(--line);
+  background: var(--sunk);
+}
+.beside-head,
+.beside-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 0 var(--s-4);
+  color: var(--faint);
+  font-size: var(--t-xs);
+}
+.beside-head {
+  height: 40px;
+}
+.beside-foot {
+  height: 36px;
+}
+.beside-title {
+  color: var(--ink-2);
+  font: 600 var(--t-md) / 1.2 var(--font-write);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.beside-text {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  --editor-max: 640px;
+  --editor-top: var(--s-2);
+  cursor: text;
+}
+.beside:not(.editing) .beside-text .cm-content {
+  caret-color: transparent;
+}
+.beside.editing {
+  background: var(--paper);
+}
+
+/* ---- Back: the last few notes while Ctrl is held ----------------------------------------------------------- */
+
+.switcher {
+  position: fixed;
+  top: 20%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  width: min(420px, calc(100vw - 32px));
+  padding: var(--s-2);
+  border-radius: var(--r-xl);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-lg);
+  animation: rise var(--d-base) var(--ease);
+}
+.switcher-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  min-height: 34px;
+  padding: 4px 10px;
+  border-radius: var(--r-md);
+  cursor: pointer;
+}
+.switcher-row.on {
+  background: var(--accent-soft);
+}
+.switcher .row-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.switcher p {
+  margin: var(--s-2) 10px 2px;
+}
+
+/* A line in the footer that says what just happened, then goes. */
+.page-foot .notice {
+  color: var(--accent);
+  animation: fade var(--d-slow) var(--ease);
+}
