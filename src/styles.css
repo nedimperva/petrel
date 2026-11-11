@@ -2342,3 +2342,105 @@ kbd {
   background: transparent !important;
   box-shadow: none !important;
 }
+
+/* ---- settle a conflict ----------------------------------------------------------------------------------- */
+
+.lcard.conflict {
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  border-style: dashed;
+}
+.settle {
+  width: min(1040px, calc(100vw - 48px));
+  max-height: calc(100vh - 80px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  padding: var(--s-5);
+  border-radius: var(--r-xl);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-lg);
+  animation: rise var(--d-base) var(--ease);
+}
+.settle-head h2 {
+  margin: 0 0 4px;
+  font: 600 24px/1.2 var(--font-write);
+}
+.settle-sides {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--s-4);
+}
+.settle-side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  min-height: 0;
+}
+.settle-text {
+  flex: 1;
+  min-height: 120px;
+  overflow: auto;
+  padding: var(--s-3) var(--s-4);
+  border-radius: var(--r-md);
+  background: var(--sunk);
+  font: 400 15px/1.65 var(--font-write);
+  white-space: pre-wrap;
+}
+.diff-del {
+  background: color-mix(in srgb, var(--bad) 18%, transparent);
+  color: inherit;
+  border-radius: 3px;
+}
+.diff-add {
+  background: color-mix(in srgb, var(--ok) 22%, transparent);
+  color: inherit;
+  border-radius: 3px;
+}
+
+/* ---- open tasks ------------------------------------------------------------------------------------------ */
+
+.palette.tasks {
+  width: min(680px, calc(100vw - 32px));
+}
+.task-group {
+  padding: 2px 0 6px;
+}
+.task-note {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-3);
+  width: 100%;
+  padding: 8px 10px 2px;
+  border: 0;
+  background: none;
+  color: var(--ink-2);
+  font: 600 var(--t-sm) / 1.3 var(--font-ui);
+  text-align: left;
+  cursor: pointer;
+}
+.task-row {
+  min-height: 32px;
+}
+.task-row .row-label {
+  flex: 1;
+  cursor: pointer;
+}
+.task-box {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1.5px solid var(--faint);
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+}
+.task-box:hover,
+.task-row.on .task-box {
+  border-color: var(--accent);
+}

@@ -5,7 +5,7 @@
 // Ctrl Tab goes back to the note before (held, it lists the last few); Ctrl \ opens a second note beside.
 
 import { createResource, createSignal, For, lazy, onCleanup, onMount, Show, Suspense } from "solid-js";
-import { api, errText, inTauri, type AiStatus, type Note, type NoteSummary } from "./api";
+import { api, errText, inTauri, type AiStatus, type Note, type NoteSummary, type ScanReport } from "./api";
 import { plainText } from "./copy";
 import TitleBar from "./TitleBar";
 import { libraryTabs, loadLibrary } from "./library/Library";
@@ -25,6 +25,7 @@ const Settings = lazy(() => import("./settings/Settings"));
 const Versions = lazy(() => import("./versions/Versions"));
 const Review = lazy(() => import("./inbox/Review"));
 const Week = lazy(() => import("./journal/Week"));
+const Tasks = lazy(() => import("./palette/Tasks"));
 
 type View =
   | { kind: "library"; tab: string }
@@ -71,6 +72,15 @@ export default function App() {
   const [history, setHistory] = createSignal(false);
   const [moving, setMoving] = createSignal(false);
   const [week, setWeek] = createSignal(false);
+  const [tasks, setTasks] = createSignal(false);
+  // A line in the page's footer for a moment ("Updated from Drive").
+  const [notice, setNotice] = createSignal<string | null>(null);
+  let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+  const tell = (text: string) => {
+    setNotice(text);
+    clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(() => setNotice(null), 5000);
+  };
   const [ai, setAi] = createSignal<AiStatus>({ ready: false, model: "", error: null });
   const [root, setRoot] = createSignal("");
   const [rev, setRev] = createSignal(0);
@@ -239,6 +249,7 @@ export default function App() {
     { id: "inbox", label: "Inbox", run: () => void library("inbox") },
     { id: "review", label: "Review the Inbox, one card at a time", run: () => void review() },
     { id: "week", label: "AI: Look back on the week", run: () => setWeek(true) },
+    { id: "tasks", label: "Open tasks in every note", run: () => void (page ? page.flush() : Promise.resolve(true)).then(() => setTasks(true)) },
     { id: "copy", label: "Copy", when: onNote, run: () => void copy("plain") },
     { id: "copy-md", label: "Copy as Markdown", keys: "Ctrl Shift C", when: onNote, run: () => void copy("markdown") },
     { id: "copy-html", label: "Copy formatted (for mail and docs)", when: onNote, run: () => void copy("html") },
@@ -268,6 +279,16 @@ export default function App() {
     { id: "settings", label: "Settings", keys: "Ctrl ,", run: () => setSettings("all") },
   ];
 
+  /** Notes changed on disk (the watcher, or a rescan): the lists redraw, and the open note reloads where you
+   * were if you have not typed in it since it was saved. If you have, the save keeps the other text as a
+   * conflict copy, as always. */
+  async function folderChanged(r: ScanReport) {
+    if (view().kind !== "note") return setRev(rev() + 1);
+    const n = current();
+    if (!n || !r.paths.includes(n.path) || page?.dirty()) return;
+    if (await page?.refresh()) tell(/google drive|googledrive|my drive/i.test(root()) ? "Updated from Drive" : "Updated from the folder");
+  }
+
   /** Drive (or another app) may have changed the folder while Petrel was in the background. */
   let lastScan = 0;
   async function rescan(loud = false) {
@@ -280,14 +301,14 @@ export default function App() {
       // The capture window and the picker write through the same index, so a zero here can still mean new
       // captures: always redraw the lists.
       if (view().kind !== "note") setRev(rev() + 1);
-      else if (r.changed) await page?.reload();
+      else await folderChanged(r);
       if (loud) say(n ? `${r.added} new, ${r.changed} changed, ${r.removed} gone` : "Up to date");
     } catch (e) {
       if (loud) say(errText(e), { error: true });
     }
   }
 
-  const overlay = () => !!(bar() || settings() || history() || moving() || week());
+  const overlay = () => !!(bar() || settings() || history() || moving() || week() || tasks());
 
   // Ctrl Tab and Ctrl \ come before the editor, which would indent or type them.
   const earlyKey = (e: KeyboardEvent) => {
@@ -384,6 +405,7 @@ export default function App() {
       },
       openNote: (id) => void openNote(id),
       focus: () => void rescan(),
+      folder: (r) => void folderChanged(r),
       // Hidden to the tray counts as leaving: coming back soon opens the same note.
       changed: () => view().kind !== "note" && setRev(rev() + 1),
     });
@@ -469,6 +491,7 @@ export default function App() {
                 onNoteId={seen}
                 onBeside={(id) => void openBeside(id)}
                 besideOpen={beside() !== null}
+                notice={notice()}
                 ref={(h) => (page = h)}
               />
             )}
@@ -530,6 +553,15 @@ export default function App() {
             onClose={() => setSettings(false)}
             onRoot={(r) => (setRoot(r), setRev(rev() + 1))}
             onAi={setAi}
+          />
+        </Show>
+        <Show when={tasks()}>
+          <Tasks
+            onClose={() => (setTasks(false), page?.focus())}
+            onOpen={(id) => void openNote(id)}
+            onTicked={(id) => {
+              if (current()?.id === id) void page?.refresh();
+            }}
           />
         </Show>
         <Show when={week()}>

@@ -1,10 +1,11 @@
 // The library (Ctrl L): everything you keep, as cards. "All" is the shelf, one row per collection with the most
 // used first; a collection's tab shows all its cards at their natural height. The arrow keys move between cards,
 // Enter opens one as a sheet, c copies, e edits, p pins, t picks the collection's colour and mark, / filters, and in
-// the inbox m files the card you are on and r reviews the inbox one card at a time.
+// the inbox m files the card you are on and r reviews the inbox one card at a time. A note changed in two places
+// shows a card at the top until it is settled (Settle.tsx).
 
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
-import { api, errText, type AiSuggestion, type Note, type NoteSummary } from "../api";
+import { api, errText, type AiSuggestion, type Conflict, type Note, type NoteSummary } from "../api";
 import { hasVersions, versionsOf } from "../collection/versions";
 import { copyFilled, itemText } from "../collection/copyItem";
 import Destination, { type Target } from "../inbox/Destination";
@@ -14,6 +15,7 @@ import type { Tab } from "../TitleBar";
 import Card, { topOf } from "./Card";
 import FacePicker from "./FacePicker";
 import Mark, { loadFaces } from "./Mark";
+import Settle from "./Settle";
 import Sheet from "./Sheet";
 
 export interface LibraryData {
@@ -21,12 +23,15 @@ export interface LibraryData {
   copies: Record<string, number>;
   /** How many `## versions` a prompt or snippet has, by id, when it has two or more. */
   versions: Record<number, number>;
+  /** Notes with a conflict copy beside them; the copies are not cards of their own. */
+  conflicts: Conflict[];
 }
 
 export async function loadLibrary(): Promise<LibraryData> {
   const s = await api();
-  const [all, copies] = await Promise.all([s.listNotes({ limit: 5000 }), s.copyCounts()]);
-  const notes = all.filter((n) => !n.folder.startsWith("."));
+  const [all, copies, conflicts] = await Promise.all([s.listNotes({ limit: 5000 }), s.copyCounts(), s.conflicts().catch(() => [] as Conflict[])]);
+  const copyIds = new Set(conflicts.map((c) => c.copy));
+  const notes = all.filter((n) => !n.folder.startsWith(".") && !copyIds.has(n.id));
   // The preview has no headings in it, so the few prompts and snippets are read whole to count their versions.
   const versions: Record<number, number> = {};
   await Promise.all(
@@ -38,7 +43,7 @@ export async function loadLibrary(): Promise<LibraryData> {
         if (k > 1) versions[n.id] = k;
       }),
   );
-  return { notes, copies, versions };
+  return { notes, copies, versions, conflicts };
 }
 
 /** The title bar's tabs: All, the Inbox, then each collection, the most used first. */
@@ -88,6 +93,7 @@ export default function Library(p: {
   const [open, setOpen] = createSignal<number | null>(null);
   const [moving, setMoving] = createSignal<Note | null>(null);
   const [facing, setFacing] = createSignal<string | null>(null);
+  const [settling, setSettling] = createSignal<Conflict | null>(null);
   // The card just copied lights up once in its collection's colour.
   const [flash, setFlash] = createSignal<number | null>(null);
   createEffect(on(() => p.tab, () => (setQ(""), setSel(null))));
@@ -201,7 +207,7 @@ export default function Library(p: {
   }
 
   const key = (e: KeyboardEvent) => {
-    if (open() !== null || moving() || facing() !== null || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (open() !== null || moving() || facing() !== null || settling() || e.ctrlKey || e.metaKey || e.altKey) return;
     if (typing(e)) {
       if (e.target === filterInput && (e.key === "ArrowDown" || e.key === "Enter")) {
         e.preventDefault();
@@ -347,6 +353,28 @@ export default function Library(p: {
         </Show>
       </div>
 
+      <Show when={p.tab === "all" && p.data?.conflicts.length}>
+        <section class="shelf-row">
+          <div class="shelf-head">
+            <h2>To settle</h2>
+            <span class="muted small">changed in two places · pick the text to keep</span>
+          </div>
+          <div class="shelf-cards">
+            <For each={p.data!.conflicts}>
+              {(c) => (
+                <button type="button" class="lcard conflict" onClick={() => setSettling(c)}>
+                  <div class="lcard-top">
+                    <span class="lcard-where">{folderName(c.folder)}</span>
+                  </div>
+                  <h3 class="lcard-title">{c.title}</h3>
+                  <div class="lcard-body">Two texts of this note: the one in it now and one kept beside it. Open to compare.</div>
+                  <footer class="lcard-meta">Settle</footer>
+                </button>
+              )}
+            </For>
+          </div>
+        </section>
+      </Show>
       <Show
         when={p.tab === "all"}
         fallback={
@@ -460,6 +488,18 @@ export default function Library(p: {
         {(n) => <Destination exclude={n().id} onPick={(t) => void file(n(), t)} onClose={() => setMoving(null)} />}
       </Show>
       <Show when={facing()}>{(top) => <FacePicker top={top()} onClose={() => setFacing(null)} />}</Show>
+      <Show when={settling()}>
+        {(c) => (
+          <Settle
+            conflict={c()}
+            onClose={() => setSettling(null)}
+            onDone={() => {
+              setSettling(null);
+              p.onChanged();
+            }}
+          />
+        )}
+      </Show>
     </div>
   );
 }
