@@ -416,6 +416,7 @@ export default function NotePage(p: Props) {
     setHeads(outline(t));
     setHere(currentHeading(heads(), editor?.cursor() ?? 0));
   };
+  const hasLinks = () => !!(links().linked.length || links().mentioned.length || related());
   const minLevel = () => Math.min(...heads().map((h) => h.level));
   const jump = (from: number) => {
     const v = view();
@@ -633,7 +634,7 @@ export default function NotePage(p: Props) {
           />
           <div class="writer" ref={host} />
         </div>
-        <Show when={links().linked.length || links().mentioned.length || related()}>
+        <Show when={hasLinks()}>
           <div class="page-links">
             <Show when={links().linked.length}>
               <h4>Linked from</h4>
@@ -677,10 +678,12 @@ export default function NotePage(p: Props) {
           </div>
         </Show>
       </div>
-      <Show when={dayPage()}>
-        {(d) => (
-          <aside class="day-month" aria-label="This month">
-            <div class="day-month-name">{new Date(`${d()}T12:00`).toLocaleDateString(undefined, { month: "long" })}</div>
+      <Show when={!p.besideOpen}>
+        <aside class="note-margin" classList={{ quiet: typingNow() }} aria-label="About this note">
+          <Show when={dayPage()}>
+            {(d) => (
+              <section class="day-month" aria-label="This month">
+                <div class="day-month-name">{new Date(`${d()}T12:00`).toLocaleDateString(undefined, { month: "long" })}</div>
             <div class="day-grid">
               <For each={["M", "T", "W", "T", "F", "S", "S"]}>{(w) => <span class="day-wd">{w}</span>}</For>
               <For each={monthGrid(d())}>
@@ -701,25 +704,76 @@ export default function NotePage(p: Props) {
               </For>
             </div>
             <p class="muted small">A dot is a day with a page. A day you skip makes no file.</p>
-          </aside>
-        )}
-      </Show>
-      <Show when={!dayPage() && !p.besideOpen && heads().length >= 3}>
-        <nav class="note-outline" classList={{ quiet: typingNow() }} aria-label="Headings">
-          <For each={heads()}>
-            {(h, i) => (
-              <button
-                class="outline-row"
-                classList={{ on: i() === here() }}
-                style={{ "padding-left": `${(h.level - minLevel()) * 12 + 8}px` }}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => jump(h.from)}
-              >
-                {h.text}
-              </button>
+              </section>
             )}
-          </For>
-        </nav>
+          </Show>
+          <Show when={!dayPage() && heads().length >= 2}>
+            <section aria-label="On this page">
+              <h4>On this page</h4>
+              <For each={heads()}>
+                {(h, i) => (
+                  <button
+                    class="outline-row"
+                    classList={{ on: i() === here() }}
+                    style={{ "padding-left": `${(h.level - minLevel()) * 12 + 10}px` }}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => jump(h.from)}
+                  >
+                    {h.text}
+                  </button>
+                )}
+              </For>
+            </section>
+          </Show>
+          <Show when={hasLinks()}>
+            <section class="margin-links">
+            <Show when={links().linked.length}>
+              <h4>Linked from</h4>
+              <For each={links().linked}>
+                {(b) => (
+                  <button class="link-row" onClick={() => p.onOpen(b.id)}>
+                    <span class="link-title">{b.title}</span>
+                    <span class="link-line">{b.line.replace(/\[\[|\]\]/g, "")}</span>
+                  </button>
+                )}
+              </For>
+            </Show>
+            <Show when={links().mentioned.length}>
+              <h4>Mentioned in</h4>
+              <For each={links().mentioned}>
+                {(b) => (
+                  <button class="link-row" onClick={() => p.onOpen(b.id)}>
+                    <span class="link-title">{b.title}</span>
+                    <span class="link-line">{b.line}</span>
+                  </button>
+                )}
+              </For>
+            </Show>
+            <Show when={related()}>
+              <h4>
+                <span class="spark">✦</span> Related
+              </h4>
+              <Show when={Array.isArray(related())} fallback={<p class="ai-thinking">Claude is looking through your notes…</p>}>
+                <Show when={(related() as AiRelated[]).length} fallback={<p class="muted small">Nothing closely related.</p>}>
+                  <For each={related() as AiRelated[]}>
+                    {(r) => (
+                      <button class="link-row" onClick={() => p.onOpen(r.id)}>
+                        <span class="link-title">{r.title}</span>
+                        <span class="link-line">{r.why}</span>
+                      </button>
+                    )}
+                  </For>
+                </Show>
+              </Show>
+            </Show>
+            </section>
+          </Show>
+          <Show when={note() && !related()}>
+            <button class="link small margin-related" onClick={() => p.aiReady ? findRelated() : p.onAiSetup()}>
+              <span class="spark">✦</span> Find related notes
+            </button>
+          </Show>
+        </aside>
       </Show>
       <footer class="page-foot">
         <span>{dayPage() ? "Journal" : folderName(note()?.folder ?? p.folder)}</span>

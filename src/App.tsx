@@ -9,7 +9,8 @@ import { createResource, createSignal, For, lazy, onCleanup, onMount, Show, Susp
 import { api, errText, inTauri, type AiStatus, type Note, type NoteSummary, type ScanReport } from "./api";
 import { plainText } from "./copy";
 import TitleBar from "./TitleBar";
-import { libraryTabs, loadLibrary } from "./library/Library";
+import Sidebar, { type Place } from "./Sidebar";
+import { loadLibrary } from "./library/Library";
 import NotePage, { type NotePageHandle } from "./note/NotePage";
 import CommandBar, { type Command } from "./palette/CommandBar";
 import { applyPrefs, changePref, parsePrefs, prefs, setPrefs } from "./settings/prefs";
@@ -36,6 +37,8 @@ type View =
 const NEW_FOLDER = "inbox";
 /** Coming back within this long opens the note you left instead of an empty page. */
 const RESUME_MS = 10 * 60 * 1000;
+/** From this width the sidebar sits beside the page; below it, it slides over and closes after a pick. */
+const SIDEBAR_DOCK_PX = 1000;
 /** Notes remembered for Back and for Ctrl K's empty list. */
 const RECENT_MAX = 12;
 /** Ctrl held this long on Ctrl Tab shows the list; a quick press just swaps. */
@@ -65,8 +68,19 @@ export default function App() {
   const [tab, setTab] = createSignal("all");
   const [bar, setBar] = createSignal<"all" | "notes" | "beside" | null>(null);
   const [beside, setBeside] = createSignal<number | null>(null);
+  // The sidebar: shown unless hidden with Ctrl 0 (ui.sidebar); docked on a wide window, over the page on a narrow one.
+  const [sideOn, setSideOn] = createSignal(true);
+  const [wide, setWide] = createSignal(innerWidth >= SIDEBAR_DOCK_PX);
+  const docked = () => sideOn() && wide();
+  const toggleSide = () => {
+    const on = !sideOn();
+    setSideOn(on);
+    void api().then((s) => s.setUiSetting("ui.sidebar", on ? "1" : "0")).catch(() => {});
+  };
   let besideH: BesideHandle | undefined;
   const [recent, setRecent] = createSignal<number[]>([]);
+  // The open note's folder, as a signal for the sidebar (the page handle is not reactive).
+  const [noteFolder, setNoteFolder] = createSignal<string | null>(null);
   const [switcher, setSwitcher] = createSignal<{ ids: number[]; i: number; shown: boolean; notes: NoteSummary[] } | null>(null);
   const [settings, setSettings] = createSignal<false | "all" | "ai">(false);
   const [history, setHistory] = createSignal(false);
@@ -149,6 +163,32 @@ export default function App() {
     const n = current();
     await (await api()).setUiSetting("last.note", n ? `${n.id}:${Date.now()}` : "").catch(() => {});
   };
+  /** What the sidebar marks: today, the inbox, open tasks, or the collection you are in. */
+  const here = (): Place => {
+    const v = view();
+    if (tasks()) return "tasks";
+    if (v.kind === "library") return v.tab === "inbox" ? "inbox" : v.tab.startsWith("c:") ? (v.tab as Place) : null;
+    if (v.day === today() || onDay() === today()) return "today";
+    const f = noteFolder();
+    if (f === "inbox") return "inbox";
+    return f ? `c:${f}` : null;
+  };
+  const libraryTitle = () => {
+    const t = tab();
+    return t === "inbox" ? "Inbox" : t.startsWith("c:") ? folderName(t.slice(2)) : "All";
+  };
+  /** A collection was renamed or trashed in the sidebar: what was open in it follows, or goes back to writing. */
+  async function folderMoved(from: string, to: string | null) {
+    const v = view();
+    const inside = (f: string) => f === from || f.startsWith(`${from}/`);
+    if (v.kind === "library" && v.tab.startsWith("c:") && inside(v.tab.slice(2))) {
+      await (to ? library(`c:${to}${v.tab.slice(2 + from.length)}`) : library("all"));
+    } else if (v.kind === "note" && inside(noteFolder() ?? "")) {
+      if (to) await page?.reload();
+      else await newNote();
+    }
+    setRev(rev() + 1);
+  }
   const current = () => (view().kind === "note" ? (page?.note() ?? null) : null);
   const onNote = () => view().kind === "note" && !!current();
 
@@ -368,6 +408,7 @@ export default function App() {
     if (mod && k === "k") setBar(bar() ? null : "all");
     else if (mod && k === "p") setBar(bar() ? null : "notes");
     else if (overlay()) return;
+    else if (mod && e.key === "0") toggleSide();
     else if (mod && k === "n") void newNote();
     else if (mod && k === "l") void (view().kind === "library" ? writing() : library());
     else if (mod && e.key === ",") setSettings("all");
@@ -403,6 +444,7 @@ export default function App() {
     document.addEventListener("keydown", dayKey, true);
     document.addEventListener("keydown", earlyKey, true);
     document.addEventListener("keyup", keyUp, true);
+    window.addEventListener("resize", () => setWide(innerWidth >= SIDEBAR_DOCK_PX));
     window.addEventListener("blur", () => switcher() && switchDone(false));
     void loadFaces();
     const s = await api();
@@ -415,6 +457,7 @@ export default function App() {
     }
     setRoot((await s.notesInfo().catch(() => ({ root: "" }))).root);
     const stored = await s.uiSettings().catch(() => ({}) as Record<string, string>);
+    setSideOn(stored["ui.sidebar"] !== "0" && innerWidth >= SIDEBAR_DOCK_PX);
     try {
       const r = JSON.parse(stored["ui.recent"] ?? "[]");
       if (Array.isArray(r)) setRecent(r.filter((x) => typeof x === "number").slice(0, RECENT_MAX));
@@ -468,16 +511,33 @@ export default function App() {
   return (
     <div class="app" classList={{ "in-library": view().kind === "library" }}>
       <TitleBar
-        library={view().kind === "library"}
-        title={title() || (noteView()?.id === null ? "New note" : "")}
-        tabs={libraryTabs(lib())}
-        tab={tab()}
-        onTab={(t) => void library(t)}
-        onLibrary={() => void (view().kind === "library" ? writing() : library())}
+        title={view().kind === "library" ? `Library · ${libraryTitle()}` : title() || (noteView()?.id === null ? "New note" : "")}
+        sidebar={sideOn()}
+        onSidebar={toggleSide}
         onNew={() => void newNote()}
         onSearch={() => setBar("all")}
       />
 
+      <div class="app-body">
+      <Show when={sideOn()}>
+        <Show when={!docked()}>
+          <div class="side-scrim" onMouseDown={() => setSideOn(false)} />
+        </Show>
+        <Sidebar
+          rev={rev()}
+          here={here()}
+          docked={docked()}
+          root={root()}
+          onNew={() => void newNote()}
+          onToday={() => void openDay(today())}
+          onInbox={() => void library("inbox")}
+          onTasks={() => void (page ? page.flush() : Promise.resolve(true)).then(() => ((panels.tasks = false), setTasks(true)))}
+          onCollection={(f) => void library(`c:${f}`)}
+          onFolderChanged={(from, to) => void folderMoved(from, to)}
+          onSettings={() => setSettings("all")}
+          onClose={() => setSideOn(false)}
+        />
+      </Show>
       <main class="view" classList={{ split: beside() !== null && view().kind === "note" }}>
         <Suspense>
           <Show when={view().kind === "library"}>
@@ -510,7 +570,7 @@ export default function App() {
                 onTitle={setTitle}
                 day={v().day ?? null}
                 onDay={(d) => void openDay(d)}
-                onNoteId={seen}
+                onNoteId={(id) => (seen(id), setNoteFolder(page?.note()?.folder ?? null))}
                 onBeside={(id) => void openBeside(id)}
                 besideOpen={beside() !== null}
                 notice={notice()}
@@ -531,6 +591,7 @@ export default function App() {
           </Show>
         </Suspense>
       </main>
+      </div>
       <Show when={switcher()?.shown && switcher()}>
         {(s) => (
           <div class="switcher" role="listbox" aria-label="Recent notes">

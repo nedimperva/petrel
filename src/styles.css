@@ -2463,3 +2463,313 @@ kbd {
 .scrim.top > .history.panel {
   height: min(640px, 78vh);
 }
+
+/* ---- the sidebar: where you are, on the left (as in Tern) ------------------------------------------------- */
+
+.app-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  position: relative;
+}
+.app-body > .view {
+  flex: 1;
+  min-width: 0;
+}
+.sidebar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: 35;
+  width: 240px;
+  display: flex;
+  flex-direction: column;
+  padding: var(--s-3) var(--s-2) var(--s-2);
+  box-sizing: border-box;
+  background: var(--sunk);
+  box-shadow: var(--shadow-lg);
+  animation: slide-in var(--d-base) var(--ease);
+}
+.sidebar.docked {
+  position: static;
+  flex: none;
+  box-shadow: none;
+  border-right: 1px solid var(--line);
+  animation: none;
+}
+@keyframes slide-in {
+  from {
+    transform: translateX(-100%);
+  }
+}
+.side-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 34;
+  background: var(--scrim);
+}
+.side-new {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 34px;
+  flex: none;
+  padding: 0 8px 0 10px;
+  margin-bottom: var(--s-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--raised);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-md);
+  font-weight: 500;
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+}
+.side-new svg {
+  color: var(--accent);
+}
+.side-new .keys {
+  margin-left: auto;
+}
+.side-new .keys kbd {
+  border: 0;
+  background: none;
+  color: var(--muted);
+}
+.side-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: none;
+}
+.side-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.side-head {
+  margin: var(--s-4) 0 4px;
+  padding: 0 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.side-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  flex: none;
+  padding: 0 6px 0 10px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: var(--t-md);
+  text-align: left;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+.side-row svg {
+  flex: none;
+  color: var(--muted);
+}
+.side-row:hover,
+.side-row:focus-visible {
+  outline: none;
+  background: var(--hover);
+  color: var(--ink);
+}
+.side-row.on {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+.side-row.child {
+  padding-left: 30px;
+  height: 28px;
+  font-size: var(--t-sm);
+}
+.side-slot {
+  display: none;
+}
+.side-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.side-count {
+  color: var(--muted);
+  font-size: var(--t-xs);
+  font-variant-numeric: tabular-nums;
+}
+.side-more {
+  display: none;
+  width: 20px;
+  text-align: center;
+  color: var(--muted);
+  border-radius: var(--r-sm);
+}
+.side-row:hover .side-more {
+  display: inline-block;
+}
+.side-row:hover .side-count {
+  display: none;
+}
+.side-more:hover {
+  background: var(--line);
+  color: var(--ink);
+}
+.side-row.editing {
+  background: var(--raised);
+  box-shadow: inset 0 0 0 2px var(--accent);
+  cursor: text;
+}
+.side-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  font: inherit;
+  color: var(--ink);
+}
+.side-add {
+  margin-top: 6px;
+  color: var(--muted);
+}
+.side-hint {
+  margin: 4px 10px 0;
+  font-size: var(--t-xs);
+  color: var(--muted);
+}
+.side-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 4px 0 10px;
+  border-top: 1px solid var(--line);
+  font-size: var(--t-xs);
+  color: var(--muted);
+}
+.side-root {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.side-menu {
+  position: fixed;
+  z-index: 70;
+  width: 240px;
+  padding: 4px;
+}
+.side-menu .menu-item {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+}
+.side-menu .menu-item.bad {
+  color: var(--bad);
+}
+.side-kind {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+}
+.side-kind .muted {
+  flex: 1;
+}
+.menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--line);
+}
+.titlebar .icon-btn.on {
+  color: var(--ink);
+}
+
+/* ---- the right margin: what is about the note (its headings, what links here, the month on a day's page) --- */
+
+.page {
+  container-type: inline-size;
+}
+.note-margin {
+  display: none;
+}
+@container (min-width: 1000px) {
+  .page-main {
+    padding-right: var(--margin-w);
+  }
+  .note-margin {
+    position: absolute;
+    top: var(--s-7);
+    right: var(--s-5);
+    bottom: 48px;
+    width: calc(var(--margin-w) - var(--s-5) - var(--s-3));
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--s-6);
+    transition: opacity var(--d-slow) var(--ease);
+  }
+  .page-links {
+    display: none;
+  }
+}
+.page {
+  --margin-w: 320px;
+}
+.note-margin.quiet:not(:hover) {
+  opacity: 0.25;
+}
+.note-margin h4 {
+  margin: 0 0 var(--s-2);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.note-margin section {
+  display: flex;
+  flex-direction: column;
+}
+.note-margin .outline-row {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+.note-margin .link-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  width: calc(100% + 16px);
+}
+.note-margin .link-line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-xs);
+  color: var(--muted);
+}
+.note-margin .day-month {
+  position: static;
+  display: flex;
+  width: auto;
+}
+.margin-related {
+  align-self: flex-start;
+}

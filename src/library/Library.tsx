@@ -12,7 +12,6 @@ import { copyFilled, itemText } from "../collection/copyItem";
 import Destination, { type Target } from "../inbox/Destination";
 import { fileCapture } from "../inbox/file";
 import { folderName, KeyHints, say, typing, undoLast } from "../ui";
-import type { Tab } from "../TitleBar";
 import Card, { topOf } from "./Card";
 import FacePicker from "./FacePicker";
 import Mark, { faces, loadFaces } from "./Mark";
@@ -49,17 +48,6 @@ export async function loadLibrary(): Promise<LibraryData> {
       }),
   );
   return { notes, copies, versions, conflicts };
-}
-
-/** The title bar's tabs: All, the Inbox, then each collection, the most used first. */
-export function libraryTabs(d: LibraryData | undefined): Tab[] {
-  if (!d) return [{ id: "all", label: "All" }];
-  const inbox = d.notes.filter((n) => n.folder === "inbox").length;
-  return [
-    { id: "all", label: "All" },
-    { id: "inbox", label: "Inbox", count: inbox || undefined },
-    ...collections(d).map((c) => ({ id: `c:${c.top}`, label: folderName(c.top) })),
-  ];
 }
 
 function collections(d: LibraryData): { top: string; notes: NoteSummary[]; use: number }[] {
