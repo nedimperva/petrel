@@ -44,3 +44,53 @@ test("answers are escaped before any formatting", async () => {
   assert.equal(answerHtml("**Garden** <img src=x onerror=alert(1)>"), "<b>Garden</b> &lt;img src=x onerror=alert(1)&gt;");
   assert.equal(answerHtml("- see [[Garden]]"), '• see <span class="cm-wikilink">Garden</span>');
 });
+
+test("blanks that fill themselves, and choices", async () => {
+  const { startValue, rememberAnswers } = await import("../src/blanks.ts");
+  const list = blanks("{{clipboard}} {{today}} {{selection|none}} {{tone: formal / casual / blunt}} {{ratio:1}}");
+  assert.deepEqual(list, [
+    { name: "clipboard", value: "", auto: "clipboard" },
+    { name: "today", value: "", auto: "today" },
+    { name: "selection", value: "none" },
+    { name: "tone", value: "formal", choices: ["formal", "casual", "blunt"] },
+    { name: "ratio:1", value: "" },
+  ]);
+  assert.equal(fill("Be {{tone: formal / casual}}.", {}), "Be formal.");
+  assert.equal(fill("Be {{tone: formal / casual}}.", { tone: "casual" }), "Be casual.");
+  assert.deepEqual(parts("A {{tone: a / b}}!").map((x) => x.text), ["A ", "tone", "!"]);
+  assert.equal(startValue(list[0], ["old"], { clipboard: "copied" }), "copied");
+  assert.equal(startValue(list[3], ["casual", "x"], {}), "casual");
+  assert.equal(startValue(list[3], ["x"], {}), "formal");
+  assert.equal(startValue({ name: "lang", value: "" }, ["Rust", "Go"], {}), "Rust");
+  assert.equal(startValue({ name: "lang", value: "TS" }, ["Rust"], {}), "TS");
+});
+
+test("answers are remembered, newest first, five at most", async () => {
+  const { rememberAnswers } = await import("../src/blanks.ts");
+  const list = blanks("{{lang}} {{clipboard}} {{empty}}");
+  let m = { lang: ["Go", "Rust", "C", "Zig", "Odin"] };
+  m = rememberAnswers(m, list, { lang: "Rust", clipboard: "secret", empty: "" });
+  assert.deepEqual(m, { lang: ["Rust", "Go", "C", "Zig", "Odin"] });
+  m = rememberAnswers(m, list, { lang: "TS" });
+  assert.deepEqual(m.lang, ["TS", "Rust", "Go", "C", "Zig"]);
+});
+
+test("versions on one card", async () => {
+  const { versionsOf, lastFirst, hasVersions } = await import("../src/collection/versions.ts");
+  assert.deepEqual(versionsOf("Just one\n\n## Heading\ntext"), []);
+  const v = versionsOf("## Short\nFix {{code}}\n\n## Long\nReview this\n```\n## not a version\n```\n");
+  assert.deepEqual(
+    v.map((x) => x.name),
+    ["Short", "Long"],
+  );
+  assert.equal(v[1].text, "Review this\n```\n## not a version\n```");
+  assert.deepEqual(
+    versionsOf("Intro words\n## A\na\n## B\nb").map((x) => x.name),
+    ["First", "A", "B"],
+  );
+  assert.deepEqual(
+    lastFirst(v, "Long").map((x) => x.name),
+    ["Long", "Short"],
+  );
+  assert.ok(hasVersions("Prompts") && hasVersions("snippets/shell") && !hasVersions("Travel"));
+});

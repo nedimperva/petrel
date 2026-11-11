@@ -2043,3 +2043,71 @@ kbd {
   text-decoration: line-through;
   text-decoration-color: var(--line-strong);
 }
+
+/* ---- blanks that fill themselves, choices, earlier answers, versions ------------------------------------------ */
+
+.blank-control {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  font-weight: 400;
+}
+.choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px;
+  border-radius: var(--r-md);
+  outline: none;
+}
+.choices:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.choices .chip {
+  cursor: pointer;
+  border: 0;
+  font: inherit;
+  font-size: var(--t-sm);
+}
+.choices .chip kbd {
+  font-size: 10px;
+}
+.blank-hint {
+  font-size: var(--t-xs);
+  color: var(--faint);
+}
+.blank-past {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.chip.small {
+  height: 20px;
+  padding: 0 8px;
+  font-size: var(--t-xs);
+  border: 0;
+  cursor: pointer;
+}
+.versions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 2px;
+}
+.versions .chip {
+  border: 0;
+  font: inherit;
+  font-size: var(--t-sm);
+  cursor: pointer;
+}
+.row-here {
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: var(--t-xs);
+  white-space: nowrap;
+}

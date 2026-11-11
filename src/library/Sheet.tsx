@@ -1,11 +1,14 @@
 // A card, opened: the whole text on a sheet over the library. A prompt's blanks become fields on the right and
-// the text fills in as you type; Enter copies. A capture from the inbox gets its filing buttons instead: Move to
-// (m), Suggest a home (s, Claude, only when pressed) and Delete (d).
+// the text fills in as you type; Enter copies. A prompt or snippet with `## versions` shows one at a time: Tab
+// steps through them (after the last blank), and the one copied last comes first. A capture from the inbox gets
+// its filing buttons instead: Move to (m), Suggest a home (s, Claude, only when pressed) and Delete (d).
 
-import { createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createMemo, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { api, errText, type AiSuggestion, type Note } from "../api";
-import { blanks, fill, parts } from "../blanks";
+import { parts } from "../blanks";
+import BlankFields, { createBlanks, keepVersion, lastVersions } from "../collection/BlankFields";
 import { copyFilled } from "../collection/copyItem";
+import { hasVersions, lastFirst, versionsOf } from "../collection/versions";
 import { ago, folderName, say, typing } from "../ui";
 import { kindOf, topOf } from "./Card";
 import Mark, { hueClass } from "./Mark";
@@ -25,18 +28,44 @@ export default function Sheet(p: {
     () => p.id,
     async (id) => (await api()).peekNote(id),
   );
-  const text = () => (note()?.body ?? "").replace(/\n+$/, "");
-  const fields = () => blanks(text());
-  const [values, setValues] = createSignal<Record<string, string>>({});
-  const value = (name: string) => values()[name] ?? fields().find((b) => b.name === name)?.value ?? "";
-  const filled = () => fill(text(), Object.fromEntries(fields().map((b) => [b.name, value(b.name)])));
+  const body = () => (note()?.body ?? "").replace(/\n+$/, "");
+  const [last] = createResource(lastVersions);
+  const versions = createMemo(() => {
+    const n = note();
+    return n && hasVersions(n.folder) ? lastFirst(versionsOf(body()), last()?.[n.path]) : [];
+  });
+  const [vi, setVi] = createSignal(0);
+  const version = () => versions()[vi() % Math.max(1, versions().length)];
+  const text = () => version()?.text ?? body();
+  const state = createBlanks(text);
+  const fields = state.list;
+  const value = (name: string) => {
+    const b = fields().find((x) => x.name === name);
+    return b ? state.value(b) : "";
+  };
+  const filled = state.out;
   const inbox = () => note()?.folder === "inbox";
+  let side: HTMLElement | undefined;
+
+  /** Tab moves through the blanks, then on to the next version. */
+  function tab(e: KeyboardEvent): boolean {
+    const n = versions().length;
+    if (n < 2) return false;
+    const stops = side ? [...side.querySelectorAll<HTMLElement>("input, textarea, .choices")] : [];
+    const at = stops.indexOf(document.activeElement as HTMLElement);
+    if (at >= 0 && (e.shiftKey ? at > 0 : at < stops.length - 1)) return false;
+    setVi((vi() + (e.shiftKey ? n - 1 : 1)) % n);
+    setTimeout(() => side?.querySelector<HTMLElement>("input, textarea, .choices")?.focus());
+    return true;
+  }
   const [sugg, setSugg] = createSignal<AiSuggestion[] | "loading" | null>(null);
 
   async function copy(markdown = false) {
     const n = note();
     if (!n) return;
     const out = markdown ? `# ${n.title}\n\n${filled()}` : filled();
+    void state.keep();
+    if (version()) void keepVersion(n.path, version()!.name);
     if (await copyFilled(n, out)) p.onClose();
   }
 
@@ -57,7 +86,9 @@ export default function Sheet(p: {
     const n = note();
     if (!n) return;
     if (e.key === "Escape") p.onClose();
-    else if (e.key === "Enter" && !(e.target instanceof HTMLTextAreaElement && !e.ctrlKey)) {
+    else if (e.key === "Tab" && !inbox() && tab(e)) {
+      // Stepped to another version.
+    } else if (e.key === "Enter" && !(e.target instanceof HTMLTextAreaElement && !e.ctrlKey)) {
       const s = sugg();
       if (inbox() && Array.isArray(s) && s[0]) p.onFile(n, s[0]);
       else if (inbox()) p.onMove(n);
@@ -97,6 +128,20 @@ export default function Sheet(p: {
               <Show when={!inbox()}>
                 <h1 class="lsheet-title">{n().title}</h1>
               </Show>
+              <Show when={versions().length > 1}>
+                <div class="versions" role="tablist" aria-label="Versions">
+                  <For each={versions()}>
+                    {(v, i) => (
+                      <button type="button" role="tab" class="chip" aria-selected={i() === vi()} classList={{ on: i() === vi() }} onClick={() => setVi(i())}>
+                        {v.name}
+                      </button>
+                    )}
+                  </For>
+                  <span class="muted small">
+                    <kbd>Tab</kbd> next version
+                  </span>
+                </div>
+              </Show>
               <div class="lsheet-text">
                 <For each={shown()}>
                   {(x) =>
@@ -111,7 +156,7 @@ export default function Sheet(p: {
                 </For>
               </div>
             </div>
-            <aside class="lsheet-side">
+            <aside class="lsheet-side" ref={side}>
               <Show
                 when={!inbox()}
                 fallback={
@@ -154,27 +199,7 @@ export default function Sheet(p: {
               >
                 <Show when={fields().length}>
                   <div class="side-head">Fill in</div>
-                  <For each={fields()}>
-                    {(b, i) => (
-                      <label class="side-field">
-                        {b.name}
-                        {/^(code|text|diff|commits|body|notes)$/i.test(b.name) ? (
-                          <textarea
-                            rows={3}
-                            value={value(b.name)}
-                            ref={(el) => i() === 0 && setTimeout(() => el.focus())}
-                            onInput={(e) => setValues({ ...values(), [b.name]: e.currentTarget.value })}
-                          />
-                        ) : (
-                          <input
-                            value={value(b.name)}
-                            ref={(el) => i() === 0 && setTimeout(() => el.focus())}
-                            onInput={(e) => setValues({ ...values(), [b.name]: e.currentTarget.value })}
-                          />
-                        )}
-                      </label>
-                    )}
-                  </For>
+                  <BlankFields state={state} side />
                 </Show>
                 <div class="side-actions">
                   <button type="button" class="btn primary wide big" onClick={() => copy()}>
@@ -186,7 +211,7 @@ export default function Sheet(p: {
                   <button type="button" class="btn wide" onClick={() => p.onEdit(n().id)}>
                     Edit <kbd>e</kbd>
                   </button>
-                  <span class="muted small center">{fields().length ? "Tab next blank · Esc back" : "Esc back"}</span>
+                  <span class="muted small center">{fields().length ? "Tab next blank · ↑ earlier answers · Esc back" : "Esc back"}</span>
                 </div>
               </Show>
             </aside>

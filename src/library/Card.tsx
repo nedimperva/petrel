@@ -25,6 +25,8 @@ export const isPrompt = (n: NoteSummary) => /\{\{[^}]+\}\}/.test(n.preview);
 export default function Card(p: {
   n: NoteSummary;
   copies: number;
+  /** `## versions` in a prompt or snippet. */
+  versions?: number;
   on: boolean;
   /** Just copied. */
   flash?: boolean;
@@ -43,6 +45,7 @@ export default function Card(p: {
   const meta = () => {
     const out: string[] = [];
     if (p.copies) out.push(`Copied ${p.copies} ${p.copies === 1 ? "time" : "times"}`);
+    if (p.versions) out.push(`${p.versions} versions`);
     if (blanks()) out.push(`${blanks()} ${blanks() === 1 ? "blank" : "blanks"}`);
     if (!out.length || inbox()) out.push(ago(p.n.modifiedAt));
     return out.join(" · ");

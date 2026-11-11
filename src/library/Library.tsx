@@ -5,7 +5,7 @@
 
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 import { api, errText, type AiSuggestion, type Note, type NoteSummary } from "../api";
-import { blanks } from "../blanks";
+import { hasVersions, versionsOf } from "../collection/versions";
 import { copyFilled, itemText } from "../collection/copyItem";
 import Destination, { type Target } from "../inbox/Destination";
 import { fileCapture } from "../inbox/file";
@@ -19,12 +19,26 @@ import Sheet from "./Sheet";
 export interface LibraryData {
   notes: NoteSummary[];
   copies: Record<string, number>;
+  /** How many `## versions` a prompt or snippet has, by id, when it has two or more. */
+  versions: Record<number, number>;
 }
 
 export async function loadLibrary(): Promise<LibraryData> {
   const s = await api();
-  const [notes, copies] = await Promise.all([s.listNotes({ limit: 5000 }), s.copyCounts()]);
-  return { notes: notes.filter((n) => !n.folder.startsWith(".")), copies };
+  const [all, copies] = await Promise.all([s.listNotes({ limit: 5000 }), s.copyCounts()]);
+  const notes = all.filter((n) => !n.folder.startsWith("."));
+  // The preview has no headings in it, so the few prompts and snippets are read whole to count their versions.
+  const versions: Record<number, number> = {};
+  await Promise.all(
+    notes
+      .filter((n) => hasVersions(n.folder))
+      .slice(0, 400)
+      .map(async (n) => {
+        const k = versionsOf((await s.peekNote(n.id).catch(() => null))?.body ?? "").length;
+        if (k > 1) versions[n.id] = k;
+      }),
+  );
+  return { notes, copies, versions };
 }
 
 /** The title bar's tabs: All, the Inbox, then each collection, the most used first. */
@@ -113,7 +127,7 @@ export default function Library(p: {
 
   async function copy(n: NoteSummary) {
     const it = await itemText(n.id);
-    if (blanks(it.text).length) return setOpen(n.id);
+    if (it.hasBlanks) return setOpen(n.id);
     if (await copyFilled(n, it.text)) {
       setFlash(n.id);
       setTimeout(() => flash() === n.id && setFlash(null), 700);
@@ -271,6 +285,7 @@ export default function Library(p: {
     <Card
       n={n}
       copies={copies(n)}
+      versions={p.data?.versions[n.id] ?? 0}
       on={current()?.id === n.id}
       flash={flash() === n.id}
       showWhere={where}
