@@ -283,6 +283,13 @@ export interface Api {
   openTasks(): Promise<OpenTask[]>;
   tickTask(id: number, line: number, text: string): Promise<UndoToken>;
   conflicts(): Promise<Conflict[]>;
+  /** A new collection; returns its path. */
+  createFolder(folder: string): Promise<string>;
+  /** A collection's new name, in the same place; returns its new path. */
+  renameFolder(folder: string, name: string): Promise<string>;
+  /** The collection and its notes to `.trash/`; returns how many notes. */
+  trashFolder(folder: string): Promise<number>;
+  revealFolder(folder: string): Promise<void>;
   /** `left` keeps the note, `right` the copy's text, `both` renames the copy. */
   settleConflict(original: number, copy: number, keep: "left" | "right" | "both"): Promise<UndoToken>;
   linkTargets(text: string, limit: number): Promise<LinkTarget[]>;
@@ -388,6 +395,10 @@ async function tauriApi(): Promise<Api> {
     openTasks: () => invoke("open_tasks"),
     tickTask: (id, line, text) => invoke("tick_task", { id, line, text }),
     conflicts: () => invoke("conflicts"),
+    createFolder: (folder) => invoke("create_folder", { folder }),
+    renameFolder: (folder, name) => invoke("rename_folder", { folder, name }),
+    trashFolder: (folder) => invoke("trash_folder", { folder }),
+    revealFolder: (folder) => invoke("reveal_folder", { folder }),
     settleConflict: (original, copy, keep) => invoke("settle_conflict", { original, copy, keep }),
     linkTargets: (text, limit) => invoke("link_targets", { text, limit }),
     resolveLink: (inner) => invoke("resolve_link", { inner }),

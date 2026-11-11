@@ -28,6 +28,7 @@ use crate::store::{Folder, Store, UndoToken, VERSION_INTERVAL_MS};
 use crate::title;
 
 mod conflicts;
+mod folders;
 mod paths;
 mod tasks;
 
@@ -899,6 +900,24 @@ impl Store {
                 all.entry(parts[..i].join("/")).or_insert(0);
             }
             *all.entry(folder).or_insert(0) += n;
+        }
+        // A collection just made from the sidebar has no notes yet: the folders on disk count too, two levels down.
+        if let Ok(root) = self.root() {
+            let mut stack = vec![(root, String::new(), 0)];
+            while let Some((dir, rel, depth)) = stack.pop() {
+                let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+                for e in entries.flatten() {
+                    let name = e.file_name().to_string_lossy().to_string();
+                    if name.starts_with('.') || name == attachments::DIR || !e.path().is_dir() {
+                        continue;
+                    }
+                    let path = if rel.is_empty() { name } else { format!("{rel}/{name}") };
+                    all.entry(path.clone()).or_insert(0);
+                    if depth < 1 {
+                        stack.push((e.path(), path, depth + 1));
+                    }
+                }
+            }
         }
         let mut out: Vec<NoteFolder> = all
             .into_iter()

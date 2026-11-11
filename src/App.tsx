@@ -266,7 +266,7 @@ export default function App() {
   const commands: Command[] = [
     { id: "new", label: "New note", keys: "Ctrl N", run: () => void newNote() },
     { id: "capture", label: "Quick capture window", keys: "Ctrl Alt Space", run: () => void api().then((s) => s.openCapture()) },
-    { id: "picker", label: "Quick picker: copy a prompt or snippet", keys: "Ctrl Alt V", run: () => void api().then((s) => s.openPicker()) },
+    { id: "picker", label: "Quick picker: copy a prompt or snippet", keys: "Ctrl Shift Space", run: () => void api().then((s) => s.openPicker()) },
     { id: "library", label: "Library", keys: "Ctrl L", run: () => void library("all") },
     { id: "today", label: "Today's page", keys: "Ctrl D", run: () => void openDay(today()) },
     { id: "inbox", label: "Inbox", run: () => void library("inbox") },

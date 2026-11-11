@@ -23,7 +23,7 @@ shorten, continue or explain your text and answer questions from your notes, but
   today's page, Enter on an empty line starts the next entry with the time.
 - **Pictures.** Paste or drop one into a note: it is saved next to the note in `attachments/` and moves with it.
 - **Copy is the action.** `Ctrl K` has Copy, Copy as Markdown and Copy formatted. The quick picker
-  (`Ctrl Alt V`) finds a prompt or snippet from any app, fills its blanks and copies it; what you used in that app
+  (`Ctrl Shift Space`) finds a prompt or snippet from any app, fills its blanks and copies it; what you used in that app
   comes first. Blanks can fill themselves (`{{clipboard}}`, `{{today}}`, `{{selection}}`), offer choices
   (`{{tone: formal / casual}}`) and remember your last answers. `## headings` in a prompt are versions of it.
 - **Two notes at once.** `Ctrl \` opens a second note beside the one you write in; `Ctrl Tab` goes back to the
@@ -126,7 +126,7 @@ Petrel keeps running in the tray: closing the window hides it, and the tray menu
 Pause hotkeys and Quit. On Linux the tray needs `libayatana-appindicator` and a tray host (Waybar's `tray` module on Omarchy); without
 one, closing the window quits as before. On Windows a left click on the icon shows the window.
 
-`Ctrl Alt Space` opens the capture window and `Ctrl Alt V` the quick picker from any app on Windows and X11 (change
+`Ctrl Alt Space` opens the capture window and `Ctrl Shift Space` the quick picker from any app on Windows and X11 (change
 them or turn them off in Settings, `Ctrl ,`; pause them from the tray). On Wayland apps can't grab keys, so bind
 `petrel --capture` and `petrel --picker` in the compositor as above. In `npm run dev` the picker is
 [http://localhost:1420/?picker](http://localhost:1420/?picker). Settings also has "Start at login", which starts Petrel hidden in the tray.

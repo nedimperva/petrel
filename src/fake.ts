@@ -15,6 +15,8 @@ export function fakeApi(): Api {
   const undos = new Map<string, () => void>();
   const copies: Record<string, number> = {};
   const copiesIn: Record<string, Record<string, number>> = {};
+  // Empty collections made in the browser, which have no note to show them yet.
+  const folders = new Set<string>();
   // The UI settings, in memory; `?keep` in the capture window pretends the last capture was a minute ago.
   const ui: Record<string, string> = location.search.includes("keep") ? { "ui.capture.last": `1:${Date.now() - 60_000}` } : {};
   let nextId = 1;
@@ -26,8 +28,8 @@ export function fakeApi(): Api {
     hotkeyActive: true,
     hotkeyPaused: false,
     hotkeyError: null,
-    pickerHotkey: "Ctrl+Alt+V" as string | null,
-    pickerHotkeyDefault: "Ctrl+Alt+V",
+    pickerHotkey: "Ctrl+Shift+Space" as string | null,
+    pickerHotkeyDefault: "Ctrl+Shift+Space",
     pickerHotkeyActive: true,
     pickerHotkeyError: null,
     hotkeySupported: true,
@@ -211,6 +213,7 @@ export function fakeApi(): Api {
     noteFolders: async () => {
       const count = new Map<string, number>();
       for (const n of notes.values()) count.set(n.folder, (count.get(n.folder) ?? 0) + 1);
+      for (const f of folders) if (!count.has(f)) count.set(f, 0);
       return [...count.entries()]
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([path, c]) => ({ path, name: path.split("/").pop() || "Notes", depth: path ? path.split("/").length : 0, count: c }));
@@ -322,6 +325,31 @@ export function fakeApi(): Api {
         const o = m && [...notes.values()].find((x) => x.folder === c.folder && x.title === m[1]);
         return o ? [{ original: o.id, copy: c.id, title: o.title, folder: o.folder, copiedAt: c.modifiedAt }] : [];
       }),
+    createFolder: async (folder) => {
+      folders.add(folder);
+      return folder;
+    },
+    renameFolder: async (folder, name) => {
+      const to = folder.includes("/") ? `${folder.slice(0, folder.lastIndexOf("/"))}/${name}` : name;
+      for (const n of notes.values())
+        if (n.folder === folder || n.folder.startsWith(`${folder}/`)) {
+          n.folder = to + n.folder.slice(folder.length);
+          n.path = pathOf(n.folder, n.title);
+        }
+      folders.delete(folder);
+      return to;
+    },
+    trashFolder: async (folder) => {
+      let k = 0;
+      for (const n of [...notes.values()])
+        if (n.folder === folder || n.folder.startsWith(`${folder}/`)) {
+          notes.delete(n.id);
+          k++;
+        }
+      folders.delete(folder);
+      return k;
+    },
+    revealFolder: async () => {},
     settleConflict: async (original, copy, keep) => {
       const o = get(original);
       const c = get(copy);

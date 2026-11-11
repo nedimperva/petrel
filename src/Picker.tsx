@@ -1,4 +1,4 @@
-// The quick picker (`petrel --picker`, Ctrl Alt V): find a prompt, snippet or any note, fill its blanks, and Enter
+// The quick picker (`petrel --picker`, Ctrl Shift Space): find a prompt, snippet or any note, fill its blanks, and Enter
 // copies it and closes, so the paste goes where you were. Ctrl O opens it in Petrel instead. It lists the things
 // to copy (collections set so with `t`); once you type, the notes that match come after them. It knows which app
 // was in front: what you copied there before comes first ("3× here"). Alt ← → step through a card's versions.

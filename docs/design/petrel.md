@@ -60,7 +60,7 @@ It is not for sale; it may be open source later.
   The most copied come first.
 - **Copy is the action.** There are no actions. Copy, Copy as Markdown and Copy formatted (HTML for mail and
   docs) are `Ctrl K` commands. `{{name}}` and `{{name|default}}` in a note are blanks filled in as you copy;
-  `\{{` is a literal. The quick picker (`Ctrl Alt V`) does the same from any app and closes, so the paste goes
+  `\{{` is a literal. The quick picker (`Ctrl Shift Space`) does the same from any app and closes, so the paste goes
   where you were.
 - **AI only when asked.** Nothing is sent until you press a key for it. On a note, `Ctrl J` (or `/` on an empty
   line): tidy, shorten, make a list, a checklist, continue, or a custom ask. Select text and pick Explain for a
@@ -174,7 +174,7 @@ are in `src/styles/tokens.css`.
 |---|---|
 | Main | The writing page, or the library (`Ctrl L`) over it. No home, no sidebar. |
 | Capture | `Ctrl Alt Space`, `petrel --capture`. No frame. One line of footer: where it goes, `Tab` to choose, `Esc` done. |
-| Quick picker | `Ctrl Alt V`, `petrel --picker`. No frame. Search, a peek pane, blanks filled inline, `Enter` copies and closes. |
+| Quick picker | `Ctrl Shift Space`, `petrel --picker`. No frame. Search, a peek pane, blanks filled inline, `Enter` copies and closes. |
 
 On Wayland the compositor binds the keys: `bind = SUPER, N, exec, petrel --capture` and
 `bind = SUPER, V, exec, petrel --picker`.
