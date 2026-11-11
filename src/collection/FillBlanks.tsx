@@ -11,6 +11,8 @@ export default function FillBlanks(p: {
   onCopy(text: string): void;
   onClose(): void;
   inline?: boolean;
+  /** The button's word: Copy, or Run for a prompt on a note. */
+  action?: string;
 }) {
   const state = createBlanks(
     () => p.text,
@@ -54,7 +56,7 @@ export default function FillBlanks(p: {
           Cancel <kbd>Esc</kbd>
         </button>
         <button type="submit" class="btn primary">
-          Copy <kbd>Enter</kbd>
+          {p.action ?? "Copy"} <kbd>Enter</kbd>
         </button>
       </div>
     </form>

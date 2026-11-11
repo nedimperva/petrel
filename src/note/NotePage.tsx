@@ -1,11 +1,16 @@
 // The writing page: a note's title and text in Literata and one quiet line below (where it lives, words, saved).
 // What links here, and related notes when asked, sit under the text. AI only when asked: `Ctrl J` on a selection, `/` on an empty
-// line. Saves go through the note saver (300 ms, conflict copies), exactly as before the redesign. A day's page
+// line; under the built-in tasks Ctrl J lists the Prompts collection, and a prompt runs on the selection (or the
+// whole note) and is shown beside the text like Tidy. Saves go through the note saver (300 ms, conflict copies), exactly as before the redesign. A day's page
 // (`journal/YYYY-MM-DD.md`) has the date for a title, the month beside it, and the time at the start of each entry.
 // Pasted pictures are saved next to the note and shown under their line.
 
 import { createEffect, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
-import { api, errText, type AiRelated, type AiTask, type Backlinks, type Note } from "../api";
+import { api, errText, type AiRelated, type AiTask, type Backlinks, type Note, type NoteSummary } from "../api";
+import { blanks, fill, todayText } from "../blanks";
+import FillBlanks from "../collection/FillBlanks";
+import { lastVersions } from "../collection/BlankFields";
+import { lastFirst, versionsOf } from "../collection/versions";
 import { toggleTask } from "../editor/commands";
 import { createEditor, type EditorHandle } from "../editor/editor";
 import { cleanPaste } from "../editor/paste";
@@ -113,7 +118,13 @@ export default function NotePage(p: Props) {
   const [explain, setExplain] = createSignal<{ x: number; y: number; text: string | null; at: number } | null>(null);
   const [asking, setAsking] = createSignal("");
   // The last AI request, for Try again.
-  let last: { task: AiTask; from: number; to: number; instruction?: string } | null = null;
+  let last: { task: AiTask; from: number; to: number; instruction?: string; label?: string } | null = null;
+  // Ctrl J's own prompts: the Prompts collection, the most copied first.
+  const [prompts, setPrompts] = createSignal<NoteSummary[]>([]);
+  const [pi, setPi] = createSignal(-1);
+  // Nothing was selected when Ctrl J was pressed: a prompt reads the whole note.
+  const [barWhole, setBarWhole] = createSignal(false);
+  const [filling, setFilling] = createSignal<{ title: string; text: string; from: number; to: number; selected: string } | null>(null);
   let seq = 0;
 
   /** The day this page is, if it is a day's page: from the view, or from the note that was opened. */
@@ -198,7 +209,7 @@ export default function NotePage(p: Props) {
 
   const view = () => editor!.view;
 
-  async function run(task: AiTask, from: number, to: number, instruction?: string) {
+  async function run(task: AiTask, from: number, to: number, instruction?: string, label?: string) {
     if (!p.aiReady) return p.onAiSetup();
     setBar(null);
     setSlash(null);
@@ -206,7 +217,7 @@ export default function NotePage(p: Props) {
     const doc = v.state.doc;
     const text = task === "continue" || task === "summarize" ? doc.sliceString(0, to) : task === "title" ? doc.toString() : doc.sliceString(from, to);
     if (!text.trim()) return say("There is no text to work on yet");
-    last = { task, from, to, instruction };
+    last = { task, from, to, instruction, label };
     const mine = ++seq;
     await saver.flush();
     if (task === "explain") {
@@ -215,7 +226,7 @@ export default function NotePage(p: Props) {
     } else if (task !== "title") {
       // Continue and summarize write at the cursor; the rest replace the text they read.
       const at = task === "continue" || task === "summarize" ? to : from;
-      v.dispatch({ effects: setPreview.of({ from: at, to: task === "continue" || task === "summarize" ? at : to, text: null, error: null, label: LABELS[task] }) });
+      v.dispatch({ effects: setPreview.of({ from: at, to: task === "continue" || task === "summarize" ? at : to, text: null, error: null, label: label ?? LABELS[task] }) });
     }
     try {
       const out = await (await api()).aiWrite({ task, text, context: doc.toString(), instruction, noteId: note()?.id });
@@ -260,7 +271,7 @@ export default function NotePage(p: Props) {
       view().dispatch({ effects: setPreview.of(null) });
       const from = pv ? pv.from : last.from;
       const to = pv ? (last.task === "continue" || last.task === "summarize" ? pv.from : pv.to) : last.to;
-      void run(last.task, from, to, last.instruction);
+      void run(last.task, from, to, last.instruction, last.label);
     },
   };
 
@@ -281,11 +292,42 @@ export default function NotePage(p: Props) {
     if (!editor || previewOf(view().state)) return;
     // On a day's page with nothing selected, Ctrl J is the week; select text for the writing tasks.
     if (dayPage() && p.onWeek && view().state.selection.main.empty) return p.onWeek();
+    setBarWhole(view().state.selection.main.empty);
+    setPi(-1);
+    void loadPrompts();
     const r = range();
-    if (r.from === r.to) return say("Select some text first");
-    view().dispatch({ selection: { anchor: r.from, head: r.to } });
+    if (r.from === r.to && !view().state.doc.length) return say("Write something first");
+    // On an empty line the bar still opens: your prompts can read the whole note.
+    if (r.from !== r.to) view().dispatch({ selection: { anchor: r.from, head: r.to } });
     const c = view().coordsAtPos(r.from);
     setBar({ x: c?.left ?? 0, y: (c?.top ?? 0) - 46, ask: false });
+  }
+
+  async function loadPrompts() {
+    const s = await api();
+    const [all, counts] = await Promise.all([s.listNotes({ limit: 2000 }), s.copyCounts()]);
+    setPrompts(
+      all
+        .filter((n) => /prompt/i.test(n.folder.split("/")[0]))
+        .sort((a, b) => (counts[b.path] ?? 0) - (counts[a.path] ?? 0) || a.title.localeCompare(b.title))
+        .slice(0, 8),
+    );
+  }
+
+  /** One of your prompts on the selection, or on the whole note when nothing was selected. Blanks other than
+   * the self-filling ones are asked first. */
+  async function runPrompt(n: NoteSummary) {
+    if (!p.aiReady) return p.onAiSetup();
+    const v = view();
+    const sel = v.state.selection.main;
+    const r = barWhole() ? { from: 0, to: v.state.doc.length } : { from: sel.from, to: sel.to };
+    setBar(null);
+    const body = (await (await api()).peekNote(n.id)).body.replace(/\n+$/, "");
+    const vs = lastFirst(versionsOf(body), (await lastVersions())[n.path]);
+    const text = vs.length ? vs[0].text : body;
+    const selected = v.state.sliceDoc(r.from, r.to);
+    if (blanks(text).some((b) => b.auto !== "selection" && b.auto !== "today")) return setFilling({ title: n.title, text, ...r, selected });
+    void run("prompt", r.from, r.to, fill(text, { selection: selected, today: todayText() }), n.title);
   }
 
   function openSlash() {
@@ -329,6 +371,12 @@ export default function NotePage(p: Props) {
   const barKeys = (e: KeyboardEvent) => {
     const b = bar();
     if (!b || b.ask) return;
+    if ((e.key === "ArrowDown" && prompts().length) || (e.key === "ArrowUp" && pi() >= 0) || (e.key === "Enter" && pi() >= 0)) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === "Enter") return void runPrompt(prompts()[pi()]);
+      return setPi(e.key === "ArrowDown" ? Math.min(prompts().length - 1, pi() + 1) : pi() - 1);
+    }
     const i = ["1", "2", "3", "4"].indexOf(e.key);
     if (i >= 0) {
       e.preventDefault();
@@ -737,6 +785,21 @@ export default function NotePage(p: Props) {
               <button class="ai-bar-btn" onMouseDown={(e) => e.preventDefault()} onClick={() => setBar({ ...b(), ask: true })}>
                 Ask… <kbd>A</kbd>
               </button>
+              <Show when={prompts().length}>
+                <div class="ai-prompts">
+                  <div class="menu-head">
+                    Your prompts <span class="muted">{barWhole() ? "on the whole note" : "on the selection"} · ↓ to choose</span>
+                  </div>
+                  <For each={prompts()}>
+                    {(n, i) => (
+                      <button class="menu-item" classList={{ on: i() === pi() }} onMouseDown={(e) => e.preventDefault()} onClick={() => void runPrompt(n)}>
+                        <span>{n.title}</span>
+                        <span class="muted">{n.preview.split("\n")[0].slice(0, 60)}</span>
+                      </button>
+                    )}
+                  </For>
+                </div>
+              </Show>
             </Show>
           </div>
         )}
@@ -757,6 +820,24 @@ export default function NotePage(p: Props) {
               )}
             </For>
           </div>
+        )}
+      </Show>
+
+      <Show when={filling()}>
+        {(f) => (
+          <FillBlanks
+            title={f().title}
+            text={f().text}
+            selection={f().selected}
+            action="Run"
+            onClose={() => (setFilling(null), view().focus())}
+            onCopy={(t) => {
+              const x = f();
+              setFilling(null);
+              view().focus();
+              void run("prompt", x.from, x.to, t, x.title);
+            }}
+          />
         )}
       </Show>
 

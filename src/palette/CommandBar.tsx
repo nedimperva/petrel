@@ -1,10 +1,11 @@
 // Ctrl K: search or ask. Typing finds notes (by title first, then by words) and commands. A question (ending in
 // `?`, or `Tab` on any text) asks Claude to answer from the notes, with the notes it used as cards to open.
 // Ctrl P opens the same bar on notes only. A few words narrow the notes found: `in:travel`, `pinned`, `today`,
-// `this week`, `has:link`, `has:picture`, `has:task` (palette/filters.ts).
+// `this week`, `has:link`, `has:picture`, `has:task` (palette/filters.ts). After an answer, Tab asks again: the
+// follow-up goes with the earlier answers and the same notes, and Ctrl Enter keeps the whole exchange as a note.
 
 import { createResource, createSignal, For, onMount, Show } from "solid-js";
-import { api, errText, type AiAnswer, type NoteSummary } from "../api";
+import { api, errText, type AiAnswer, type AiSource, type NoteSummary } from "../api";
 import { answerHtml } from "../copy";
 import { folderName, Kbd, say } from "../ui";
 import { keep, noFilters, parseFilters } from "./filters";
@@ -39,6 +40,11 @@ export default function CommandBar(p: {
   const [i, setI] = createSignal(0);
   const [answer, setAnswer] = createSignal<AiAnswer | "loading" | null>(null);
   const [asked, setAsked] = createSignal("");
+  /** The questions answered before the latest one, in this exchange. */
+  const [thread, setThread] = createSignal<{ question: string; answer: AiAnswer }[]>([]);
+  const [following, setFollowing] = createSignal(false);
+  const [more, setMore] = createSignal("");
+  const [moreLoading, setMoreLoading] = createSignal(false);
   const filters = () => parseFilters(q());
   const [notes] = createResource(q, async (text) => {
     const s = await api();
@@ -98,6 +104,8 @@ export default function CommandBar(p: {
       return p.onAiSetup();
     }
     setAsked(question);
+    setThread([]);
+    setFollowing(false);
     setAnswer("loading");
     try {
       setAnswer(await (await api()).aiAsk(question));
@@ -106,6 +114,45 @@ export default function CommandBar(p: {
       say(errText(e), { error: true });
     }
   }
+
+  /** Every turn so far, the latest last. */
+  const turns = () => {
+    const a = answer();
+    return a && a !== "loading" ? [...thread(), { question: asked(), answer: a }] : thread();
+  };
+
+  /** A question that follows the answer: same notes, the talk so far. */
+  async function askMore() {
+    const question = more().trim();
+    const a = answer();
+    if (!question || !a || a === "loading" || moreLoading()) return;
+    const all = turns();
+    const notes = [...new Set(all.flatMap((t) => t.answer.read ?? t.answer.sources.map((s) => s.id)))];
+    setMoreLoading(true);
+    try {
+      const next = await (await api()).aiAsk(
+        question,
+        all.map((t) => ({ question: t.question, answer: t.answer.answer })),
+        notes,
+      );
+      setThread(all);
+      setAsked(question);
+      setAnswer(next);
+      setMore("");
+    } catch (e) {
+      say(errText(e), { error: true });
+    } finally {
+      setMoreLoading(false);
+    }
+  }
+
+  /** The notes any answer in the exchange came from, each once. */
+  const allSources = (): AiSource[] => {
+    const seen = new Set<number>();
+    return turns()
+      .flatMap((t) => t.answer.sources)
+      .filter((s) => !seen.has(s.id) && seen.add(s.id));
+  };
 
   const choose = (r: Row | undefined) => {
     if (!r) return;
@@ -119,8 +166,13 @@ export default function CommandBar(p: {
     const a = answer();
     if (!a || a === "loading") return;
     const s = await api();
-    const refs = a.sources.map((x) => `- [[${x.title}]]`).join("\n");
-    const n = await s.createNote("", `Q ${asked().replace(/[?\\/:*"<>|]/g, "").slice(0, 50)}`, `> ${asked()}\n\n${a.answer}\n\n${refs ? `Sources:\n${refs}\n` : ""}`, ["answer"]);
+    const all = turns();
+    const refs = allSources()
+      .map((x) => `- [[${x.title}]]`)
+      .join("\n");
+    const talk = all.map((t) => `> ${t.question}\n\n${t.answer.answer}`).join("\n\n");
+    const first = all[0]?.question ?? asked();
+    const n = await s.createNote("", `Q ${first.replace(/[?\\/:*"<>|]/g, "").slice(0, 50)}`, `${talk}\n\n${refs ? `Sources:\n${refs}\n` : ""}`, ["answer"]);
     p.onClose();
     p.onOpen(n.id);
     say("Saved the answer as a note");
@@ -130,7 +182,14 @@ export default function CommandBar(p: {
     const n = rows().length;
     if (answer() && e.key === "Escape") {
       e.preventDefault();
+      setThread([]);
+      setFollowing(false);
       return setAnswer(null);
+    }
+    if (e.key === "Tab" && answer() && answer() !== "loading" && !p.notesOnly) {
+      e.preventDefault();
+      e.stopPropagation();
+      return setFollowing(true);
     }
     if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) setI((i() + 1) % Math.max(1, n));
     else if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p" && !p.notesOnly)) setI((i() + n - 1) % Math.max(1, n));
@@ -157,12 +216,14 @@ export default function CommandBar(p: {
               setQ(e.currentTarget.value);
               setI(0);
               setAnswer(null);
+              setThread([]);
+              setFollowing(false);
             }}
             onKeyDown={key}
           />
           <Show when={!p.notesOnly && q().trim() && noFilters(filters())}>
             <span class="muted small nowrap">
-              <kbd>Tab</kbd> ask
+              <kbd>Tab</kbd> {answer() && answer() !== "loading" ? "ask again" : "ask"}
             </span>
           </Show>
         </div>
@@ -224,10 +285,54 @@ export default function CommandBar(p: {
                 const a = answer() as AiAnswer;
                 return (
                   <>
+                    <For each={thread()}>
+                      {(t) => (
+                        <div class="answer-turn earlier">
+                          <p class="answer-q">{t.question}</p>
+                          <div class="answer-text" innerHTML={answerHtml(t.answer.answer)} />
+                        </div>
+                      )}
+                    </For>
+                    <Show when={thread().length}>
+                      <p class="answer-q">{asked()}</p>
+                    </Show>
                     <div class="answer-text" innerHTML={answerHtml(a.answer)} />
-                    <Show when={a.sources.length}>
+                    <Show when={following()}>
+                      <form
+                        class="answer-more"
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          void askMore();
+                        }}
+                      >
+                        <span class="spark">✦</span>
+                        <input
+                          ref={(el) => setTimeout(() => el.focus())}
+                          placeholder="Ask again, about the same notes…"
+                          value={more()}
+                          disabled={moreLoading()}
+                          onInput={(e) => setMore(e.currentTarget.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Escape") {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setFollowing(false);
+                              input.focus();
+                            } else if (e.key === "Enter" && e.ctrlKey) {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              void saveAnswer();
+                            }
+                          }}
+                        />
+                        <Show when={moreLoading()} fallback={<span class="muted small nowrap"><kbd>Enter</kbd> ask</span>}>
+                          <span class="ai-thinking small">Claude is reading…</span>
+                        </Show>
+                      </form>
+                    </Show>
+                    <Show when={allSources().length}>
                       <div class="sources">
-                        <For each={a.sources}>
+                        <For each={allSources()}>
                           {(s) => (
                             <button class="source" onClick={() => (p.onClose(), p.onOpen(s.id))}>
                               <span class="source-title">{s.folder === "inbox" ? "A capture" : s.title}</span>
@@ -244,8 +349,13 @@ export default function CommandBar(p: {
                           Open {a.sources[0].title}
                         </button>
                       </Show>
+                      <Show when={!following()}>
+                        <button class="btn" onClick={() => setFollowing(true)}>
+                          Ask again <kbd>Tab</kbd>
+                        </button>
+                      </Show>
                       <button class="btn primary" onClick={saveAnswer}>
-                        Save answer as a note <Kbd keys="Ctrl Enter" />
+                        {thread().length ? "Save the exchange as a note" : "Save answer as a note"} <Kbd keys="Ctrl Enter" />
                       </button>
                     </div>
                   </>
