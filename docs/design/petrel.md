@@ -3,6 +3,44 @@
 Decided by the owner on 2026-11-09 and 2026-11-10. Canvas: https://claude.ai/artifact/2iMBXDeW8F2UVV1tLguc7g.
 This replaces the Drafts-shaped plan (`docs/PLAN.md`, `docs/design/actions.md`, `docs/design/ui.md`).
 
+## The model (2026-11-11, the coherence pass)
+
+Everything is a page. You do three things: **write**, **find**, **copy**. Every feature sits under one of them;
+anything that does not stays hidden until asked for.
+
+- **Write**: the page (which can split in two: a note beside), capture, today's page, paragraph focus, headings in
+  the margin, clean paste, and AI on the text (`Ctrl J`, the one AI door; `/` on an empty line opens the same menu).
+- **Find**: `Ctrl K`, the one door. Notes, commands, a question for your notes, the recent notes (Back), open tasks,
+  the week. `Ctrl P` is `Ctrl K` on notes only. Panels it opens (tasks, the week, history, an answer) look and move
+  the same, and `Esc` goes back to `Ctrl K`.
+- **Copy**: the library and the quick picker are the same thing: cards of what you copy. A collection is either
+  **pages** (Travel, Journal: found with `Ctrl K`) or **to copy** (Prompts, Snippets: cards in the library and the
+  picker). Set once per collection (`t`), kept in its `.petrel` file (`copy: yes`). The inbox is cards too, until filed.
+
+Three kinds of screen, no more: the **page** (one or two notes), **one overlay** that grows into a panel (`Ctrl K`
+and what it opens), and **the card sheet** (shared with the picker). No dialog opens on top of another; when
+something closes, the focus goes back where it was; every overlay comes and goes with the same motion.
+
+### The key grammar
+
+| Key | Means, everywhere |
+|---|---|
+| `Enter` | do it (open, copy, keep, run, file) |
+| `Esc` | back one step (close the panel, then the overlay, then the note beside) |
+| `Tab` | the next field, and only that (`Shift Tab` the one before) |
+| `Alt ←` `Alt →` | the sibling before or after: another day, another version |
+| `↑` `↓` | move through a list |
+| `1`–`9` | pick from a short numbered list (a place, a choice, a side to keep) |
+| `Ctrl K` | find; `Ctrl P` notes only; `Ctrl J` AI; `Ctrl L` the library; `Ctrl Tab` back |
+
+Every screen ends with the same one-line footer of its keys (`src/ui.tsx`, `KeyHints`).
+
+In the capture window `@` says where a capture goes: `@recipes` (a collection), `@today`, `@fri`, `@nov20` (a day),
+`@Groceries` (a note). `#` is only ever a heading and `>` only a quote. Old `#word` and `>Note` routing is gone.
+
+On Hyprland (Omarchy) Petrel makes the capture window and the picker float, centred and pinned to every
+workspace itself, through `hyprctl`, when they open.
+
 ## What Petrel is
 
 A personal tool for quick notes and for keeping the things you copy often. Minimal, quick and good to look at.
