@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use petrel_core::notes::{
     Backlinks, LinkTarget, Note, NoteChange, NoteFolder, NoteQuery, NoteSummary, NoteVersion, Resolved,
-    SavedNote, ScanReport,
+    SavedNote, ScanReport, TopicFace,
 };
 use petrel_core::{Store, UndoToken};
 use tauri::State;
@@ -195,4 +195,81 @@ pub fn backlinks(state: State<AppState>, id: i64) -> R<Backlinks> {
 #[tauri::command]
 pub fn link_mention(state: State<AppState>, note_id: i64, kind: String, id: i64) -> R<UndoToken> {
     with(&state, |s| s.link_mention(note_id, &kind, id))
+}
+
+/// Today's page, or any day's (`YYYY-MM-DD`). None when the day has no page yet.
+#[tauri::command]
+pub fn day_note(state: State<AppState>, date: String) -> R<Option<Note>> {
+    with(&state, |s| s.day_note(&date))
+}
+
+/// Files a capture onto a day's page, under the time.
+#[tauri::command]
+pub fn file_into_day(state: State<AppState>, id: i64, date: String) -> R<NoteChange> {
+    with(&state, |s| s.file_into_day(id, &date))
+}
+
+/// What "the week" reads, and what the week's page counts and lists without AI.
+#[tauri::command]
+pub fn notes_between(state: State<AppState>, from: i64, to: i64) -> R<Vec<Note>> {
+    with(&state, |s| s.notes_between(from, to))
+}
+
+#[tauri::command]
+pub fn topic_faces(state: State<AppState>) -> R<std::collections::HashMap<String, TopicFace>> {
+    with(&state, |s| s.topic_faces())
+}
+
+#[tauri::command]
+pub fn set_topic_face(state: State<AppState>, top: String, color: String, mark: String) -> R<TopicFace> {
+    with(&state, |s| s.set_topic_face(&top, &color, &mark))
+}
+
+/// A pasted picture, sent as raw bytes (a JSON array would be several times bigger). The folder and the file
+/// name come in headers, percent-encoded: a header carries ASCII only.
+#[tauri::command]
+pub fn save_attachment(state: State<AppState>, request: tauri::ipc::Request<'_>) -> R<String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("the picture did not arrive as bytes".into());
+    };
+    let header = |k: &str| -> R<String> {
+        let v = request.headers().get(k).ok_or_else(|| format!("no {k}"))?;
+        percent_decode(v.to_str().map_err(|e| e.to_string())?)
+    };
+    let (folder, name) = (header("x-petrel-folder")?, header("x-petrel-name")?);
+    with(&state, |s| s.save_attachment(&folder, &name, bytes))
+}
+
+/// A picture's bytes, to show on the page.
+#[tauri::command]
+pub fn attachment(state: State<AppState>, folder: String, link: String) -> R<tauri::ipc::Response> {
+    with(&state, |s| s.attachment(&folder, &link)).map(tauri::ipc::Response::new)
+}
+
+/// What `encodeURIComponent` made, back to text.
+fn percent_decode(s: &str) -> R<String> {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            let hex = std::str::from_utf8(&b[i + 1..i + 3]).map_err(|e| e.to_string())?;
+            out.push(u8::from_str_radix(hex, 16).map_err(|_| format!("bad escape in {s}"))?);
+            i += 3;
+        } else {
+            out.push(b[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn headers_decode() {
+        assert_eq!(super::percent_decode("Putovanja%2F%C5%A1alica").unwrap(), "Putovanja/šalica");
+        assert_eq!(super::percent_decode("plain.png").unwrap(), "plain.png");
+        assert!(super::percent_decode("%zz").is_err());
+    }
 }

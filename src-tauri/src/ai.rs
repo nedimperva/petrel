@@ -544,6 +544,46 @@ pub async fn ai_related(app: tauri::AppHandle, note_id: i64) -> R<Vec<Related>> 
     .await
 }
 
+/// How much of the week goes to the model, at most, all notes together.
+const WEEK_CHARS: usize = 40_000;
+
+/// "The week, when you ask": a few sentences on what the notes changed between `from` and `to` were about. The
+/// counts and the open tasks are worked out on the page, without AI; this is only the prose. Never runs by itself.
+#[tauri::command]
+pub async fn ai_week(app: tauri::AppHandle, from: i64, to: i64) -> R<String> {
+    let state = app.state::<AppState>();
+    let model = model(&state);
+    let notes = {
+        let store = state.store.lock().map_err(|_| "store lock poisoned".to_string())?;
+        store.notes_between(from, to).map_err(|e| format!("{e:#}"))?
+    };
+    if notes.is_empty() {
+        return Err("nothing was written in these days".into());
+    }
+    blocking(move || {
+        let mut user = String::from("These are the notes the user wrote or changed this week, newest first:\n\n");
+        let each = (WEEK_CHARS / notes.len()).clamp(400, 4_000);
+        for n in &notes {
+            let what = if n.folder == petrel_core::notes::INBOX_DIR { "capture" } else { "note" };
+            user += &format!(
+                "<{what} title=\"{}\" folder=\"{}\">\n{}\n</{what}>\n\n",
+                n.title.replace('"', "'"),
+                n.folder,
+                head(n.body.trim(), each)
+            );
+            if user.len() > WEEK_CHARS {
+                break;
+            }
+        }
+        user += "Write a short look back on this week for the user: what the week went to and what moved \
+            forward, in two short paragraphs at most, warm and plain, speaking to them as you. Name notes as \
+            [[Title]] links where it helps (only titles listed above, never captures, which have only a time as \
+            a title). Do not list open tasks or count things: the page shows those. No headings, no bullet list.";
+        complete(&model, "medium", SYSTEM, &user, 2_000)
+    })
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

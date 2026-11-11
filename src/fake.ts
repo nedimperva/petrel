@@ -2,7 +2,7 @@
 // and collections, and an AI that answers from a script. The real rules (files, conflicts, front matter, links)
 // are in crates/petrel-core/src/notes.rs and its tests; this is enough to work on the screens.
 
-import type { AiSuggestion, Api, Note, NoteSummary, NoteVersion, UndoToken } from "./api";
+import type { AiSuggestion, Api, Note, NoteSummary, NoteVersion, TopicFace, UndoToken } from "./api";
 import { parseLinks } from "./notes/parse";
 
 const MIN = 60_000;
@@ -54,6 +54,12 @@ export function fakeApi(): Api {
     return n;
   };
 
+  function dayOf(age: number) {
+    const d = new Date(Date.now() - age);
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  }
+
   const stamp = (age: number) => {
     const d = new Date(Date.now() - age);
     const p = (n: number) => String(n).padStart(2, "0");
@@ -79,6 +85,10 @@ export function fakeApi(): Api {
   add("Snippets", "git undo last commit", "git reset --soft HEAD~1\n", ["git"], 40 * DAY);
   add("Songs", "Kad ja pođoh", "Capo 2\n\nAm        Dm\nKad ja pođoh na Bembašu\nE7            Am\nna Bembašu na vodu\n", [], 60 * DAY);
   add("Songs", "Wish you were here", "Intro: Em G Em G Em A Em A G\n\nC         D/F#\nSo, so you think you can tell\n", [], 90 * DAY);
+  add("journal", dayOf(DAY), "08:40 Slow start. First cold morning, coffee on the balcony.\n\n17:05\n- [x] Call the dentist\n- [ ] Send the Mostar dates to Lejla\n", [], DAY);
+  add("journal", dayOf(0), "08:12 Want to finish the shelf plan this week.\n", [], 40 * MIN);
+  const faces: Record<string, TopicFace> = { Prompts: { color: "plum", mark: "spark" }, Songs: { color: "rose", mark: "music" } };
+  const pictures = new Map<string, Uint8Array>();
   copies["Prompts/Code review.md"] = 14;
   copies["Prompts/Release notes.md"] = 6;
   copies["Snippets/Email sign-off.md"] = 22;
@@ -292,6 +302,57 @@ export function fakeApi(): Api {
       return { linked, mentioned: [] };
     },
 
+    dayNote: async (date) => {
+      const n = [...notes.values()].find((x) => x.folder === "journal" && x.title === date);
+      return n ? { ...n } : null;
+    },
+    fileIntoDay: async (id, date) => {
+      const a = get(id);
+      let b = [...notes.values()].find((x) => x.folder === "journal" && x.title === date);
+      const made = !b;
+      b ??= add("journal", date, "");
+      const day = b;
+      const before = day.body;
+      const t = new Date();
+      const time = `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`;
+      const text = a.body.trim();
+      const glue = day.body.trimEnd() ? `${day.body.trimEnd()}\n\n` : "";
+      day.body = `${glue}${time}${/^[>\-*#!|`]/.test(text) ? "\n" : " "}${text}\n`;
+      day.modifiedAt = Date.now();
+      notes.delete(id);
+      return {
+        note: { ...day },
+        token: token(() => {
+          day.body = before;
+          notes.set(a.id, a);
+          if (made) notes.delete(day.id);
+        }),
+        relinked: 0,
+      };
+    },
+    notesBetween: async (from, to) =>
+      [...notes.values()].filter((n) => n.modifiedAt >= from && n.modifiedAt < to).sort((a, b) => b.modifiedAt - a.modifiedAt).map((n) => ({ ...n })),
+    topicFaces: async () => ({ ...faces }),
+    setTopicFace: async (top, face) => {
+      faces[top] = { ...face };
+      return { ...face };
+    },
+    saveAttachment: async (folder, name, bytes) => {
+      let link = `attachments/${name.replace(/[^A-Za-z0-9._-]+/g, "-")}`;
+      for (let i = 2; pictures.has(`${folder}/${link}`); i++) link = link.replace(/(-\d+)?(\.\w+)$/, `-${i}$2`);
+      pictures.set(`${folder}/${link}`, bytes);
+      return link;
+    },
+    attachment: async (folder, link) => {
+      const b = pictures.get(`${folder}/${link}`);
+      if (!b) throw new Error(`no picture ${link}`);
+      return b;
+    },
+    captureContext: async () =>
+      location.search.includes("quote")
+        ? { text: "A long, cold proof gives the bread a deeper, slightly sour taste.", app: "Firefox", title: "The Bread Book, chapter 3" }
+        : { text: null, app: null, title: null },
+
     aiStatus: async () => ({ ready: aiKey !== null, model: "claude-opus-5-5", error: null }),
     setAiKey: async (key) => {
       aiKey = key;
@@ -331,6 +392,11 @@ export function fakeApi(): Api {
       s.push({ kind: "move", noteId: null, folder: "Ideas", title: me.body.split(/[.:\n]/)[0].slice(0, 40), why: "a new idea of its own" });
       return wait(s.slice(0, 3), 900);
     },
+    aiWeek: async () =>
+      wait(
+        "Most of the week went to the trip: the flights are booked and [[Tern release]] moved on too. You came back to [[Garden]] twice, which says spring is on your mind.",
+        1200,
+      ),
     aiRelated: async (id) => {
       const me = get(id);
       return wait(

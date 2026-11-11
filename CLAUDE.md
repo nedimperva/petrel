@@ -5,7 +5,7 @@ Markdown files in one folder; a Rust engine (`crates/petrel-core`) indexes them 
 (`src-tauri`) adds windows, tray, hotkeys and AI, and a SolidJS UI (`src`) draws it. The README covers setup and
 keys; `docs/design/petrel.md` is the design; this file covers state and decisions that aren't visible from the code.
 
-## Where things stand (2026-11-11)
+## Where things stand (2026-11-11, later)
 
 - **Redesign implemented (owner decisions 2026-11-09/10, canvas https://claude.ai/artifact/2iMBXDeW8F2UVV1tLguc7g),
   on a PR based on the notes PR (#9).** No actions, no drafts UI, no `petrel://` links, no `petrel run`: those
@@ -19,6 +19,14 @@ keys; `docs/design/petrel.md` is the design; this file covers state and decision
   the app opens on a writing page in `inbox/` (or the last note if left under 10 min ago, setting `last.note`);
   no Home, Inbox or Collection pages; the library is cards on `Ctrl L` (`src/library/`: shelf, collection
   grid, `Sheet.tsx` for an opened card with blank fields). Tern's colours in `tokens.css`.
+- **Next ideas (owner picks 2026-11-11, canvas https://claude.ai/artifact/Sw6CPjnpGXY6Vz9LnVCQ5d), branch
+  `next-ideas`:** capture routing (`#topic`, `#today`, `>Note`, `src/inbox/route.ts`), the selection as a quote
+  (`src-tauri/src/context.rs`: UI Automation on Windows, primary selection + hyprctl on Linux), pictures in
+  `<folder>/attachments/` carried on move and merge, inbox review (`src/inbox/Review.tsx`), collection looks in
+  `<top>/.petrel`, `p` pins, Ctrl K filters, today's page (`journal/`, `src/journal/`), Linen and clock paper, a
+  writing font, the petrel, an optional typing sound, the week on Ctrl J (`ai_week`). Left out by the owner: one line
+  from a terminal, the greeting page. Not tried: the selection quote in a real window on either OS.
+- Resources read under App's `<Suspense>` suspend the whole page (focus leaves the editor): new screens use signals.
 - Tried headless: the debug build boots under `xvfb-run -a dbus-run-session` (capture, `--new`, `--stdin` and the
   picker work); the UI was driven with Playwright against the fake store (`src/fake.ts`). Not tried: a real
   window on Windows (title bar dragging, window buttons, frameless capture), AI with a real key.

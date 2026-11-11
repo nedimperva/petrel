@@ -87,6 +87,25 @@ pub fn close_capture(state: State<AppState>, app: tauri::AppHandle) {
     }
 }
 
+/// What was selected when the capture key was pressed, once: a second call gets nothing. Waits a moment for
+/// the selection, which is read off the main thread.
+#[tauri::command]
+pub async fn capture_context(app: tauri::AppHandle) -> crate::context::CaptureContext {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let rx = state.capture_context.lock().ok().and_then(|mut s| s.take());
+        let Some((ctx, primary)) = rx.as_ref().and_then(crate::context::wait) else {
+            return Default::default();
+        };
+        if let Ok(mut last) = state.last_primary.lock() {
+            *last = primary;
+        }
+        ctx
+    })
+    .await
+    .unwrap_or_default()
+}
+
 /// The command bar's "Capture window".
 #[tauri::command]
 pub fn open_capture_window(app: tauri::AppHandle) {

@@ -41,3 +41,20 @@ test("recents move to the front and are capped", () => {
   assert.deepEqual(pushRecent(["a", "b", "c"], "b"), ["b", "a", "c"]);
   assert.deepEqual(pushRecent(["a", "b"], "c", 2), ["c", "a"]);
 });
+
+test("Ctrl K filters come off the words", async () => {
+  const { parseFilters, inFolder, noFilters } = await import("../src/palette/filters.ts");
+  const now = new Date(2026, 10, 11, 21, 0);
+  const f = parseFilters("in:travel hotel pinned this week has:link", now);
+  assert.equal(f.words, "hotel");
+  assert.equal(f.folder, "travel");
+  assert.equal(f.pinned, true);
+  assert.equal(f.since, new Date(2026, 10, 5).getTime());
+  assert.deepEqual(f.has, ["link"]);
+  assert.equal(parseFilters("today", now).since, new Date(2026, 10, 11).getTime());
+  assert.equal(parseFilters('in:"Work notes" x', now).folder, "Work notes");
+  assert.ok(noFilters(parseFilters("weekend plans", now)));
+  assert.equal(parseFilters("weekend plans", now).words, "weekend plans");
+  assert.ok(inFolder("Travel/Mostar", "travel") && inFolder("Travel", "trav") && !inFolder("Work", "travel"));
+  assert.ok(inFolder("Travel/Mostar", "travel/mostar") && !inFolder("Travel/Kotor", "travel/mostar"));
+});

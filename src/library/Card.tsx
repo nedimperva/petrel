@@ -6,11 +6,12 @@ import { For, Show } from "solid-js";
 import type { NoteSummary } from "../api";
 import { parts } from "../blanks";
 import { ago, folderName } from "../ui";
+import { topOf } from "./faces";
+import Mark, { hueClass } from "./Mark";
+
+export { topOf };
 
 export type CardKind = "code" | "song" | "text";
-
-/** A collection's top folder ("" is Notes). */
-export const topOf = (folder: string) => folder.split("/")[0];
 
 export function kindOf(folder: string): CardKind {
   const top = topOf(folder).toLowerCase();
@@ -19,22 +20,14 @@ export function kindOf(folder: string): CardKind {
   return "text";
 }
 
-/** One of a few quiet hues per collection, picked from its name so it stays the same. */
-export function hueOf(folder: string): number {
-  const top = topOf(folder);
-  if (top === "inbox") return 5;
-  if (!top) return 0;
-  let h = 0;
-  for (const c of top) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  return 1 + (h % 4);
-}
-
 export const isPrompt = (n: NoteSummary) => /\{\{[^}]+\}\}/.test(n.preview);
 
 export default function Card(p: {
   n: NoteSummary;
   copies: number;
   on: boolean;
+  /** Just copied. */
+  flash?: boolean;
   /** On the shelf every card says which collection it is from. */
   showWhere?: boolean;
   onSelect(): void;
@@ -61,8 +54,8 @@ export default function Card(p: {
 
   return (
     <article
-      class={`lcard hue-${hueOf(p.n.folder)} kind-${kind()}`}
-      classList={{ on: p.on, inbox: inbox() }}
+      class={`lcard ${hueClass(p.n.folder)} kind-${kind()}`}
+      classList={{ on: p.on, inbox: inbox(), flash: !!p.flash }}
       tabIndex={-1}
       data-card={p.n.id}
       onMouseDown={() => p.onSelect()}
@@ -70,7 +63,7 @@ export default function Card(p: {
     >
       <div class="lcard-top">
         <span class="lcard-where">
-          <span class="dot" aria-hidden="true" />
+          <Mark folder={p.n.folder} size={12} />
           {p.showWhere || inbox() ? folderName(topOf(p.n.folder)) : p.n.pinned ? "Pinned" : folderName(p.n.folder)}
         </span>
         <span class="lcard-acts">

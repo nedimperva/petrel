@@ -15,6 +15,11 @@ Decided by the owner on 2026-11-06. Design doc and canvas: https://claude.ai/art
   the editor started from. If the file changed on disk in the meantime, the other version is kept as
   `Title (conflict YYYY-MM-DD HHMM).md`, and nothing is overwritten.
 - Trash moves the file to `<root>/.trash/`. Folders that start with `.` are never scanned.
+- Pictures live in `<folder>/attachments/` next to the notes that link them (`![](attachments/name.png)`); only
+  png, jpg, gif and webp, 20 MB at most, names cleaned to letters, digits, `.`, `_` and `-`. A move or merge into
+  another folder moves the pictures the note links and fixes the links, and undo moves them back.
+- A collection's look is `<top folder>/.petrel` (`color: teal`, `mark: plane`); other lines in it are kept.
+- A day's page is `journal/YYYY-MM-DD.md`. Filing a capture there adds `HH:MM text` at the end.
 - Versions of a note are in `note_versions`, keyed by the note's uuid. A rename made in another app starts a new
   history.
 
@@ -44,5 +49,4 @@ Decided by the owner on 2026-11-06. Design doc and canvas: https://claude.ai/art
 ## Not yet
 
 A file watcher, action steps for promote and append, the History panel for notes, an "in notes" chip in the drafts
-list, moving a note between folders from the UI, a built-in daily note (for now it is left to an action), and a
-separate notes window.
+list, moving a note between folders from the UI, and a separate notes window.

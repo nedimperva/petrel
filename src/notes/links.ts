@@ -42,6 +42,22 @@ function linkAt(view: EditorView, pos: number): ParsedLink | undefined {
   return parseLinks(line.text, line.from).find((l) => l.from <= pos && pos <= l.to);
 }
 
+/** The look of a suggestion list (`[[`, and the capture window's `#` and `>`). It lives here, not in styles.css:
+ * CodeMirror's base theme is scoped and would win. */
+export const completionTheme = EditorView.theme({
+  ".cm-tooltip.cm-tooltip-autocomplete": {
+    border: "none",
+    borderRadius: "var(--r-lg)",
+    background: "var(--raised)",
+    boxShadow: "var(--shadow), 0 0 0 1px var(--line)",
+    padding: "var(--s-1)",
+  },
+  ".cm-tooltip.cm-tooltip-autocomplete > ul": { fontFamily: "var(--font-ui)", fontSize: "var(--t-md)", lineHeight: "1.4", maxHeight: "320px" },
+  ".cm-tooltip.cm-tooltip-autocomplete > ul > li": { padding: "6px 10px", borderRadius: "var(--r-md)" },
+  ".cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected]": { background: "var(--accent-soft)", color: "var(--ink)" },
+  ".cm-completionDetail": { marginLeft: "var(--s-3)", fontStyle: "normal", color: "var(--faint)" },
+});
+
 export function linkExtensions(o: LinkOptions): Extension {
   const cache = new Map<string, Resolved | "pending">();
   const lookup = (view: EditorView, inner: string): Resolved | undefined => {
@@ -176,20 +192,7 @@ export function linkExtensions(o: LinkOptions): Extension {
     draw,
     hover,
     autocompletion({ override: [complete], icons: false, activateOnTyping: true }),
-    // The list's look lives here, not in styles.css: CodeMirror's base theme is scoped and would win.
-    EditorView.theme({
-      ".cm-tooltip.cm-tooltip-autocomplete": {
-        border: "none",
-        borderRadius: "var(--r-lg)",
-        background: "var(--bg-0)",
-        boxShadow: "var(--shadow), 0 0 0 1px var(--line)",
-        padding: "var(--s-1)",
-      },
-      ".cm-tooltip.cm-tooltip-autocomplete > ul": { fontFamily: "var(--font-ui)", fontSize: "var(--t-md)", lineHeight: "1.4", maxHeight: "320px" },
-      ".cm-tooltip.cm-tooltip-autocomplete > ul > li": { padding: "6px 10px", borderRadius: "var(--r-md)" },
-      ".cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected]": { background: "var(--accent-soft)", color: "var(--ink)" },
-      ".cm-completionDetail": { marginLeft: "var(--s-3)", fontStyle: "normal", color: "var(--faint)" },
-    }),
+    completionTheme,
     keymap.of([{ key: "Alt-Enter", run: follow }]),
     EditorView.domEventHandlers({
       mousedown(e, view) {

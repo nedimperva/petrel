@@ -1,10 +1,11 @@
 // Settings (`Ctrl ,`): the Petrel folder (put it inside Google Drive to sync), AI with your own Claude key, the
-// two hotkeys, start at login, and how the page looks.
+// two hotkeys, start at login, how the page looks and feels.
 
 import { createResource, createSignal, For, Show } from "solid-js";
 import { api, errText, type AiStatus, type DesktopSettings } from "../api";
 import { say } from "../ui";
-import { applyPrefs, prefs, setPrefs, SIZES, storedValue, type Prefs, type Theme } from "./prefs";
+import { tick } from "../joy/sound";
+import { applyPrefs, FONTS, prefs, setPrefs, SIZES, storedValue, THEMES, type Prefs } from "./prefs";
 
 export default function Settings(p: { section?: "ai"; onClose(): void; onRoot(root: string): void; onAi(s: AiStatus): void }) {
   const [info, { refetch: refetchInfo }] = createResource(async () => (await api()).notesInfo());
@@ -172,17 +173,36 @@ export default function Settings(p: { section?: "ai"; onClose(): void; onRoot(ro
             />
             Start Petrel at login, in the tray, so capture is instant
           </label>
+          <label class="row check">
+            <input type="checkbox" checked={prefs().captureSelection} onChange={(e) => pref("captureSelection", e.currentTarget.checked)} />
+            Bring the text selected in the app you were in into a capture, as a quote with where it came from
+          </label>
         </section>
 
         <section>
           <h3>Look</h3>
           <div class="row">
-            <span class="label">Theme</span>
+            <span class="label">Paper</span>
             <div class="seg">
-              <For each={["system", "light", "dark"] as Theme[]}>
+              <For each={THEMES}>
                 {(t) => (
-                  <button classList={{ on: prefs().theme === t }} onClick={() => pref("theme", t)}>
-                    {t[0].toUpperCase() + t.slice(1)}
+                  <button classList={{ on: prefs().theme === t.id }} onClick={() => pref("theme", t.id)}>
+                    {t.label}
+                  </button>
+                )}
+              </For>
+            </div>
+          </div>
+          <Show when={prefs().theme === "clock"}>
+            <p class="muted small">Paper by day, Linen from 19:00, Night from 23:00 until 7:00.</p>
+          </Show>
+          <div class="row">
+            <span class="label">Writing font</span>
+            <div class="seg">
+              <For each={FONTS}>
+                {(f) => (
+                  <button classList={{ on: prefs().writeFont === f.id }} style={{ "font-family": f.css }} onClick={() => pref("writeFont", f.id)}>
+                    {f.label}
                   </button>
                 )}
               </For>
@@ -204,6 +224,26 @@ export default function Settings(p: { section?: "ai"; onClose(): void; onRoot(ro
             <input type="checkbox" checked={prefs().typewriter} onChange={(e) => pref("typewriter", e.currentTarget.checked)} />
             Typewriter scrolling: the line you type stays in the middle
           </label>
+        </section>
+
+        <section>
+          <h3>Feel</h3>
+          <label class="row check">
+            <input type="checkbox" checked={prefs().petrel} onChange={(e) => pref("petrel", e.currentTarget.checked)} />
+            The petrel crosses the page when the Inbox is clear
+          </label>
+          <label class="row check">
+            <input
+              type="checkbox"
+              checked={prefs().sound}
+              onChange={(e) => {
+                void pref("sound", e.currentTarget.checked);
+                if (e.currentTarget.checked) tick();
+              }}
+            />
+            A soft pencil sound as you type
+          </label>
+          <p class="muted small">No streaks, no badges, nothing that counts against you.</p>
         </section>
       </div>
     </div>

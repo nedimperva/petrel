@@ -501,24 +501,31 @@ kbd {
   font-size: var(--t-xs);
 }
 
-/* Each collection keeps one quiet hue, for its dot and its blanks. */
-.hue-0 { --hue: var(--ink-2); --hue-soft: var(--hover); }
-.hue-1 { --hue: #2f4f9a; --hue-soft: #e9edf5; }
-.hue-2 { --hue: #1f7a4d; --hue-soft: #e6f3ec; }
-.hue-3 { --hue: #a1452a; --hue-soft: #f8eae4; }
-.hue-4 { --hue: #6d4aa8; --hue-soft: #efe9f8; }
-.hue-5 { --hue: #8a6510; --hue-soft: #fbf1dc; }
-:root[data-theme="dark"] .hue-1 { --hue: #8fa8e6; --hue-soft: #26304a; }
-:root[data-theme="dark"] .hue-2 { --hue: #6cc59a; --hue-soft: #1d3329; }
-:root[data-theme="dark"] .hue-3 { --hue: #e59377; --hue-soft: #3a261f; }
-:root[data-theme="dark"] .hue-4 { --hue: #b49be3; --hue-soft: #2e2640; }
-:root[data-theme="dark"] .hue-5 { --hue: #ddb661; --hue-soft: #382d16; }
+/* Each collection keeps one quiet hue, for its dot, its mark and its blanks: picked in the library (`t`) or from
+   its name (src/library/faces.ts). */
+.hue-slate { --hue: var(--ink-2); --hue-soft: var(--hover); }
+.hue-blue { --hue: #2f4f9a; --hue-soft: #e9edf5; }
+.hue-teal { --hue: #22707c; --hue-soft: #e3f1f2; }
+.hue-green { --hue: #1f7a4d; --hue-soft: #e6f3ec; }
+.hue-ochre { --hue: #8a6510; --hue-soft: #fbf1dc; }
+.hue-clay { --hue: #a1452a; --hue-soft: #f8eae4; }
+.hue-rose { --hue: #a83a5e; --hue-soft: #f8e8ee; }
+.hue-plum { --hue: #6d4aa8; --hue-soft: #efe9f8; }
+:root[data-theme="dark"] .hue-blue { --hue: #8fa8e6; --hue-soft: #26304a; }
+:root[data-theme="dark"] .hue-teal { --hue: #6cc0ca; --hue-soft: #1b3236; }
+:root[data-theme="dark"] .hue-green { --hue: #6cc59a; --hue-soft: #1d3329; }
+:root[data-theme="dark"] .hue-ochre { --hue: #ddb661; --hue-soft: #382d16; }
+:root[data-theme="dark"] .hue-clay { --hue: #e59377; --hue-soft: #3a261f; }
+:root[data-theme="dark"] .hue-rose { --hue: #e78aa8; --hue-soft: #3b2029; }
+:root[data-theme="dark"] .hue-plum { --hue: #b49be3; --hue-soft: #2e2640; }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .hue-1 { --hue: #8fa8e6; --hue-soft: #26304a; }
-  :root:not([data-theme="light"]) .hue-2 { --hue: #6cc59a; --hue-soft: #1d3329; }
-  :root:not([data-theme="light"]) .hue-3 { --hue: #e59377; --hue-soft: #3a261f; }
-  :root:not([data-theme="light"]) .hue-4 { --hue: #b49be3; --hue-soft: #2e2640; }
-  :root:not([data-theme="light"]) .hue-5 { --hue: #ddb661; --hue-soft: #382d16; }
+  :root:not([data-theme="light"]):not([data-theme="linen"]) .hue-blue { --hue: #8fa8e6; --hue-soft: #26304a; }
+  :root:not([data-theme="light"]):not([data-theme="linen"]) .hue-teal { --hue: #6cc0ca; --hue-soft: #1b3236; }
+  :root:not([data-theme="light"]):not([data-theme="linen"]) .hue-green { --hue: #6cc59a; --hue-soft: #1d3329; }
+  :root:not([data-theme="light"]):not([data-theme="linen"]) .hue-ochre { --hue: #ddb661; --hue-soft: #382d16; }
+  :root:not([data-theme="light"]):not([data-theme="linen"]) .hue-clay { --hue: #e59377; --hue-soft: #3a261f; }
+  :root:not([data-theme="light"]):not([data-theme="linen"]) .hue-rose { --hue: #e78aa8; --hue-soft: #3b2029; }
+  :root:not([data-theme="light"]):not([data-theme="linen"]) .hue-plum { --hue: #b49be3; --hue-soft: #2e2640; }
 }
 
 .lcard {
@@ -558,11 +565,29 @@ kbd {
   font-weight: 600;
   color: var(--hue);
 }
-.lcard-where .dot {
+/* A collection's mark: a dot, or the small icon picked for it. */
+.mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  color: var(--hue);
+}
+.mark .dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: var(--hue);
+}
+.mark.tile {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: var(--hue-soft);
+}
+.mark.tile .dot {
+  width: 8px;
+  height: 8px;
 }
 .lcard-acts {
   margin-left: auto;
@@ -1503,4 +1528,496 @@ kbd {
     animation: none !important;
     transition: none !important;
   }
+}
+
+/* ---- collections' looks ---------------------------------------------------------------------------------- */
+
+.mark-btn {
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  background: none;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.mark-btn:hover .mark.tile,
+.mark-btn:focus-visible .mark.tile {
+  box-shadow: 0 0 0 2px var(--hue);
+}
+.shelf-head {
+  align-items: center;
+}
+.lib-title {
+  align-items: center;
+}
+.face-picker {
+  width: min(420px, calc(100vw - 32px));
+}
+.face-label {
+  margin: var(--s-3) 0 var(--s-2);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.face-colors,
+.face-marks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.swatch {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid var(--paper);
+  background: var(--hue);
+  box-shadow: 0 0 0 1px var(--line);
+  cursor: pointer;
+}
+.swatch.on {
+  box-shadow: 0 0 0 2px var(--ink);
+}
+.face-mark {
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--raised);
+  color: var(--hue);
+  cursor: pointer;
+}
+.face-mark.on {
+  background: var(--hue-soft);
+  border-color: var(--hue);
+}
+
+/* ---- inbox review ---------------------------------------------------------------------------------------- */
+
+.review {
+  height: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 0 var(--s-7);
+  padding: var(--s-7) var(--s-7) 0;
+  box-sizing: border-box;
+  overflow: auto;
+}
+.review-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  min-width: 0;
+}
+.review-progress {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.review-progress span {
+  width: 22px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line-strong);
+}
+.review-progress span.done {
+  background: var(--accent);
+}
+.review-progress span.now {
+  background: var(--accent-ink);
+}
+.review-stack {
+  position: relative;
+  min-height: 340px;
+}
+.review-card {
+  position: relative;
+  z-index: 2;
+  min-height: 320px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  padding: var(--s-6) 36px;
+  background: var(--raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow);
+  animation: rise var(--d-slow) var(--ease);
+  transition: transform 220ms var(--ease), opacity 220ms var(--ease);
+}
+.review-card.leaving {
+  transform: translateX(60px) rotate(2deg);
+  opacity: 0;
+}
+.review-card.ghost {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  box-shadow: none;
+  animation: none;
+}
+.review-card.ghost.one {
+  transform: translate(8px, 7px);
+}
+.review-card.ghost.two {
+  transform: translate(16px, 14px);
+  background: var(--sunk);
+  z-index: 0;
+}
+.review-when {
+  font-size: var(--t-sm);
+  color: var(--muted);
+}
+.review-text {
+  font: 400 20px/1.6 var(--font-write);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.review-hint {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--accent-wash);
+  border-radius: var(--r-md);
+  font-size: var(--t-md);
+  color: var(--accent-ink);
+}
+.review-places {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 22px;
+}
+.review-place {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-rd);
+  text-align: left;
+  cursor: pointer;
+}
+.review-place:hover {
+  background: var(--accent-soft);
+}
+.review-place-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.review-foot {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2) var(--s-5);
+  padding: var(--s-4) 0 var(--s-5);
+  color: var(--muted);
+  font-size: var(--t-xs);
+}
+.review-clear {
+  grid-column: 1 / -1;
+  grid-row: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-3);
+  text-align: center;
+}
+.review-clear-title {
+  margin: 0;
+  font: italic 400 30px/1.3 var(--font-write);
+  color: var(--ink-2);
+}
+@media (max-width: 760px) {
+  .review {
+    grid-template-columns: minmax(0, 1fr);
+    padding: var(--s-5) var(--s-4) 0;
+  }
+}
+
+/* The petrel, once across the page when the inbox is clear. */
+.petrel-glide {
+  max-width: 100%;
+  overflow: visible;
+}
+.petrel-bird {
+  offset-path: path("M10 100 C 120 30, 240 110, 450 30");
+  offset-rotate: auto;
+  animation: glide 1.6s var(--ease) both;
+}
+.petrel-trail {
+  animation: fade 1.6s var(--ease) both;
+}
+@keyframes glide {
+  from {
+    offset-distance: 0%;
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  to {
+    offset-distance: 82%;
+  }
+}
+.no-petrel .petrel-glide {
+  display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .petrel-bird {
+    offset-distance: 82%;
+  }
+}
+
+/* ---- the day's page -------------------------------------------------------------------------------------- */
+
+.page {
+  position: relative;
+}
+.day-head {
+  width: 100%;
+  max-width: var(--editor-max);
+  margin: 0 auto;
+  box-sizing: border-box;
+  padding: var(--s-7) var(--s-5) 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-4);
+}
+.day-title {
+  margin: 0;
+  font: 600 30px/1.25 var(--font-write);
+  letter-spacing: -0.015em;
+}
+.day-nav {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+}
+.cm-stamp {
+  font-family: var(--font-ui);
+  font-size: 0.72em;
+  font-variant-numeric: tabular-nums;
+  color: var(--faint);
+  letter-spacing: 0.02em;
+}
+.day-month {
+  position: absolute;
+  top: var(--s-7);
+  right: var(--s-6);
+  width: 196px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  font-size: var(--t-sm);
+  color: var(--muted);
+}
+.day-month-name {
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.day-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 2px;
+  text-align: center;
+}
+.day-wd {
+  font-size: var(--t-xs);
+  color: var(--faint);
+}
+.day-cell {
+  position: relative;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.day-cell:hover {
+  background: var(--hover);
+}
+.day-cell.has {
+  color: var(--ink);
+}
+.day-cell.has::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 2px;
+  width: 3px;
+  height: 3px;
+  margin-left: -1.5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.day-cell.future {
+  color: var(--faint);
+}
+.day-cell.on {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.day-cell.on::after {
+  background: var(--accent-fg);
+}
+/* The month only fits beside the text on a wide window; the text comes first. */
+@media (max-width: 1180px) {
+  .day-month {
+    display: none;
+  }
+}
+
+/* Saved is a tick that fades in, not a word that blinks. */
+.state.saved::before {
+  content: "✓ ";
+  color: var(--ok);
+}
+.state.saved {
+  animation: fade var(--d-slow) var(--ease);
+}
+
+/* ---- pictures in a note ---------------------------------------------------------------------------------- */
+
+.cm-picture {
+  display: block;
+  margin: var(--s-2) 0 var(--s-3);
+}
+.cm-picture img {
+  display: block;
+  max-width: 100%;
+  max-height: 420px;
+  border-radius: var(--r-md);
+  box-shadow: 0 0 0 1px var(--line);
+}
+.cm-picture.missing {
+  font: var(--t-sm) / 1.4 var(--font-ui);
+  color: var(--bad);
+}
+
+/* ---- the week -------------------------------------------------------------------------------------------- */
+
+.week {
+  width: min(680px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-5);
+}
+.week section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.week-bar {
+  display: flex;
+  gap: 2px;
+  height: 10px;
+  border-radius: 5px;
+  overflow: hidden;
+}
+.week-bar span {
+  background: var(--hue);
+}
+.week-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2) var(--s-4);
+  font-size: var(--t-sm);
+  color: var(--ink-2);
+}
+.week-legend .dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--hue);
+}
+.week-prose p {
+  margin: 0 0 var(--s-2);
+  font: 400 16px/1.7 var(--font-write);
+}
+.week-prose .link {
+  font: inherit;
+}
+.week-ask {
+  display: flex;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  background: var(--accent-wash);
+  border-radius: var(--r-md);
+  color: var(--ink-2);
+}
+.week-ask p {
+  margin: 0;
+  font: var(--t-md) / 1.6 var(--font-ui);
+}
+.week-task {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-3);
+  font-size: var(--t-rd);
+}
+.week-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2) var(--s-5);
+  padding-top: var(--s-3);
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: var(--t-xs);
+}
+
+/* ---- Ctrl K filters -------------------------------------------------------------------------------------- */
+
+.palette-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0 var(--s-4) var(--s-2);
+}
+
+/* The capture's place chip carries the collection's mark. */
+.capture-foot .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Copy flashes the card once in its collection's colour. */
+.lcard.flash {
+  animation: copied 700ms var(--ease);
+}
+@keyframes copied {
+  20% {
+    background: var(--hue-soft);
+    box-shadow: 0 0 0 2px var(--hue);
+  }
+}
+
+/* Dots and icons take the same room, so the labels after them line up. */
+.mark {
+  min-width: 14px;
 }

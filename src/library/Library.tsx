@@ -1,6 +1,7 @@
 // The library (Ctrl L): everything you keep, as cards. "All" is the shelf, one row per collection with the most
 // used first; a collection's tab shows all its cards at their natural height. The arrow keys move between cards,
-// Enter opens one as a sheet, c copies, e edits, / filters, and in the inbox m files the card you are on.
+// Enter opens one as a sheet, c copies, e edits, p pins, t picks the collection's colour and mark, / filters, and in
+// the inbox m files the card you are on and r reviews the inbox one card at a time.
 
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 import { api, errText, type AiSuggestion, type Note, type NoteSummary } from "../api";
@@ -11,6 +12,8 @@ import { fileCapture } from "../inbox/file";
 import { folderName, say, typing, undoLast } from "../ui";
 import type { Tab } from "../TitleBar";
 import Card, { topOf } from "./Card";
+import FacePicker from "./FacePicker";
+import Mark, { loadFaces } from "./Mark";
 import Sheet from "./Sheet";
 
 export interface LibraryData {
@@ -62,6 +65,7 @@ export default function Library(p: {
   onNew(folder: string): void;
   onChanged(): void;
   onAiSetup(): void;
+  onReview(): void;
 }) {
   let grid!: HTMLDivElement;
   let filterInput!: HTMLInputElement;
@@ -69,6 +73,9 @@ export default function Library(p: {
   const [sel, setSel] = createSignal<number | null>(null);
   const [open, setOpen] = createSignal<number | null>(null);
   const [moving, setMoving] = createSignal<Note | null>(null);
+  const [facing, setFacing] = createSignal<string | null>(null);
+  // The card just copied lights up once in its collection's colour.
+  const [flash, setFlash] = createSignal<number | null>(null);
   createEffect(on(() => p.tab, () => (setQ(""), setSel(null))));
 
   const copies = (n: NoteSummary) => p.data?.copies[n.path] ?? 0;
@@ -107,7 +114,11 @@ export default function Library(p: {
   async function copy(n: NoteSummary) {
     const it = await itemText(n.id);
     if (blanks(it.text).length) return setOpen(n.id);
-    if (await copyFilled(n, it.text)) p.onChanged();
+    if (await copyFilled(n, it.text)) {
+      setFlash(n.id);
+      setTimeout(() => flash() === n.id && setFlash(null), 700);
+      p.onChanged();
+    }
   }
 
   async function file(note: Note, t: Target) {
@@ -138,6 +149,18 @@ export default function Library(p: {
   }
   const moveSummary = async (n: NoteSummary) => setMoving(await (await api()).peekNote(n.id));
 
+  async function pin(n: NoteSummary) {
+    try {
+      await (await api()).pinNote(n.id, !n.pinned);
+      say(n.pinned ? "Unpinned" : `Pinned to the front of ${folderName(topOf(n.folder))}`);
+      p.onChanged();
+    } catch (e) {
+      say(errText(e), { error: true });
+    }
+  }
+  /** Only a collection has a look of its own: not the inbox, not the top of the folder. */
+  const canFace = (top: string) => !!top && top !== "inbox";
+
   /** The nearest card in a direction, by where the cards are drawn, so the shelf and the columns move alike. */
   function step(dx: number, dy: number) {
     const cards = [...grid.querySelectorAll<HTMLElement>("[data-card]")];
@@ -164,7 +187,7 @@ export default function Library(p: {
   }
 
   const key = (e: KeyboardEvent) => {
-    if (open() !== null || moving() || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (open() !== null || moving() || facing() !== null || e.ctrlKey || e.metaKey || e.altKey) return;
     if (typing(e)) {
       if (e.target === filterInput && (e.key === "ArrowDown" || e.key === "Enter")) {
         e.preventDefault();
@@ -209,6 +232,18 @@ export default function Library(p: {
         if (n?.folder === "inbox") void moveSummary(n);
         else return;
         break;
+      case "p":
+        if (n && n.folder !== "inbox") void pin(n);
+        else return;
+        break;
+      case "t":
+        if (n && canFace(topOf(n.folder))) setFacing(topOf(n.folder));
+        else return;
+        break;
+      case "r":
+        if (inbox().length) p.onReview();
+        else return;
+        break;
       case "/":
         filterInput.focus();
         break;
@@ -217,7 +252,7 @@ export default function Library(p: {
         break;
       default:
         // Typing a letter starts the filter, so finding needs no key first.
-        if (e.key.length === 1 && /\S/.test(e.key) && !/[cejkhlmz]/.test(e.key)) {
+        if (e.key.length === 1 && /\S/.test(e.key) && !/[cejkhlmprtz]/.test(e.key)) {
           filterInput.focus();
           return;
         }
@@ -226,7 +261,10 @@ export default function Library(p: {
     e.preventDefault();
     e.stopPropagation();
   };
-  onMount(() => document.addEventListener("keydown", key));
+  onMount(() => {
+    document.addEventListener("keydown", key);
+    void loadFaces();
+  });
   onCleanup(() => document.removeEventListener("keydown", key));
 
   const card = (n: NoteSummary, where = false) => (
@@ -234,6 +272,7 @@ export default function Library(p: {
       n={n}
       copies={copies(n)}
       on={current()?.id === n.id}
+      flash={flash() === n.id}
       showWhere={where}
       onSelect={() => setSel(n.id)}
       onOpen={() => setOpen(n.id)}
@@ -248,7 +287,17 @@ export default function Library(p: {
       <div class="lib-head">
         <Show when={heading()}>
           <div class="lib-title">
+            <Show when={p.tab.startsWith("c:") && canFace(p.tab.slice(2))}>
+              <button type="button" class="mark-btn" title="Colour and mark (t)" aria-label="Colour and mark" onClick={() => setFacing(p.tab.slice(2))}>
+                <Mark folder={p.tab.slice(2)} class="tile" />
+              </button>
+            </Show>
             <h1>{heading()}</h1>
+            <Show when={p.tab === "inbox" && inbox().length}>
+              <button type="button" class="btn small" onClick={p.onReview}>
+                Review <kbd>r</kbd>
+              </button>
+            </Show>
             <span class="muted">
               {p.tab === "inbox"
                 ? `${inbox().length} ${inbox().length === 1 ? "capture" : "captures"} to file`
@@ -300,11 +349,21 @@ export default function Library(p: {
           {(r) => (
             <section class="shelf-row">
               <div class="shelf-head">
+                <Show when={canFace(r.top)} fallback={<Mark folder={r.top} class="tile" />}>
+                  <button type="button" class="mark-btn" title="Colour and mark" aria-label={`Colour and mark of ${r.label}`} onClick={() => setFacing(r.top)}>
+                    <Mark folder={r.top} class="tile" />
+                  </button>
+                </Show>
                 <h2>{r.label}</h2>
                 <span class="muted small">
                   {r.total} · {r.sub}
                 </span>
                 <span class="grow" />
+                <Show when={r.id === "inbox"}>
+                  <button type="button" class="link small" onClick={p.onReview}>
+                    Review one by one
+                  </button>
+                </Show>
                 <Show when={r.total > ROW}>
                   <button type="button" class="link small" onClick={() => p.onTab(r.id)}>
                     All {r.total}
@@ -349,6 +408,17 @@ export default function Library(p: {
           <span>
             <kbd>m</kbd> move
           </span>
+          <span>
+            <kbd>r</kbd> review
+          </span>
+        </Show>
+        <Show when={p.tab !== "inbox"}>
+          <span>
+            <kbd>p</kbd> pin
+          </span>
+          <span>
+            <kbd>t</kbd> colour and mark
+          </span>
         </Show>
         <span class="grow" />
         <span>
@@ -374,6 +444,7 @@ export default function Library(p: {
       <Show when={moving()}>
         {(n) => <Destination exclude={n().id} onPick={(t) => void file(n(), t)} onClose={() => setMoving(null)} />}
       </Show>
+      <Show when={facing()}>{(top) => <FacePicker top={top()} onClose={() => setFacing(null)} />}</Show>
     </div>
   );
 }

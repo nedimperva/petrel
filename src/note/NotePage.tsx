@@ -1,10 +1,15 @@
 // The writing page: a note's title and text in Literata and one quiet line below (where it lives, words, saved).
 // What links here, and related notes when asked, sit under the text. AI only when asked: `Ctrl J` on a selection, `/` on an empty
-// line. Saves go through the note saver (300 ms, conflict copies), exactly as before the redesign.
+// line. Saves go through the note saver (300 ms, conflict copies), exactly as before the redesign. A day's page
+// (`journal/YYYY-MM-DD.md`) has the date for a title, the month beside it, and the time at the start of each entry.
+// Pasted pictures are saved next to the note and shown under their line.
 
 import { createEffect, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 import { api, errText, type AiRelated, type AiTask, type Backlinks, type Note } from "../api";
 import { createEditor, type EditorHandle } from "../editor/editor";
+import { pictureExtensions } from "../editor/pictures";
+import { addDays, clock, dayTitle, isDayNote, JOURNAL, monthGrid, today } from "../journal/days";
+import { dayExtensions } from "../journal/stamps";
 import { linkExtensions } from "../notes/links";
 import { createNoteSaver, type NoteSaver, type SaveState } from "../notes/saver";
 import { prefs } from "../settings/prefs";
@@ -36,6 +41,12 @@ interface Props {
   onHistory(): void;
   /** The title as it is typed, for the title bar. */
   onTitle?(title: string): void;
+  /** A day's page (`YYYY-MM-DD`) that may not have a file yet. */
+  day?: string | null;
+  /** Go to another day's page. */
+  onDay?(day: string): void;
+  /** "The week, when you ask". */
+  onWeek?(): void;
   onAiSetup(): void;
   ref(h: NotePageHandle): void;
 }
@@ -47,12 +58,13 @@ const BAR: { task: AiTask; label: string }[] = [
   { task: "explain", label: "Explain" },
 ];
 
-const SLASH: { task: AiTask; label: string; hint: string }[] = [
+const SLASH: { task: AiTask | "week"; label: string; hint: string }[] = [
   { task: "continue", label: "Continue writing", hint: "from where the text stops" },
   { task: "summarize", label: "Summarize the text above", hint: "a few sentences" },
   { task: "checklist", label: "Turn into a checklist", hint: "the paragraph above" },
   { task: "title", label: "Suggest a title", hint: "renames the note if you keep it" },
 ];
+const WEEK = { task: "week" as const, label: "Look back on the week", hint: "what the last seven days went to" };
 
 const LABELS: Record<AiTask, string> = {
   tidy: "Tidied",
@@ -85,6 +97,28 @@ export default function NotePage(p: Props) {
   let last: { task: AiTask; from: number; to: number; instruction?: string } | null = null;
   let seq = 0;
 
+  /** The day this page is, if it is a day's page: from the view, or from the note that was opened. */
+  const dayPage = (): string | null => {
+    if (p.day) return p.day;
+    const n = note();
+    return n && isDayNote(n.folder, n.title) ? n.title : null;
+  };
+  const slashItems = () => (dayPage() ? [...SLASH, WEEK] : SLASH);
+  // The days that have a page, for the month. A signal, not a resource: a resource read here would suspend the
+  // whole page (App's Suspense) on every day change and take the focus out of the text.
+  const [journal, setJournal] = createSignal<Set<string>>(new Set());
+  createEffect(
+    on(
+      () => (dayPage() ? `${dayPage()}:${note()?.id ?? ""}` : null),
+      (k) => {
+        if (k)
+          void api()
+            .then((s) => s.listNotes({ folder: JOURNAL, limit: 1000 }))
+            .then((ns) => setJournal(new Set(ns.map((n) => n.title))), () => {});
+      },
+    ),
+  );
+
   const loadLinks = async (id: number) => setLinks(await (await api()).backlinks(id).catch(() => ({ linked: [], mentioned: [] })));
 
   async function load(id: number | null) {
@@ -99,7 +133,11 @@ export default function NotePage(p: Props) {
       setTitle("");
       setLinks({ linked: [], mentioned: [] });
       setWords(0);
-      titleInput?.focus();
+      if (p.day) {
+        // Today's empty page starts with the time; it is not a file until something is written after it.
+        if (p.day === today()) editor?.load(`${clock()} `, 6);
+        editor?.view.focus();
+      } else titleInput?.focus();
       return;
     }
     try {
@@ -221,6 +259,8 @@ export default function NotePage(p: Props) {
 
   function openBar() {
     if (!editor || previewOf(view().state)) return;
+    // On a day's page with nothing selected, Ctrl J is the week; select text for the writing tasks.
+    if (dayPage() && p.onWeek && view().state.selection.main.empty) return p.onWeek();
     const r = range();
     if (r.from === r.to) return say("Select some text first");
     view().dispatch({ selection: { anchor: r.from, head: r.to } });
@@ -235,10 +275,11 @@ export default function NotePage(p: Props) {
     setSlash({ x: c?.left ?? 0, y: (c?.bottom ?? 0) + 4, i: 0 });
   }
 
-  function slashRun(task: AiTask) {
+  function slashRun(task: AiTask | "week") {
     const v = view();
     const head = v.state.selection.main.head;
     setSlash(null);
+    if (task === "week") return p.onWeek?.();
     if (task === "checklist") {
       // The paragraph above the empty line.
       const doc = v.state.doc;
@@ -255,9 +296,10 @@ export default function NotePage(p: Props) {
   const slashKeys = (e: KeyboardEvent) => {
     const s = slash();
     if (!s) return;
-    if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) setSlash({ ...s, i: (s.i + 1) % SLASH.length });
-    else if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p")) setSlash({ ...s, i: (s.i + SLASH.length - 1) % SLASH.length });
-    else if (e.key === "Enter") slashRun(SLASH[s.i].task);
+    const items = slashItems();
+    if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) setSlash({ ...s, i: (s.i + 1) % items.length });
+    else if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p")) setSlash({ ...s, i: (s.i + items.length - 1) % items.length });
+    else if (e.key === "Enter") slashRun(items[s.i].task);
     else if (e.key === "Escape") setSlash(null);
     else return setSlash(null);
     e.preventDefault();
@@ -298,11 +340,13 @@ export default function NotePage(p: Props) {
       note,
       setNote,
       setSave,
-      fresh: () => ({ folder: p.folder, title: title() }),
+      fresh: () => ({ folder: p.folder, title: dayPage() ?? title() }),
       conflict: (path) => say(`This note was also changed elsewhere. That copy is kept as ${path}.`, { error: true }),
     });
     editor.setExtra([
       aiPreview(actions),
+      pictureExtensions(() => note()?.folder ?? p.folder),
+      dayExtensions(() => dayPage() === today()),
       linkExtensions({
         open: async (inner) => {
           const r = await (await api()).resolveLink(inner);
@@ -353,10 +397,14 @@ export default function NotePage(p: Props) {
   });
 
   createEffect(() => editor?.setTypewriter(prefs().typewriter));
-  createEffect(() => p.onTitle?.(title() || (note() ? note()!.title : "")));
+  createEffect(() => {
+    const d = dayPage();
+    p.onTitle?.(d ? (d === today() ? "Today" : dayTitle(d)) : title() || (note() ? note()!.title : ""));
+  });
 
-  createEffect(on(() => p.id, (id) => {
-    if (editor && id !== (note()?.id ?? null)) void load(id);
+  // Another note, or another day whose page has no file yet (the id stays null): load again.
+  createEffect(on(() => [p.id, p.day] as const, ([id, day], prev) => {
+    if (editor && (id !== (note()?.id ?? null) || day !== prev?.[1])) void load(id);
   }, { defer: true }));
 
   onCleanup(() => {
@@ -411,8 +459,29 @@ export default function NotePage(p: Props) {
     <div class="page">
       <div class="page-main">
         <div class="sheet">
+          <Show when={dayPage()}>
+            {(d) => (
+              <div class="day-head">
+                <h1 class="day-title">{dayTitle(d())}</h1>
+                <span class="day-nav">
+                  <button class="icon-btn" title="The day before (Alt ←)" aria-label="The day before" onClick={() => p.onDay?.(addDays(d(), -1))}>
+                    ‹
+                  </button>
+                  <Show when={d() !== today()}>
+                    <button class="link small" onClick={() => p.onDay?.(today())}>
+                      Today
+                    </button>
+                  </Show>
+                  <button class="icon-btn" title="The day after (Alt →)" aria-label="The day after" onClick={() => p.onDay?.(addDays(d(), 1))}>
+                    ›
+                  </button>
+                </span>
+              </div>
+            )}
+          </Show>
           <input
             ref={titleInput}
+            hidden={!!dayPage()}
             class="title-input"
             placeholder="Title"
             value={title()}
@@ -476,13 +545,45 @@ export default function NotePage(p: Props) {
           </div>
         </Show>
       </div>
+      <Show when={dayPage()}>
+        {(d) => (
+          <aside class="day-month" aria-label="This month">
+            <div class="day-month-name">{new Date(`${d()}T12:00`).toLocaleDateString(undefined, { month: "long" })}</div>
+            <div class="day-grid">
+              <For each={["M", "T", "W", "T", "F", "S", "S"]}>{(w) => <span class="day-wd">{w}</span>}</For>
+              <For each={monthGrid(d())}>
+                {(x) =>
+                  x ? (
+                    <button
+                      class="day-cell"
+                      classList={{ on: x === d(), has: journal().has(x), future: x > today() }}
+                      aria-label={dayTitle(x)}
+                      onClick={() => p.onDay?.(x)}
+                    >
+                      {Number(x.slice(8))}
+                    </button>
+                  ) : (
+                    <span />
+                  )
+                }
+              </For>
+            </div>
+            <p class="muted small">A dot is a day with a page. A day you skip makes no file.</p>
+          </aside>
+        )}
+      </Show>
       <footer class="page-foot">
-        <span>{folderName(note()?.folder ?? p.folder)}</span>
+        <span>{dayPage() ? "Journal" : folderName(note()?.folder ?? p.folder)}</span>
         <Show when={words()}>
           <span>{words()} words</span>
         </Show>
+        <Show when={dayPage()}>
+          <span>
+            <kbd>Alt ←</kbd> <kbd>Alt →</kbd> other days
+          </span>
+        </Show>
         <span class="grow" />
-        <span class="state" classList={{ bad: save() === "error" }} title={synced() ? p.root : undefined}>
+        <span class="state" classList={{ bad: save() === "error", saved: save() === "saved" && !!note() }} title={synced() ? p.root : undefined}>
           {saveLabel()}
         </span>
       </footer>
@@ -551,7 +652,7 @@ export default function NotePage(p: Props) {
             <div class="menu-head">
               <span class="spark">✦</span> Ask Claude
             </div>
-            <For each={SLASH}>
+            <For each={slashItems()}>
               {(x, i) => (
                 <button class="menu-item" classList={{ on: i() === s().i }} onMouseDown={(e) => e.preventDefault()} onClick={() => slashRun(x.task)}>
                   <span>{x.label}</span>

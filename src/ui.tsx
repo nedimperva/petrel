@@ -66,6 +66,7 @@ export function ago(ms: number): string {
 export function folderName(folder: string): string {
   if (!folder) return "Notes";
   if (folder === "inbox") return "Inbox";
+  if (folder === "journal") return "Journal";
   return folder.split("/").pop() ?? folder;
 }
 

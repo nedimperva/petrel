@@ -1,46 +1,71 @@
-// Where a capture goes: a note to add it to, or a folder to file it in as its own note. The inbox's `m` and the
-// capture window's Tab both open this. Typing narrows the list; a new folder name is offered as it is typed.
+// Where a capture goes: a note to add it to, today's page, or a folder to file it in as its own note. The inbox's
+// `m`, the review's `/` and the capture window's Tab open this. Typing narrows the list; a new folder name is
+// offered as it is typed. With nothing typed, the places used most and lately come first.
 
 import { createResource, createSignal, For, onMount, Show } from "solid-js";
 import { api, type NoteSummary } from "../api";
+import Mark from "../library/Mark";
 import { folderName } from "../ui";
+import { filedCounts } from "./file";
+import { keyOf, score } from "./learn";
 
-export type Target = { kind: "note"; id: number; title: string } | { kind: "folder"; folder: string };
+export type Target = { kind: "note"; id: number; title: string } | { kind: "folder"; folder: string } | { kind: "day" };
 
 export function targetLabel(t: Target | null): string {
   if (!t) return "Inbox";
+  if (t.kind === "day") return "Today's page";
   return t.kind === "note" ? t.title : folderName(t.folder);
 }
 
-export default function Destination(p: { exclude?: number; onPick(t: Target): void; onClose(): void }) {
+/** The folder a target files into, for its mark. */
+export const targetFolder = (t: Target | null, folderOfNote?: string) =>
+  !t ? "inbox" : t.kind === "day" ? "journal" : t.kind === "folder" ? t.folder : (folderOfNote ?? "");
+
+export interface Row {
+  t: Target;
+  label: string;
+  sub: string;
+  folder: string;
+}
+
+/** The places to offer, best first: learned order when nothing is typed, else what matches. */
+export function placeRows(text: string, folders: string[], notes: NoteSummary[], used: Record<string, { n: number; at: number }>, typed: string): Row[] {
+  const q = text.trim().toLowerCase();
+  const day: Row = { t: { kind: "day" }, label: "Today's page", sub: "under the time", folder: "journal" };
+  const fs = folders
+    .filter((f) => f !== "journal" && (!q || f.toLowerCase().includes(q) || folderName(f).toLowerCase().includes(q)))
+    .map((f): Row => ({ t: { kind: "folder", folder: f }, label: folderName(f), sub: "as a new note in this folder", folder: f }));
+  const ns = notes.map((n): Row => ({ t: { kind: "note", id: n.id, title: n.title }, label: n.title, sub: `add to the end · ${folderName(n.folder)}`, folder: n.folder }));
+  let out: Row[];
+  if (!q) {
+    const all = [day, ...fs, ...ns];
+    const s = (r: Row) => score(used[keyOf(r.t)]);
+    // Learned places first; the rest keep their order (folders, then recent notes).
+    out = [...all.filter((r) => s(r) > 0).sort((a, b) => s(b) - s(a)), ...all.filter((r) => s(r) === 0)];
+  } else {
+    out = [...("today's page journal day".includes(q) || q.startsWith("tod") ? [day] : []), ...fs.slice(0, 6), ...ns];
+  }
+  const exact = folders.some((f) => f.toLowerCase() === q);
+  if (q && !exact) out.push({ t: { kind: "folder", folder: typed.trim() }, label: `New folder “${typed.trim()}”`, sub: "made when the note is filed", folder: "" });
+  return out;
+}
+
+export default function Destination(p: { exclude?: number; noDay?: boolean; onPick(t: Target): void; onClose(): void }) {
   let input!: HTMLInputElement;
   onMount(() => input.focus());
   const [q, setQ] = createSignal("");
   const [i, setI] = createSignal(0);
   const [folders] = createResource(async () =>
-    (await (await api()).noteFolders()).filter((f) => f.path !== "inbox" && !f.path.startsWith(".")),
+    (await (await api()).noteFolders()).map((f) => f.path).filter((f) => f !== "inbox" && !f.startsWith(".")),
   );
+  const [used] = createResource(filedCounts);
   const [notes] = createResource(q, async (text): Promise<NoteSummary[]> => {
     const s = await api();
     const found = text.trim() ? await s.findNotes(text, 12) : await s.listNotes({ limit: 12 });
     return found.filter((n) => n.folder !== "inbox" && n.id !== p.exclude);
   });
 
-  const rows = (): { t: Target; label: string; sub: string }[] => {
-    const text = q().trim().toLowerCase();
-    const fs = (folders() ?? [])
-      .filter((f) => !text || f.path.toLowerCase().includes(text) || folderName(f.path).toLowerCase().includes(text))
-      .map((f) => ({ t: { kind: "folder", folder: f.path } as Target, label: folderName(f.path), sub: "as a new note in this folder" }));
-    const ns = (notes() ?? []).map((n) => ({
-      t: { kind: "note", id: n.id, title: n.title } as Target,
-      label: n.title,
-      sub: `add to the end · ${folderName(n.folder)}`,
-    }));
-    const out = [...fs.slice(0, 6), ...ns];
-    const exact = (folders() ?? []).some((f) => f.path.toLowerCase() === text);
-    if (text && !exact) out.push({ t: { kind: "folder", folder: q().trim() }, label: `New folder “${q().trim()}”`, sub: "made when the note is filed" });
-    return out;
-  };
+  const rows = () => placeRows(q(), folders() ?? [], notes() ?? [], used() ?? {}, q()).filter((r) => !(p.noDay && r.t.kind === "day"));
 
   const key = (e: KeyboardEvent) => {
     const n = rows().length;
@@ -61,7 +86,7 @@ export default function Destination(p: { exclude?: number; onPick(t: Target): vo
         <input
           class="palette-input"
           ref={input}
-          placeholder="Move to a note or a collection…"
+          placeholder="Move to a note, a collection or today's page…"
           value={q()}
           onInput={(e) => {
             setQ(e.currentTarget.value);
@@ -73,7 +98,7 @@ export default function Destination(p: { exclude?: number; onPick(t: Target): vo
           <For each={rows()}>
             {(r, k) => (
               <button class="palette-row" classList={{ on: k() === i() }} onMouseMove={() => setI(k())} onClick={() => p.onPick(r.t)}>
-                <span class="row-icon">{r.t.kind === "note" ? "¶" : "▤"}</span>
+                <span class="row-icon">{r.t.kind === "note" ? "¶" : <Mark folder={r.folder} size={13} />}</span>
                 <span class="row-label">{r.label}</span>
                 <span class="row-sub">{r.sub}</span>
               </button>

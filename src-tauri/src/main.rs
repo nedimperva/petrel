@@ -3,6 +3,7 @@
 mod ai;
 mod cli;
 mod commands;
+mod context;
 mod desktop;
 mod notes;
 mod tray;
@@ -29,6 +30,10 @@ pub struct AppState {
     pub hotkey: Mutex<desktop::Hotkey>,
     /// The quick picker's hotkey.
     pub picker_hotkey: Mutex<desktop::Hotkey>,
+    /// What was selected when the capture key was pressed, on its way to the capture window.
+    pub capture_context: Mutex<Option<context::Pending>>,
+    /// The Linux primary selection the last capture saw, so an old selection is not brought in twice.
+    pub last_primary: Mutex<Option<String>>,
 }
 
 /// Where the database lives: `PETREL_DB` if set; otherwise `<app data>/petrel.db`, or `<app data>/dev/petrel.db`
@@ -111,6 +116,7 @@ pub fn open_capture(app: &tauri::AppHandle) {
         let _ = w.set_focus();
         return;
     }
+    remember_context(app);
     let built = WebviewWindowBuilder::new(app, "capture", WebviewUrl::App("index.html".into()))
         .title("Petrel capture")
         .inner_size(640.0, 260.0)
@@ -126,6 +132,27 @@ pub fn open_capture(app: &tauri::AppHandle) {
     if let Err(e) = built {
         log::error!("cannot open the capture window: {e}");
     }
+}
+
+/// Starts reading what was selected in the window in front, unless Settings turned it off. It must run before the
+/// capture window is made: once that window has the focus the other app's selection is out of reach.
+fn remember_context(app: &tauri::AppHandle) {
+    let Some(state) = app.try_state::<AppState>() else { return };
+    let on = state
+        .store
+        .lock()
+        .ok()
+        .and_then(|s| s.setting("ui.capture_selection").ok().flatten())
+        .is_none_or(|v| v != "0");
+    let rx = if on {
+        let last = state.last_primary.lock().ok().and_then(|l| l.clone());
+        Some(context::start(last))
+    } else {
+        None
+    };
+    if let Ok(mut slot) = state.capture_context.lock() {
+        *slot = rx;
+    };
 }
 
 /// Opens the quick picker, or focuses it: a small search over the collections that copies and closes.
@@ -269,6 +296,8 @@ fn main() {
                 quitting: AtomicBool::new(false),
                 hotkey: Mutex::new(desktop::Hotkey::default()),
                 picker_hotkey: Mutex::new(desktop::Hotkey::default()),
+                capture_context: Mutex::new(None),
+                last_primary: Mutex::new(None),
             });
             // Without a tray (no StatusNotifier host on Linux, say), closing the window quits, as before.
             // The Linux tray loads libayatana-appindicator at run time and panics if it is missing.
@@ -313,6 +342,7 @@ fn main() {
             commands::show_window,
             commands::close_capture,
             commands::open_capture_window,
+            commands::capture_context,
             commands::open_picker_window,
             commands::close_picker,
             commands::show_note_in_main,
@@ -350,12 +380,20 @@ fn main() {
             notes::resolve_link,
             notes::backlinks,
             notes::link_mention,
+            notes::day_note,
+            notes::file_into_day,
+            notes::notes_between,
+            notes::topic_faces,
+            notes::set_topic_face,
+            notes::save_attachment,
+            notes::attachment,
             ai::ai_status,
             ai::set_ai_key,
             ai::ai_write,
             ai::ai_ask,
             ai::ai_suggest_home,
             ai::ai_related,
+            ai::ai_week,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Petrel")

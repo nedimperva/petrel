@@ -1,11 +1,13 @@
 // Ctrl K: search or ask. Typing finds notes (by title first, then by words) and commands. A question (ending in
 // `?`, or `Tab` on any text) asks Claude to answer from the notes, with the notes it used as cards to open.
-// Ctrl P opens the same bar on notes only.
+// Ctrl P opens the same bar on notes only. A few words narrow the notes found: `in:travel`, `pinned`, `today`,
+// `this week`, `has:link`, `has:picture`, `has:task` (palette/filters.ts).
 
 import { createResource, createSignal, For, onMount, Show } from "solid-js";
 import { api, errText, type AiAnswer, type NoteSummary } from "../api";
 import { answerHtml } from "../copy";
 import { folderName, Kbd, say } from "../ui";
+import { hasAll, keep, noFilters, parseFilters } from "./filters";
 import { rank } from "./match";
 
 export interface Command {
@@ -34,12 +36,31 @@ export default function CommandBar(p: {
   const [i, setI] = createSignal(0);
   const [answer, setAnswer] = createSignal<AiAnswer | "loading" | null>(null);
   const [asked, setAsked] = createSignal("");
+  const filters = () => parseFilters(q());
   const [notes] = createResource(q, async (text) => {
     const s = await api();
-    if (!text.trim()) return p.notesOnly ? s.listNotes({ limit: 12 }) : [];
-    const [byTitle, byWords] = await Promise.all([s.findNotes(text, 8), s.searchNotes(text, 12)]);
-    const seen = new Set(byTitle.map((n) => n.id));
-    return [...byTitle, ...byWords.filter((n) => !seen.has(n.id))].slice(0, 12);
+    const f = parseFilters(text);
+    if (noFilters(f)) {
+      if (!text.trim()) return p.notesOnly ? s.listNotes({ limit: 12 }) : [];
+      const [byTitle, byWords] = await Promise.all([s.findNotes(text, 8), s.searchNotes(text, 12)]);
+      const seen = new Set(byTitle.map((n) => n.id));
+      return [...byTitle, ...byWords.filter((n) => !seen.has(n.id))].slice(0, 12);
+    }
+    // With filters, look wider and narrow after.
+    let found: NoteSummary[];
+    if (f.words) {
+      const [byTitle, byWords] = await Promise.all([s.findNotes(f.words, 200), s.searchNotes(f.words, 200)]);
+      const seen = new Set(byTitle.map((n) => n.id));
+      found = [...byTitle, ...byWords.filter((n) => !seen.has(n.id))];
+    } else found = await s.listNotes({ limit: 1000 });
+    found = found.filter((n) => keep(n, f));
+    if (f.has.length) {
+      // `has:` needs the text: the most recent notes that pass the rest are read in full.
+      const full = await Promise.all(found.slice(0, 120).map((n) => s.peekNote(n.id).catch(() => null)));
+      const ok = new Set(full.filter((n) => n && hasAll(n, f.has)).map((n) => n!.id));
+      found = found.filter((n) => ok.has(n.id));
+    }
+    return found.slice(0, 30);
   });
 
   const commands = () => {
@@ -47,7 +68,7 @@ export default function CommandBar(p: {
     const live = p.commands.filter((c) => !c.when || c.when());
     return q().trim() ? rank(q(), live, (c) => c.label) : live.slice(0, 9);
   };
-  const isQuestion = () => /\?\s*$/.test(q()) || /^(what|how|why|when|where|who|which|do|did|does|is|are|can|should|summari[sz]e|list|find)\b/i.test(q().trim());
+  const isQuestion = () => noFilters(filters()) && (/\?\s*$/.test(q()) || /^(what|how|why|when|where|who|which|do|did|does|is|are|can|should|summari[sz]e|list|find)\b/i.test(q().trim()));
 
   const rows = (): Row[] => {
     const out: Row[] = [];
@@ -56,7 +77,7 @@ export default function CommandBar(p: {
     if (q().trim() && !p.notesOnly && isQuestion()) out.push({ kind: "ask" });
     // A command that matches well beats notes; otherwise notes first.
     out.push(...(q().trim() && cs.length && ns.length === 0 ? cs : [...ns, ...cs]));
-    if (q().trim() && !p.notesOnly && !isQuestion()) out.push({ kind: "ask" });
+    if (q().trim() && !p.notesOnly && !isQuestion() && noFilters(filters())) out.push({ kind: "ask" });
     return out;
   };
 
@@ -104,7 +125,7 @@ export default function CommandBar(p: {
     }
     if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) setI((i() + 1) % Math.max(1, n));
     else if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p" && !p.notesOnly)) setI((i() + n - 1) % Math.max(1, n));
-    else if (e.key === "Tab" && !p.notesOnly && q().trim()) void ask();
+    else if (e.key === "Tab" && !p.notesOnly && q().trim() && noFilters(filters())) void ask();
     else if (e.key === "Enter" && answer() && answer() !== "loading" && e.ctrlKey) void saveAnswer();
     else if (e.key === "Enter") choose(rows()[i()]);
     else if (e.key === "Escape") p.onClose();
@@ -130,12 +151,27 @@ export default function CommandBar(p: {
             }}
             onKeyDown={key}
           />
-          <Show when={!p.notesOnly && q().trim()}>
+          <Show when={!p.notesOnly && q().trim() && noFilters(filters())}>
             <span class="muted small nowrap">
               <kbd>Tab</kbd> ask
             </span>
           </Show>
         </div>
+        <Show when={!noFilters(filters())}>
+          <div class="palette-filters">
+            <Show when={filters().folder}>
+              <span class="chip on">in {filters().folder}</span>
+            </Show>
+            <Show when={filters().pinned}>
+              <span class="chip on">pinned</span>
+            </Show>
+            <Show when={filters().since !== null}>
+              <span class="chip on">since {new Date(filters().since!).toLocaleDateString(undefined, { weekday: "long" })}</span>
+            </Show>
+            <For each={filters().has}>{(h) => <span class="chip on">has a {h}</span>}</For>
+            <span class="muted small">{notes()?.length ?? 0} found</span>
+          </div>
+        </Show>
         <Show
           when={answer()}
           fallback={

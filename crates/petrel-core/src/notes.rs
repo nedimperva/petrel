@@ -22,6 +22,7 @@ use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::attachments;
 use crate::links::{self, same, Link, Target};
 use crate::store::{Folder, Store, UndoToken, VERSION_INTERVAL_MS};
 use crate::title;
@@ -32,6 +33,12 @@ pub const ROOT_SETTING: &str = "notes.root";
 pub const TRASH_DIR: &str = ".trash";
 /// Captures land here until they are filed.
 pub const INBOX_DIR: &str = "inbox";
+/// Today's page and the days before it: `journal/YYYY-MM-DD.md`.
+pub const JOURNAL_DIR: &str = "journal";
+/// A collection's look in the library (colour and mark), kept in the folder so it syncs with it.
+pub const FACE_FILE: &str = ".petrel";
+/// Notes read for "the week", at most.
+const BETWEEN_MAX: usize = 200;
 /// Settings keys `copied.<path>` count copies (collections sort by them).
 const COPY_PREFIX: &str = "copied.";
 /// More files than this in the notes folder are not indexed (a folder picked by mistake, like a home folder).
@@ -277,6 +284,11 @@ enum UndoStep {
     FileTrashed {
         path: String,
         trashed: PathBuf,
+    },
+    /// A file that is not a note (a picture) moved with one. Undo moves it back.
+    FileMoved {
+        from: String,
+        to: String,
     },
     /// Undo puts `before` back if the file still holds `after`.
     NoteText {
@@ -1109,7 +1121,17 @@ impl Store {
             params![id, to, new_folder, name],
         )?;
         self.index_file(&root, &to)?;
-        let mut steps = vec![UndoStep::FileRenamed { from: row.path.clone(), to }];
+        let mut steps = vec![UndoStep::FileRenamed { from: row.path.clone(), to: to.clone() }];
+        // Pictures the note links go with it, so the links keep working in the new folder.
+        let before =
+            std::fs::read_to_string(&target).with_context(|| format!("reading {}", target.display()))?;
+        let (carried, moved) = self.carry_attachments(&root, &row.folder, &new_folder, &before)?;
+        steps.extend(moved);
+        if carried != before {
+            write_atomic(&target, &carried)?;
+            self.index_file(&root, &to)?;
+            steps.push(UndoStep::NoteText { path: to.clone(), before, after: carried });
+        }
         let (old_folder, old_title) = (row.folder.clone(), row.title.clone());
         let qualify_new = Some(new_folder.clone()).filter(|f| !f.is_empty());
         let relinked = self.relink(&old_title, &mut steps, |t| match t {
@@ -1125,6 +1147,19 @@ impl Store {
     /// Adds one note's text to the end of another, under the date and time, and moves the first to the trash.
     /// The inbox's "add to a note".
     pub fn merge_note(&mut self, from_id: i64, into_id: i64) -> Result<NoteChange> {
+        let stamp = chrono::Local::now().format("%Y-%m-%d %H:%M");
+        self.merge_with(from_id, into_id, Vec::new(), |body| format!("_{stamp}_\n\n{}\n", body.trim()))
+    }
+
+    /// The work of `merge_note`: `entry` turns the added text into what goes at the end. `steps` are undone after
+    /// the merge's own (a day page made for it, say).
+    fn merge_with(
+        &mut self,
+        from_id: i64,
+        into_id: i64,
+        mut steps: Vec<UndoStep>,
+        entry: impl FnOnce(&str) -> String,
+    ) -> Result<NoteChange> {
         if from_id == into_id {
             bail!("a note can't be added to itself");
         }
@@ -1146,18 +1181,25 @@ impl Store {
             front.tags = tags;
             front_text = render_front(&front);
         }
-        let stamp = chrono::Local::now().format("%Y-%m-%d %H:%M");
         let body = body.trim_end();
         let glue = if body.is_empty() { String::new() } else { format!("{body}\n\n") };
-        let after = format!("{front_text}{glue}_{stamp}_\n\n{}\n", from.body.trim());
         self.note_version(into_id, &before, "before_append")?;
-        write_atomic(&path, &after)?;
+        let (added, moved) = self.carry_attachments(&root, &from.folder, &row.folder, &from.body)?;
+        let after = format!("{front_text}{glue}{}", entry(&added));
+        if let Err(e) = write_atomic(&path, &after) {
+            // The pictures went ahead of the text: put them back where the capture still links them.
+            for m in moved.iter().rev() {
+                if let UndoStep::FileMoved { from, to } = m {
+                    let _ = rename_with_retry(&abs(&root, to), &abs(&root, from));
+                }
+            }
+            return Err(e);
+        }
         self.index_file(&root, &row.path)?;
         let trashed = self.move_to_trash(&root, &from.path)?;
-        let steps = vec![
-            UndoStep::NoteText { path: row.path.clone(), before, after },
-            UndoStep::FileTrashed { path: from.path.clone(), trashed },
-        ];
+        steps.extend(moved);
+        steps.push(UndoStep::NoteText { path: row.path.clone(), before, after });
+        steps.push(UndoStep::FileTrashed { path: from.path.clone(), trashed });
         let token = self.remember_notes(steps);
         Ok(NoteChange { note: self.peek_note(into_id)?, token, relinked: 0 })
     }
@@ -1207,6 +1249,169 @@ impl Store {
     pub fn capture_note(&mut self, body: &str) -> Result<Note> {
         let stamp = chrono::Local::now().format("%Y-%m-%d %H%M%S").to_string();
         self.create_note(INBOX_DIR, &stamp, body, &[])
+    }
+
+    // ---- days --------------------------------------------------------------------------------------------------
+
+    /// The page for a day (`YYYY-MM-DD`), if it has one. A day without one has no file: the page is made when
+    /// something is written on it.
+    pub fn day_note(&self, date: &str) -> Result<Option<Note>> {
+        let date = check_day(date)?;
+        match self.id_of(&join_rel(JOURNAL_DIR, &date))? {
+            Some(id) => Ok(Some(self.peek_note(id)?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Adds a capture to the end of a day's page under the time (`21:14 text`), making the page if the day has
+    /// none, and moves the capture to the trash. One undo takes back all of it.
+    pub fn file_into_day(&mut self, from_id: i64, date: &str) -> Result<NoteChange> {
+        let date = check_day(date)?;
+        let mut steps = Vec::new();
+        let into = match self.id_of(&join_rel(JOURNAL_DIR, &date))? {
+            Some(id) => id,
+            None => {
+                let n = self.create_note(JOURNAL_DIR, &date, "", &[])?;
+                steps.push(UndoStep::FileCreated { path: n.path.clone() });
+                n.id
+            }
+        };
+        let time = chrono::Local::now().format("%H:%M").to_string();
+        self.merge_with(from_id, into, steps, |body| day_entry(&time, body))
+    }
+
+    /// Notes changed between two moments (ms), newest first, with their text: what "the week" reads.
+    pub fn notes_between(&self, from: i64, to: i64) -> Result<Vec<Note>> {
+        let ids: Vec<i64> = self
+            .conn
+            .prepare_cached(
+                "SELECT id FROM notes WHERE modified_at >= ?1 AND modified_at < ?2 \
+                 ORDER BY modified_at DESC LIMIT ?3",
+            )?
+            .query_map(params![from, to, BETWEEN_MAX as i64], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(ids.into_iter().filter_map(|id| self.peek_note(id).ok()).collect())
+    }
+
+    // ---- pictures ----------------------------------------------------------------------------------------------
+
+    /// Writes a pasted picture to `<folder>/attachments/` and returns the link text for it
+    /// (`attachments/<name>`), relative to a note in `folder`. A name already taken gets a number.
+    pub fn save_attachment(&mut self, folder: &str, name: &str, bytes: &[u8]) -> Result<String> {
+        let root = self.root()?;
+        let folder = clean_folder(folder);
+        let name = attachments::clean_name(name)
+            .ok_or_else(|| anyhow!("only pictures can be pasted into a note"))?;
+        if bytes.is_empty() || bytes.len() > attachments::MAX_BYTES {
+            bail!("that picture is too big to keep in a note (20 MB at most)");
+        }
+        let dir = abs(&root, &join_dir(&folder, attachments::DIR));
+        let file = free_name(&dir, &name);
+        write_bytes_atomic(&dir.join(&file), bytes)?;
+        Ok(format!("{}/{file}", attachments::DIR))
+    }
+
+    /// The bytes of a picture a note in `folder` links as `attachments/<name>`, to show it on the page.
+    pub fn attachment(&self, folder: &str, link: &str) -> Result<Vec<u8>> {
+        let root = self.root()?;
+        let name = link
+            .strip_prefix(&format!("{}/", attachments::DIR))
+            .filter(|n| attachments::is_clean(n))
+            .ok_or_else(|| anyhow!("{link} is not a picture next to the note"))?;
+        let path = abs(&root, &join_dir(&join_dir(&clean_folder(folder), attachments::DIR), name));
+        std::fs::read(&path).with_context(|| format!("reading {}", path.display()))
+    }
+
+    /// Moves the pictures `body` links from one folder's `attachments/` to another's, renaming any whose name is
+    /// taken there, and returns the body with its links fixed and the moves (for undo).
+    fn carry_attachments(
+        &self,
+        root: &Path,
+        from: &str,
+        to: &str,
+        body: &str,
+    ) -> Result<(String, Vec<UndoStep>)> {
+        let names = attachments::linked(body);
+        if from == to || names.is_empty() {
+            return Ok((body.to_string(), Vec::new()));
+        }
+        let from_dir = join_dir(from, attachments::DIR);
+        let to_dir = join_dir(to, attachments::DIR);
+        let mut renamed = HashMap::new();
+        let mut steps = Vec::new();
+        for name in names {
+            let src = format!("{from_dir}/{name}");
+            if !abs(root, &src).is_file() {
+                continue;
+            }
+            let dir = abs(root, &to_dir);
+            std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+            let file = free_name(&dir, &name);
+            let dst = format!("{to_dir}/{file}");
+            rename_with_retry(&abs(root, &src), &abs(root, &dst))?;
+            steps.push(UndoStep::FileMoved { from: src, to: dst });
+            if file != name {
+                renamed.insert(name, file);
+            }
+        }
+        Ok((attachments::rename_links(body, &renamed), steps))
+    }
+
+    // ---- collections' looks ------------------------------------------------------------------------------------
+
+    /// Each top folder's look (colour and mark), from its `.petrel` file. Folders without one are left out.
+    pub fn topic_faces(&self) -> Result<HashMap<String, TopicFace>> {
+        let root = self.root()?;
+        let mut out = HashMap::new();
+        let Ok(entries) = std::fs::read_dir(&root) else { return Ok(out) };
+        for e in entries.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') || !e.path().is_dir() {
+                continue;
+            }
+            if let Ok(text) = std::fs::read_to_string(e.path().join(FACE_FILE)) {
+                let f = parse_face(&text);
+                if f.color.is_some() || f.mark.is_some() {
+                    out.insert(
+                        name,
+                        TopicFace { color: f.color.unwrap_or_default(), mark: f.mark.unwrap_or_default() },
+                    );
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// Sets a top folder's colour and mark (empty: the default). Lines in `.petrel` Petrel does not know are kept.
+    pub fn set_topic_face(&mut self, top: &str, color: &str, mark: &str) -> Result<TopicFace> {
+        let root = self.root()?;
+        let top = clean_folder(top);
+        if top.is_empty() || top.contains('/') || top == INBOX_DIR {
+            bail!("only a collection (a top folder) has a look of its own");
+        }
+        let (color, mark) = (face_word(color)?, face_word(mark)?);
+        let dir = abs(&root, &top);
+        if !dir.is_dir() {
+            bail!("there is no folder called {top}");
+        }
+        let path = dir.join(FACE_FILE);
+        let old = std::fs::read_to_string(&path).unwrap_or_default();
+        let mut lines: Vec<String> = old
+            .lines()
+            .filter(|l| !matches!(l.split_once(':').map(|(k, _)| k.trim()), Some("color" | "mark")))
+            .map(str::to_string)
+            .collect();
+        if lines.is_empty() {
+            lines.push("# Petrel: how this collection looks in the library.".into());
+        }
+        if !color.is_empty() {
+            lines.push(format!("color: {color}"));
+        }
+        if !mark.is_empty() {
+            lines.push(format!("mark: {mark}"));
+        }
+        write_atomic(&path, &(lines.join("\n") + "\n"))?;
+        Ok(TopicFace { color, mark })
     }
 
     /// A note's saved versions, newest first (the history panel).
@@ -1733,6 +1938,13 @@ impl Store {
                         n += 1;
                     }
                 }
+                UndoStep::FileMoved { from, to } => {
+                    let (f, t) = (abs(&root, &from), abs(&root, &to));
+                    if t.exists() && !f.exists() {
+                        rename_with_retry(&t, &f)?;
+                        n += 1;
+                    }
+                }
                 UndoStep::NoteText { path, before, after } => {
                     let p = abs(&root, &path);
                     if std::fs::read_to_string(&p).ok().as_deref() == Some(after.as_str()) {
@@ -1771,6 +1983,94 @@ impl Store {
         }
         Ok(n)
     }
+}
+
+/// A day as `YYYY-MM-DD`, refused when it is not a real date (the page's file name comes from it).
+fn check_day(date: &str) -> Result<String> {
+    let d = chrono::NaiveDate::parse_from_str(date.trim(), "%Y-%m-%d")
+        .map_err(|_| anyhow!("{date} is not a day (YYYY-MM-DD)"))?;
+    Ok(d.format("%Y-%m-%d").to_string())
+}
+
+/// One entry on a day's page: the time, then the text. A quote, a list or a heading keeps its own line.
+fn day_entry(time: &str, body: &str) -> String {
+    let body = body.trim();
+    let block = body.starts_with(['>', '-', '*', '#', '!', '|', '`']) || body.starts_with("1.");
+    if block {
+        format!("{time}\n{body}\n")
+    } else {
+        format!("{time} {body}\n")
+    }
+}
+
+fn join_dir(folder: &str, name: &str) -> String {
+    if folder.is_empty() {
+        name.to_string()
+    } else {
+        format!("{folder}/{name}")
+    }
+}
+
+/// `name` if no file in `dir` has it, else `stem-2.ext`, `stem-3.ext`…
+fn free_name(dir: &Path, name: &str) -> String {
+    if !dir.join(name).exists() {
+        return name.to_string();
+    }
+    let (stem, ext) = name.rsplit_once('.').unwrap_or((name, ""));
+    (2..).map(|n| format!("{stem}-{n}.{ext}")).find(|c| !dir.join(c).exists()).expect("some number is free")
+}
+
+fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+    let dir = path.parent().ok_or_else(|| anyhow!("{} has no folder", path.display()))?;
+    std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("picture");
+    let tmp = dir.join(format!(".{name}.petrel-tmp"));
+    {
+        let mut f = std::fs::File::create(&tmp).with_context(|| format!("writing {}", tmp.display()))?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+    }
+    rename_with_retry(&tmp, path)
+}
+
+/// A collection's look, as the library draws it. The names are the UI's (`teal`, `plane`); empty is the default.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopicFace {
+    pub color: String,
+    pub mark: String,
+}
+
+#[derive(Default)]
+struct FaceLines {
+    color: Option<String>,
+    mark: Option<String>,
+}
+
+/// A colour or mark name: lower-case letters and `-`, short. Anything else is not one Petrel drew.
+fn face_word(s: &str) -> Result<String> {
+    let s = s.trim().to_lowercase();
+    if s.len() > 24 || !s.chars().all(|c| c.is_ascii_lowercase() || c == '-') {
+        bail!("{s} is not a colour or mark Petrel knows");
+    }
+    Ok(s)
+}
+
+fn parse_face(text: &str) -> FaceLines {
+    let mut f = FaceLines::default();
+    for line in text.lines() {
+        let Some((k, v)) = line.split_once(':') else { continue };
+        let Ok(v) = face_word(v) else { continue };
+        if v.is_empty() {
+            continue;
+        }
+        match k.trim() {
+            "color" => f.color = Some(v),
+            "mark" => f.mark = Some(v),
+            _ => {}
+        }
+    }
+    f
 }
 
 fn mtime_ms_of(t: std::time::SystemTime) -> i64 {
@@ -2108,6 +2408,103 @@ mod tests {
         assert!(!dir.join("Home/Omarchy setup.md").exists());
         s.undo(&tok.token).unwrap();
         assert!(dir.join("Home/Omarchy setup.md").exists());
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn captures_go_to_a_day_page() {
+        let dir = tmp();
+        let mut s = store_in(&dir);
+        assert!(s.day_note("2026-11-11").unwrap().is_none());
+        assert!(s.day_note("2026-13-40").is_err() && s.day_note("../x").is_err());
+        let c = s.capture_note("Lunch with Amra\n").unwrap();
+        let ch = s.file_into_day(c.id, "2026-11-11").unwrap();
+        assert_eq!(ch.note.path, "journal/2026-11-11.md");
+        let body = &ch.note.body;
+        assert!(
+            body.len() > 6 && body.as_bytes()[2] == b':' && body.trim_end().ends_with("Lunch with Amra"),
+            "{body}"
+        );
+        let q = s.capture_note("> a quote\n").unwrap();
+        let body = s.file_into_day(q.id, "2026-11-11").unwrap().note.body;
+        assert!(body.contains("\n> a quote"), "{body}");
+        // One undo for the first: the capture comes back and the page it made goes.
+        let c2 = s.capture_note("again\n").unwrap();
+        let other = s.file_into_day(c2.id, "2026-11-12").unwrap();
+        s.undo_notes(&other.token.token).unwrap();
+        assert!(dir.join(&c2.path).exists() && !dir.join("journal/2026-11-12.md").exists());
+        assert_eq!(day_entry("09:05", "- [ ] milk"), "09:05\n- [ ] milk\n");
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn pictures_move_with_their_note() {
+        let dir = tmp();
+        let mut s = store_in(&dir);
+        let link = s.save_attachment(INBOX_DIR, "Screen shot.PNG", b"png bytes").unwrap();
+        assert_eq!(link, "attachments/Screen-shot.png");
+        assert_eq!(s.attachment(INBOX_DIR, &link).unwrap(), b"png bytes");
+        assert!(s.attachment(INBOX_DIR, "attachments/../../secret.png").is_err());
+        assert!(s.save_attachment(INBOX_DIR, "x.exe", b"MZ").is_err());
+        // The scan never takes a picture for a note.
+        assert_eq!(s.scan_notes().unwrap().added, 0);
+
+        let c = s.capture_note(&format!("Shelf ![shelf]({link})\n")).unwrap();
+        // A picture of the same name already lives in Home: the moved one is renamed and the link follows.
+        std::fs::create_dir_all(dir.join("Home/attachments")).unwrap();
+        std::fs::write(dir.join("Home/attachments/Screen-shot.png"), b"other").unwrap();
+        let moved = s.move_note(c.id, "Home", "Shelf").unwrap();
+        assert!(moved.note.body.contains("](attachments/Screen-shot-2.png)"), "{}", moved.note.body);
+        assert_eq!(std::fs::read(dir.join("Home/attachments/Screen-shot-2.png")).unwrap(), b"png bytes");
+        assert!(!dir.join("inbox/attachments/Screen-shot.png").exists());
+        s.undo_notes(&moved.token.token).unwrap();
+        assert!(dir.join("inbox/attachments/Screen-shot.png").exists());
+        let back = s.peek_note(s.id_of(&c.path).unwrap().unwrap()).unwrap();
+        assert!(back.body.contains("](attachments/Screen-shot.png)"), "{}", back.body);
+
+        // Added to a note in another folder: the picture goes there too.
+        let into = s.create_note("work", "Plan", "Steps\n", &[]).unwrap();
+        let merged = s.merge_note(back.id, into.id).unwrap();
+        assert!(merged.note.body.contains("](attachments/Screen-shot.png)"));
+        assert!(dir.join("work/attachments/Screen-shot.png").exists());
+        s.undo_notes(&merged.token.token).unwrap();
+        assert!(
+            dir.join("inbox/attachments/Screen-shot.png").exists()
+                && !dir.join("work/attachments/Screen-shot.png").exists()
+        );
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn collections_have_a_look() {
+        let dir = tmp();
+        let mut s = store_in(&dir);
+        s.create_note("Travel", "Mostar", "", &[]).unwrap();
+        assert!(s.topic_faces().unwrap().is_empty());
+        std::fs::write(dir.join("Travel").join(FACE_FILE), "keep: me\ncolor: rose\n").unwrap();
+        let f = s.set_topic_face("Travel", "teal", "plane").unwrap();
+        assert_eq!((f.color.as_str(), f.mark.as_str()), ("teal", "plane"));
+        let text = std::fs::read_to_string(dir.join("Travel").join(FACE_FILE)).unwrap();
+        assert!(text.contains("keep: me") && !text.contains("rose"), "{text}");
+        assert_eq!(s.topic_faces().unwrap()["Travel"], f);
+        assert!(s.set_topic_face("inbox", "teal", "").is_err());
+        assert!(s.set_topic_face("Travel/Sub", "teal", "").is_err());
+        assert!(s.set_topic_face("Travel", "Teal; rm", "").is_err());
+        assert!(s.set_topic_face("Nowhere", "teal", "").is_err());
+        // The face file is not a note.
+        assert_eq!(s.scan_notes().unwrap().added, 0);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn notes_of_a_week() {
+        let dir = tmp();
+        let mut s = store_in(&dir);
+        let a = s.create_note("", "A", "one", &[]).unwrap();
+        let all = s.notes_between(0, i64::MAX).unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].id, a.id);
+        assert!(s.notes_between(a.modified_at + 1, i64::MAX).unwrap().is_empty());
         std::fs::remove_dir_all(dir).ok();
     }
 }

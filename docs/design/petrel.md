@@ -29,6 +29,31 @@ It is not for sale; it may be open source later.
   popover. `Ctrl K` with a question answers from your notes and shows the notes it used. Also: summarize, a title,
   related notes, where to file a capture.
 
+## Next ideas (chosen 2026-11-11)
+
+Canvas: https://claude.ai/artifact/Sw6CPjnpGXY6Vz9LnVCQ5d. Out for now: one line from a terminal, the greeting page.
+
+- **Capture with a word.** `#recipes` (a top folder), `#today` or `>Groceries` (a note) in the capture window says
+  where it goes; the list offers places as you type, the word is taken out, and a word left in the text still
+  routes it when you press Esc (`src/inbox/route.ts`).
+- **The quote comes along.** Text selected in the app in front when the capture key is pressed starts the capture
+  as a quote, with the app and window title under it. Windows reads it through UI Automation (no faked key
+  presses, the clipboard untouched, password fields skipped); Linux reads the primary selection and asks Hyprland
+  for the window, and an old selection is not brought in twice (`src-tauri/src/context.rs`). Off in Settings.
+- **Pictures** pasted or dropped into a note go to `<folder>/attachments/` and are linked `![](attachments/x.png)`.
+  Moving or merging a note into another folder takes its pictures along (one undo). Photos wider than 2000 px are
+  made smaller unless Shift is held.
+- **Inbox review**: one capture at a time, oldest first, numbers file it in the six places used most and lately
+  (`ui.filed`), Space keeps it for later, `s` asks Claude. Ends with "Inbox clear." and the petrel.
+- **A look per collection**: a colour and a mark, kept in the folder's `.petrel` file so it syncs. `p` pins.
+- **Ctrl K filters**: `in:`, `pinned`, `today`, `this week`, `has:link`, `has:picture`, `has:task`.
+- **Today's page**: `Ctrl D`, `journal/YYYY-MM-DD.md`, made only when written on. Entries start with the time
+  (`21:14 text`); captures filed there get it too. The month sits beside the text on a wide window.
+- **Small joys**: paper tones (Paper, Linen, Night, or follow the clock), a writing font, a fading saved tick,
+  filed cards slide away, a copied card flashes in its colour, an optional pencil sound. No streaks, no badges.
+- **The week, when you ask**: counts and open tasks from the files, then a few sentences from Claude after Enter,
+  which says first how many notes and words it will read. Enter keeps it as `journal/YYYY-Www.md`.
+
 ## Rules
 
 - **Files are the truth.** Every note is a `.md` file in one folder the owner picks, ideally inside Google
@@ -67,5 +92,6 @@ On Wayland the compositor binds the keys: `bind = SUPER, N, exec, petrel --captu
 
 ## Not yet
 
-A local model as a second AI provider. A file watcher (the folder is rescanned when the window comes to the
+A local model as a second AI provider. The page's link in the capture quote (browsers do not put it in the window
+title). A file watcher (the folder is rescanned when the window comes to the
 front instead). A real-window check on Windows of this design.

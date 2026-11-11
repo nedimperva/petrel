@@ -7,7 +7,8 @@ import { api, errText, type AiSuggestion, type Note } from "../api";
 import { blanks, fill, parts } from "../blanks";
 import { copyFilled } from "../collection/copyItem";
 import { ago, folderName, say, typing } from "../ui";
-import { hueOf, kindOf, topOf } from "./Card";
+import { kindOf, topOf } from "./Card";
+import Mark, { hueClass } from "./Mark";
 
 export default function Sheet(p: {
   id: number;
@@ -82,11 +83,11 @@ export default function Sheet(p: {
     <div class="scrim sheet-scrim" onMouseDown={(e) => e.target === e.currentTarget && p.onClose()}>
       <Show when={note()}>
         {(n) => (
-          <div class={`lsheet hue-${hueOf(n().folder)} kind-${kindOf(n().folder)}`} role="dialog" aria-label={n().title}>
+          <div class={`lsheet ${hueClass(n().folder)} kind-${kindOf(n().folder)}`} role="dialog" aria-label={n().title}>
             <div class="lsheet-main">
               <div class="lsheet-top">
                 <span class="lcard-where">
-                  <span class="dot" aria-hidden="true" />
+                  <Mark folder={n().folder} size={12} />
                   {folderName(topOf(n().folder))}
                 </span>
                 <span class="muted small">

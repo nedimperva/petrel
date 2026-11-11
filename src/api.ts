@@ -169,6 +169,19 @@ export interface AiRelated {
   why: string;
 }
 
+/** What was selected when the capture key was pressed, and the window it was in. */
+export interface CaptureContext {
+  text: string | null;
+  app: string | null;
+  title: string | null;
+}
+
+/** A collection's look in the library: colour and mark names from `src/library/faces.ts`; empty is the default. */
+export interface TopicFace {
+  color: string;
+  mark: string;
+}
+
 export interface AppEvents {
   /** Tray "Quit": save, then close this window. */
   quit(): void;
@@ -230,6 +243,21 @@ export interface Api {
   resolveLink(inner: string): Promise<Resolved>;
   backlinks(id: number): Promise<Backlinks>;
 
+  /** A day's page (`YYYY-MM-DD`), or null when the day has none yet. */
+  dayNote(date: string): Promise<Note | null>;
+  /** Files a capture onto a day's page under the time, making the page if needed. */
+  fileIntoDay(id: number, date: string): Promise<NoteChange>;
+  /** Notes changed between two moments (ms), with their text. */
+  notesBetween(from: number, to: number): Promise<Note[]>;
+  topicFaces(): Promise<Record<string, TopicFace>>;
+  setTopicFace(top: string, face: TopicFace): Promise<TopicFace>;
+  /** Writes a pasted picture next to notes in `folder`; returns the link (`attachments/<name>`). */
+  saveAttachment(folder: string, name: string, bytes: Uint8Array): Promise<string>;
+  /** A picture's bytes, for a note in `folder` linking `link`. */
+  attachment(folder: string, link: string): Promise<Uint8Array>;
+  /** Once per capture window. */
+  captureContext(): Promise<CaptureContext>;
+
   aiStatus(): Promise<AiStatus>;
   setAiKey(key: string | null): Promise<AiStatus>;
   aiWrite(o: {
@@ -242,6 +270,8 @@ export interface Api {
   aiAsk(question: string): Promise<AiAnswer>;
   aiSuggestHome(noteId: number): Promise<AiSuggestion[]>;
   aiRelated(noteId: number): Promise<AiRelated[]>;
+  /** A few sentences on the notes changed between two moments. */
+  aiWeek(from: number, to: number): Promise<string>;
 }
 
 export const inTauri = "__TAURI_INTERNALS__" in window;
@@ -306,12 +336,25 @@ async function tauriApi(): Promise<Api> {
     resolveLink: (inner) => invoke("resolve_link", { inner }),
     backlinks: (id) => invoke("backlinks", { id }),
 
+    dayNote: (date) => invoke("day_note", { date }),
+    fileIntoDay: (id, date) => invoke("file_into_day", { id, date }),
+    notesBetween: (from, to) => invoke("notes_between", { from, to }),
+    topicFaces: () => invoke("topic_faces"),
+    setTopicFace: (top, face) => invoke("set_topic_face", { top, color: face.color, mark: face.mark }),
+    saveAttachment: (folder, name, bytes) =>
+      invoke("save_attachment", bytes, {
+        headers: { "x-petrel-folder": encodeURIComponent(folder), "x-petrel-name": encodeURIComponent(name) },
+      }),
+    attachment: async (folder, link) => new Uint8Array(await invoke<ArrayBuffer>("attachment", { folder, link })),
+    captureContext: () => invoke("capture_context"),
+
     aiStatus: () => invoke("ai_status"),
     setAiKey: (key) => invoke("set_ai_key", { key }),
     aiWrite: (o) => invoke("ai_write", { ...o }),
     aiAsk: (question) => invoke("ai_ask", { question }),
     aiSuggestHome: (noteId) => invoke("ai_suggest_home", { noteId }),
     aiRelated: (noteId) => invoke("ai_related", { noteId }),
+    aiWeek: (from, to) => invoke("ai_week", { from, to }),
   };
 }
 

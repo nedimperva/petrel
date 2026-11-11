@@ -93,8 +93,26 @@
   color-scheme: dark;
 }
 
+/* Linen: warmer paper for evenings. Only the paper and the ink change; the accent stays. */
+:root[data-theme="linen"] {
+  --paper: #f4eee3;
+  --sheet: #f4eee3;
+  --raised: #fbf8f2;
+  --sunk: #ece5d8;
+  --hover: #e5dccc;
+  --ink: #2b261f;
+  --ink-2: #554d42;
+  --muted: #645b4f;
+  --faint: #857b6b;
+  --line: #e1d7c5;
+  --line-strong: #d1c5af;
+  --accent-soft: #e4e4e8;
+  --accent-wash: #eeebe6;
+  color-scheme: light;
+}
+
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
+  :root:not([data-theme="light"]):not([data-theme="linen"]) {
     --paper: #201f1d;
     --sheet: #201f1d;
     --raised: #252422;
