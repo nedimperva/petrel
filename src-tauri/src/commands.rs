@@ -1,17 +1,11 @@
 //! What the UI may ask for. Every command returns `Result<T, String>`; the engine's errors are formatted
 //! with their context chain so the strip or the log can show them.
 
-use petrel_core::action::{self, Action, EditorState, Paths, RunReport, Source};
-use petrel_core::host::CancelToken;
-use petrel_core::store::SweepReport;
-use petrel_core::store::Version;
-use petrel_core::store_actions::RunLogEntry;
-use petrel_core::{Draft, Folder, ListPage, ListQuery, SearchHit, Store, TagCount, UndoToken};
+use petrel_core::Store;
 use std::sync::atomic::Ordering;
 
 use tauri::{Manager, State};
 
-use crate::host::TauriHost;
 use crate::AppState;
 
 type R<T> = Result<T, String>;
@@ -36,33 +30,6 @@ pub fn app_info(state: State<AppState>) -> AppInfo {
         db_path: state.db_path.display().to_string(),
         debug: cfg!(debug_assertions),
     }
-}
-
-#[tauri::command]
-pub fn new_draft(state: State<AppState>, content: String) -> R<Draft> {
-    with(&state, |s| s.new_draft(&content))
-}
-
-#[tauri::command]
-pub fn open_draft(state: State<AppState>, id: i64) -> R<Draft> {
-    with(&state, |s| s.draft(id))
-}
-
-/// The list's preview: read without marking the draft accessed.
-#[tauri::command]
-pub fn peek_draft(state: State<AppState>, id: i64) -> R<Draft> {
-    with(&state, |s| s.peek(id))
-}
-
-#[tauri::command]
-pub fn save_draft(state: State<AppState>, id: i64, content: String, cursor: i64) -> R<bool> {
-    with(&state, |s| s.save(id, &content, cursor))
-}
-
-/// Remembers where the cursor was in a draft whose text is already saved; not an edit.
-#[tauri::command]
-pub fn save_cursor(state: State<AppState>, id: i64, cursor: i64) -> R<()> {
-    with(&state, |s| s.save_cursor(id, cursor))
 }
 
 /// The last way out when the database will not take a save: the text goes to a file next to it
@@ -91,68 +58,6 @@ pub fn close_window(state: State<AppState>, window: tauri::WebviewWindow) {
     let _ = window.destroy();
 }
 
-#[tauri::command]
-pub fn list_drafts(state: State<AppState>, query: ListQuery) -> R<ListPage> {
-    with(&state, |s| s.list(&query))
-}
-
-#[tauri::command]
-pub fn search_drafts(state: State<AppState>, query: String, limit: usize) -> R<Vec<SearchHit>> {
-    with(&state, |s| s.search(&query, limit.min(500)))
-}
-
-#[tauri::command]
-pub fn set_tags(state: State<AppState>, id: i64, tags: Vec<String>) -> R<Vec<String>> {
-    with(&state, |s| s.set_tags(id, &tags))
-}
-
-#[tauri::command]
-pub fn tag_counts(state: State<AppState>, folder: Option<Folder>) -> R<Vec<TagCount>> {
-    with(&state, |s| s.tag_counts(folder))
-}
-
-#[tauri::command]
-pub fn rename_tag(state: State<AppState>, from: String, to: String) -> R<usize> {
-    with(&state, |s| s.rename_tag(&from, &to))
-}
-
-#[tauri::command]
-pub fn merge_tags(state: State<AppState>, from: Vec<String>, into: String) -> R<usize> {
-    with(&state, |s| s.merge_tags(&from, &into))
-}
-
-#[tauri::command]
-pub fn move_drafts(state: State<AppState>, ids: Vec<i64>, folder: Folder) -> R<UndoToken> {
-    with(&state, |s| s.move_drafts(&ids, folder))
-}
-
-#[tauri::command]
-pub fn flag_drafts(state: State<AppState>, ids: Vec<i64>, flagged: bool) -> R<UndoToken> {
-    with(&state, |s| s.flag_drafts(&ids, flagged))
-}
-
-#[tauri::command]
-pub fn add_tags(state: State<AppState>, ids: Vec<i64>, tags: Vec<String>) -> R<UndoToken> {
-    with(&state, |s| s.add_tags(&ids, &tags))
-}
-
-#[tauri::command]
-pub fn undo(state: State<AppState>, token: String) -> R<usize> {
-    with(&state, |s| s.undo(&token))
-}
-
-/// No undo: the UI says so in its confirm dialog.
-#[tauri::command]
-pub fn empty_trash(state: State<AppState>) -> R<usize> {
-    with(&state, |s| s.empty_trash())
-}
-
-/// Runs housekeeping now; the shell also runs it at start and daily.
-#[tauri::command]
-pub fn sweep(state: State<AppState>) -> R<SweepReport> {
-    with(&state, |s| s.sweep())
-}
-
 /// The window starts hidden and the UI shows it once it has rendered, so there is no white flash.
 #[tauri::command]
 pub fn show_window(state: State<AppState>, window: tauri::WebviewWindow) {
@@ -168,9 +73,11 @@ pub fn show_window(state: State<AppState>, window: tauri::WebviewWindow) {
 /// main window was never shown, nothing would be left on screen, so Petrel quits rather than lingering unseen.
 #[tauri::command]
 pub fn close_capture(state: State<AppState>, app: tauri::AppHandle) {
+    use tauri::Emitter;
     if let Some(w) = app.get_webview_window("capture") {
         let _ = w.destroy();
     }
+    let _ = app.emit_to("main", "petrel-changed", ());
     if state.tray.load(Ordering::SeqCst) {
         return;
     }
@@ -186,42 +93,7 @@ pub fn open_capture_window(app: tauri::AppHandle) {
     crate::open_capture(&app);
 }
 
-/// A draft's id from its uuid (links carry uuids; ids are this database's own).
-#[tauri::command]
-pub fn find_draft(state: State<AppState>, uuid: String) -> R<Option<i64>> {
-    with(&state, |s| s.find_by_uuid(&uuid))
-}
-
-/// The `petrel://` links that arrived since the last call (main.rs queues them).
-#[tauri::command]
-pub fn take_links(state: State<AppState>) -> Vec<crate::uri::Link> {
-    state.links.lock().map(|mut q| std::mem::take(&mut *q)).unwrap_or_default()
-}
-
-/// A draft's versions, newest first (the history panel, `Ctrl H`).
-#[tauri::command]
-pub fn list_versions(state: State<AppState>, draft_id: i64) -> R<Vec<Version>> {
-    with(&state, |s| s.versions(draft_id))
-}
-
-#[tauri::command]
-pub fn version_text(state: State<AppState>, version_id: i64) -> R<String> {
-    with(&state, |s| s.version_content(version_id))
-}
-
-/// Puts a version's text back; the current text is kept as a `restore` version first. `draft_id` is the draft
-/// the panel shows, so a stale panel can never restore into another draft.
-#[tauri::command]
-pub fn restore_version(state: State<AppState>, draft_id: i64, version_id: i64) -> R<Draft> {
-    with(&state, |s| {
-        if !s.versions(draft_id)?.iter().any(|v| v.id == version_id) {
-            anyhow::bail!("that version is not one of this draft's");
-        }
-        s.restore(version_id)
-    })
-}
-
-/// The UI's own preferences (`ui.*`: open to new draft, editor type). Other keys belong to the engine.
+/// The UI's own preferences (`ui.*`: theme, last screen). Other keys belong to the engine.
 #[tauri::command]
 pub fn ui_settings(state: State<AppState>) -> R<std::collections::HashMap<String, String>> {
     with(&state, |s| Ok(s.settings_with_prefix("ui.")?.into_iter().collect()))
@@ -235,7 +107,7 @@ pub fn set_ui_setting(state: State<AppState>, key: String, value: String) -> R<(
     with(&state, |s| s.set_setting(&key, &value))
 }
 
-/// The settings page's Desktop section: the capture hotkey and start at login.
+/// The settings page's Desktop section: the two hotkeys and start at login.
 #[tauri::command]
 pub fn desktop_settings(app: tauri::AppHandle) -> crate::desktop::DesktopSettings {
     crate::desktop::settings(&app)
@@ -243,8 +115,12 @@ pub fn desktop_settings(app: tauri::AppHandle) -> crate::desktop::DesktopSetting
 
 /// `None` or empty turns the hotkey off. Refused (and the old one kept) when the key is taken or malformed.
 #[tauri::command]
-pub fn set_hotkey(app: tauri::AppHandle, hotkey: Option<String>) -> R<crate::desktop::DesktopSettings> {
-    crate::desktop::set_hotkey(&app, hotkey).map_err(|e| format!("{e:#}"))?;
+pub fn set_hotkey(
+    app: tauri::AppHandle,
+    which: crate::desktop::Which,
+    hotkey: Option<String>,
+) -> R<crate::desktop::DesktopSettings> {
+    crate::desktop::set_hotkey(&app, which, hotkey).map_err(|e| format!("{e:#}"))?;
     Ok(crate::desktop::settings(&app))
 }
 
@@ -254,108 +130,64 @@ pub fn set_autostart(app: tauri::AppHandle, on: bool) -> R<crate::desktop::Deskt
     Ok(crate::desktop::settings(&app))
 }
 
-// ---- actions (package 03) -----------------------------------------------------------------------------------
+// ---- copy ----------------------------------------------------------------------------------------------------
 
+/// Puts text on the clipboard; with `html`, also as rich text for apps that paste formatting (mail, docs). The
+/// clipboard handle lives in the app state: on Linux the owner must stay alive for the text to stay pasteable.
 #[tauri::command]
-pub fn list_actions(state: State<AppState>) -> R<Vec<Action>> {
-    with(&state, |s| s.actions())
-}
-
-/// Saving from the action editor trusts the steps: the person just wrote them (actions.md "Trust").
-#[tauri::command]
-pub fn save_action(state: State<AppState>, action: Action) -> R<Action> {
-    with(&state, |s| s.save_action(&action, true))
-}
-
-#[tauri::command]
-pub fn delete_action(state: State<AppState>, uuid: String) -> R<bool> {
-    with(&state, |s| s.delete_action(&uuid))
-}
-
-#[tauri::command]
-pub fn action_log(state: State<AppState>, limit: usize) -> R<Vec<RunLogEntry>> {
-    with(&state, |s| s.action_log(limit.min(1000)))
-}
-
-/// The webview's answer to a `host-request` event.
-#[tauri::command]
-pub fn host_reply(state: State<AppState>, id: u64, value: serde_json::Value) -> bool {
-    state.broker.answer(id, value)
-}
-
-/// Stops the running action, if there is one (`Esc` while it runs).
-#[tauri::command]
-pub fn cancel_run(state: State<AppState>) -> bool {
-    match state.running.lock().ok().and_then(|r| r.clone()) {
-        Some(token) => {
-            token.cancel();
-            true
-        }
-        None => false,
+pub fn copy_text(state: State<AppState>, text: String, html: bool) -> R<()> {
+    let mut slot = state.clipboard.lock().map_err(|_| "clipboard lock poisoned".to_string())?;
+    if slot.is_none() {
+        *slot = Some(arboard::Clipboard::new().map_err(|e| format!("no clipboard: {e}"))?);
     }
-}
-
-/// `runAction` steps look actions up while the store is otherwise free.
-struct Library<'a>(&'a std::sync::Mutex<Store>);
-
-impl action::Library for Library<'_> {
-    fn find_action(&self, key: &str) -> Option<Action> {
-        self.0.lock().ok()?.action(key).ok().flatten()
-    }
-}
-
-/// Clears the running slot however the run ends.
-struct Running<'a>(&'a AppState);
-
-impl Drop for Running<'_> {
-    fn drop(&mut self) {
-        if let Ok(mut r) = self.0.running.lock() {
-            *r = None;
-        }
-    }
-}
-
-/// Runs an action on a draft. The store is locked only to load and to commit, so autosave and the list keep
-/// working while a step waits on a command or on the person. One run at a time.
-#[tauri::command]
-pub async fn run_action(
-    app: tauri::AppHandle,
-    window: tauri::WebviewWindow,
-    key: String,
-    draft_id: i64,
-    editor: Option<EditorState>,
-    source: Option<Source>,
-) -> R<RunReport> {
-    // Dialogs go to the window that started the run, not to every window.
-    let target = window.label().to_string();
-    tauri::async_runtime::spawn_blocking(move || {
-        let state = app.state::<AppState>();
-        let cancel = CancelToken::default();
-        {
-            let mut running = state.running.lock().map_err(|_| "run lock poisoned".to_string())?;
-            if running.is_some() {
-                return Err("another action is running".to_string());
-            }
-            *running = Some(cancel.clone());
-        }
-        let _running = Running(&state);
-        let (prepared, paths) = with(&state, |s| {
-            Ok((action::prepare(s, &key, draft_id, editor, source.unwrap_or_default())?, Paths::for_store(s)))
-        })?;
-        let mut host = TauriHost {
-            app: &app,
-            target: &target,
-            broker: &state.broker,
-            clipboard: &state.clipboard,
-            cancel: cancel.clone(),
-        };
-        let executed = action::execute(prepared, &mut host, &Library(&state.store), &paths, &cancel);
-        let report = with(&state, |s| action::finish(s, executed))?;
-        if let action::RunOutcome::Failed { step, message } = &report.outcome {
-            log::info!("action {} failed at step {step}: {message}", report.action);
-        }
-        Ok(report)
+    let cb = slot.as_mut().expect("just set");
+    let done = if html { cb.set_html(markdown_html(&text), Some(text.clone())) } else { cb.set_text(&text) };
+    done.map_err(|e| {
+        // A dead connection (the display server restarted) is not coming back; the next copy opens a new one.
+        *slot = None;
+        format!("copying: {e}")
     })
-    .await
-    .map_err(|e| format!("the run stopped: {e}"))?
+}
+
+/// Markdown as HTML for "Copy formatted". Raw HTML in the note is dropped: it would paste into mail as markup.
+pub fn markdown_html(md: &str) -> String {
+    use pulldown_cmark::{html, Event, Options, Parser};
+    let opts = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
+    let events = Parser::new_ext(md, opts).filter(|e| !matches!(e, Event::Html(_) | Event::InlineHtml(_)));
+    let mut out = String::new();
+    html::push_html(&mut out, events);
+    out
+}
+
+// ---- the quick picker ------------------------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn open_picker_window(app: tauri::AppHandle) {
+    crate::open_picker(&app);
+}
+
+/// The picker copied (or was dismissed) and is done.
+#[tauri::command]
+pub fn close_picker(app: tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("picker") {
+        let _ = w.destroy();
+    }
+}
+
+/// "Open in Petrel" from the picker: the main window shows the note.
+#[tauri::command]
+pub fn show_note_in_main(app: tauri::AppHandle, id: i64) {
+    use tauri::Emitter;
+    crate::show_main(&app);
+    let _ = app.emit_to("main", "petrel-open-note", id);
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn formatted_copy_drops_raw_html() {
+        let h = super::markdown_html("# Hi\n\n- [ ] one\n\n<script>x</script>\n\n**bold**");
+        assert!(h.contains("<h1>Hi</h1>") && h.contains("<strong>bold</strong>") && h.contains("checkbox"));
+        assert!(!h.contains("<script>"), "{h}");
+    }
 }

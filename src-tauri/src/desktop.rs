@@ -1,7 +1,8 @@
-//! The global capture hotkey and start at login (package 07).
+//! The global hotkeys and start at login.
 //!
-//! The hotkey opens the capture window from anywhere. It works on Windows and X11. On Wayland an app can't grab
-//! keys, so the compositor binds `petrel --capture` instead (README), and the settings say so.
+//! One hotkey opens the capture window from anywhere, the other the quick picker. They work on Windows and X11.
+//! On Wayland an app can't grab keys, so the compositor binds `petrel --capture` and `petrel --picker` instead
+//! (README), and the settings say so.
 //! Start at login launches `petrel --hidden`: Petrel waits in the tray, so the first capture is instant.
 
 use std::str::FromStr;
@@ -15,11 +16,34 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 use crate::AppState;
 
-/// The setting: absent means the default, empty means off.
-pub const HOTKEY_SETTING: &str = "capture.hotkey";
+/// Which window a hotkey opens.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Which {
+    Capture,
+    Picker,
+}
+
+impl Which {
+    /// The setting: absent means the default, empty means off.
+    fn setting(self) -> &'static str {
+        match self {
+            Which::Capture => "capture.hotkey",
+            Which::Picker => "picker.hotkey",
+        }
+    }
+    fn default(self) -> &'static str {
+        match self {
+            Which::Capture => DEFAULT_HOTKEY,
+            Which::Picker => DEFAULT_PICKER_HOTKEY,
+        }
+    }
+}
 /// Ctrl+Alt is AltGr on Windows, and AltGr with a letter types a character on many layouts (AltGr+N is `}` on
 /// Croatian and Bosnian ones). AltGr+Space types nothing on common layouts, and few apps use Ctrl+Alt+Space.
 pub const DEFAULT_HOTKEY: &str = "Ctrl+Alt+Space";
+/// V for paste: the picker ends by copying. AltGr+V types nothing on the Bosnian and Croatian layouts.
+pub const DEFAULT_PICKER_HOTKEY: &str = "Ctrl+Alt+V";
 /// What start at login passes, so Petrel starts in the tray instead of on screen.
 pub const HIDDEN_ARG: &str = "--hidden";
 
@@ -43,6 +67,10 @@ pub struct DesktopSettings {
     hotkey_active: bool,
     hotkey_paused: bool,
     hotkey_error: Option<String>,
+    picker_hotkey: Option<String>,
+    picker_hotkey_default: &'static str,
+    picker_hotkey_active: bool,
+    picker_hotkey_error: Option<String>,
     /// False on Wayland, where the compositor binds keys.
     hotkey_supported: bool,
     autostart: bool,
@@ -57,12 +85,19 @@ pub fn wants_hidden(args: &[String]) -> bool {
     args.iter().skip(1).any(|a| a == HIDDEN_ARG)
 }
 
+fn slot(state: &AppState, which: Which) -> &Mutex<Hotkey> {
+    match which {
+        Which::Capture => &state.hotkey,
+        Which::Picker => &state.picker_hotkey,
+    }
+}
+
 /// The chosen hotkey from the store, the default if never set.
-fn stored_hotkey(app: &AppHandle) -> Option<String> {
+fn stored_hotkey(app: &AppHandle, which: Which) -> Option<String> {
     let state = app.state::<AppState>();
-    let stored = state.store.lock().ok().and_then(|s| s.setting(HOTKEY_SETTING).ok().flatten());
+    let stored = state.store.lock().ok().and_then(|s| s.setting(which.setting()).ok().flatten());
     match stored {
-        None => Some(DEFAULT_HOTKEY.to_string()),
+        None => Some(which.default().to_string()),
         Some(s) if s.trim().is_empty() => None,
         Some(s) => Some(s),
     }
@@ -77,20 +112,22 @@ pub fn parse(text: &str) -> Result<Shortcut> {
     Ok(s)
 }
 
-/// Registers the stored hotkey at start. Failures are kept for the settings to show, never fatal.
+/// Registers the stored hotkeys at start. Failures are kept for the settings to show, never fatal.
 pub fn init(app: &AppHandle) {
-    let chosen = stored_hotkey(app);
-    let mut hk = Hotkey { chosen: chosen.clone(), ..Default::default() };
-    if let Some(text) = chosen.filter(|_| hotkey_supported()) {
-        match register(app, &text) {
-            Ok(s) => hk.registered = Some(s),
-            Err(e) => {
-                log::warn!("capture hotkey {text}: {e:#}");
-                hk.error = Some(format!("{e:#}"));
+    for which in [Which::Capture, Which::Picker] {
+        let chosen = stored_hotkey(app, which);
+        let mut hk = Hotkey { chosen: chosen.clone(), ..Default::default() };
+        if let Some(text) = chosen.filter(|_| hotkey_supported()) {
+            match register(app, &text) {
+                Ok(s) => hk.registered = Some(s),
+                Err(e) => {
+                    log::warn!("{which:?} hotkey {text}: {e:#}");
+                    hk.error = Some(format!("{e:#}"));
+                }
             }
         }
+        slot(&app.state::<AppState>(), which).lock().map(|mut h| *h = hk).ok();
     }
-    app.state::<AppState>().hotkey.lock().map(|mut h| *h = hk).ok();
 }
 
 fn register(app: &AppHandle, text: &str) -> Result<Shortcut> {
@@ -101,23 +138,39 @@ fn register(app: &AppHandle, text: &str) -> Result<Shortcut> {
     Ok(s)
 }
 
-/// The plugin calls this for every registered key; only the capture hotkey is registered.
-pub fn on_shortcut(app: &AppHandle, _shortcut: &Shortcut, state: ShortcutState) {
+/// The plugin calls this for every registered key: the capture hotkey or the picker's.
+pub fn on_shortcut(app: &AppHandle, shortcut: &Shortcut, state: ShortcutState) {
     if state != ShortcutState::Pressed {
         return;
     }
-    let paused = app.state::<AppState>().hotkey.lock().map(|h| h.paused).unwrap_or(false);
-    if !paused {
+    let st = app.state::<AppState>();
+    let paused = st.hotkey.lock().map(|h| h.paused).unwrap_or(false);
+    if paused {
+        return;
+    }
+    let picker = st.picker_hotkey.lock().ok().and_then(|h| h.registered);
+    if picker.as_ref() == Some(shortcut) {
+        crate::open_picker(app);
+    } else {
         crate::open_capture(app);
     }
 }
 
 /// Changes the hotkey (`None` or empty: off). The new one is registered before the old one goes, so a key that
 /// is taken leaves the working one in place.
-pub fn set_hotkey(app: &AppHandle, text: Option<String>) -> Result<()> {
+pub fn set_hotkey(app: &AppHandle, which: Which, text: Option<String>) -> Result<()> {
     let text = text.map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
     let state = app.state::<AppState>();
-    let old = lock(&state.hotkey)?.registered;
+    let other = match which {
+        Which::Capture => Which::Picker,
+        Which::Picker => Which::Capture,
+    };
+    if let Some(t) = &text {
+        if lock(slot(&state, other))?.registered == Some(parse(t)?) {
+            anyhow::bail!("{t} already opens the other window");
+        }
+    }
+    let old = lock(slot(&state, which))?.registered;
     let new = match &text {
         Some(t) if hotkey_supported() => {
             let s = parse(t)?;
@@ -139,8 +192,8 @@ pub fn set_hotkey(app: &AppHandle, text: Option<String>) -> Result<()> {
         .store
         .lock()
         .map_err(|_| anyhow!("store lock poisoned"))?
-        .set_setting(HOTKEY_SETTING, text.as_deref().unwrap_or(""))?;
-    let mut hk = lock(&state.hotkey)?;
+        .set_setting(which.setting(), text.as_deref().unwrap_or(""))?;
+    let mut hk = lock(slot(&state, which))?;
     hk.chosen = text;
     hk.registered = new;
     hk.error = None;
@@ -151,7 +204,8 @@ fn lock(m: &Mutex<Hotkey>) -> Result<std::sync::MutexGuard<'_, Hotkey>> {
     m.lock().map_err(|_| anyhow!("hotkey lock poisoned"))
 }
 
-/// The tray's "Pause hotkey": a game or a remote desktop session may want the key for a while.
+/// The tray's "Pause hotkeys": a game or a remote desktop session may want the keys for a while. Kept on the
+/// capture slot; it pauses both.
 pub fn toggle_pause(app: &AppHandle) -> bool {
     let state = app.state::<AppState>();
     let Ok(mut hk) = state.hotkey.lock() else { return false };
@@ -174,6 +228,10 @@ pub fn settings(app: &AppHandle) -> DesktopSettings {
         Ok(h) => (h.chosen.clone(), h.registered.is_some() && !h.paused, h.paused, h.error.clone()),
         Err(_) => (None, false, false, Some("hotkey lock poisoned".into())),
     };
+    let (picker, picker_active, picker_error) = match state.picker_hotkey.lock() {
+        Ok(h) => (h.chosen.clone(), h.registered.is_some() && !paused, h.error.clone()),
+        Err(_) => (None, false, Some("hotkey lock poisoned".into())),
+    };
     let (autostart, autostart_error) = match app.autolaunch().is_enabled() {
         Ok(on) => (on, None),
         Err(e) => (false, Some(e.to_string())),
@@ -184,6 +242,10 @@ pub fn settings(app: &AppHandle) -> DesktopSettings {
         hotkey_active: active,
         hotkey_paused: paused,
         hotkey_error: error,
+        picker_hotkey: picker,
+        picker_hotkey_default: DEFAULT_PICKER_HOTKEY,
+        picker_hotkey_active: picker_active,
+        picker_hotkey_error: picker_error,
         hotkey_supported: hotkey_supported(),
         autostart,
         autostart_error,
@@ -201,7 +263,8 @@ mod tests {
 
     #[test]
     fn parses_what_the_settings_write() {
-        for ok in [DEFAULT_HOTKEY, "Ctrl+Shift+N", "Alt+Shift+F2", "Ctrl+Alt+ArrowUp"] {
+        for ok in [DEFAULT_HOTKEY, DEFAULT_PICKER_HOTKEY, "Ctrl+Shift+N", "Alt+Shift+F2", "Ctrl+Alt+ArrowUp"]
+        {
             assert!(parse(ok).is_ok(), "{ok}");
         }
         assert!(parse("N").is_err(), "a bare key");

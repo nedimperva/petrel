@@ -1,5 +1,8 @@
 # Petrel roadmap
 
+> **Superseded on 2026-11-09.** Petrel no longer has actions, drafts or `petrel://` links. The current design is
+> [docs/design/petrel.md](design/petrel.md). This file is kept for history.
+
 A fast, local-first, keyboard-first text capture and actions app for Linux, then Windows. Inspired by the
 workflow of Drafts (Agile Tortoise) — *capture first, act later* — not gated on feature parity with it and not
 using its name, icon or code. Rust + SQLite + Tauri 2 + SolidJS, the same foundation as

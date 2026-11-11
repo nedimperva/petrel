@@ -1,4 +1,4 @@
-//! The tray icon (package 07): New draft, Capture, Show, Quit. With it, closing a window hides it and Petrel
+//! The tray icon: Capture, Quick picker, Show, Quit. With it, closing a window hides it and Petrel
 //! keeps running, so the next capture is instant. Quit asks every window to save and close first.
 
 use std::sync::atomic::Ordering;
@@ -11,13 +11,13 @@ use tauri::{Emitter, Manager};
 use crate::AppState;
 
 pub fn build(app: &tauri::App) -> Result<()> {
-    let new = MenuItem::with_id(app, "new", "New draft", true, None::<&str>)?;
+    let new = MenuItem::with_id(app, "picker", "Quick picker…", true, None::<&str>)?;
     let capture = MenuItem::with_id(app, "capture", "Capture…", true, None::<&str>)?;
     let show = MenuItem::with_id(app, "show", "Show Petrel", true, None::<&str>)?;
-    let pause = CheckMenuItem::with_id(app, "pause", "Pause hotkey", true, false, None::<&str>)?;
+    let pause = CheckMenuItem::with_id(app, "pause", "Pause hotkeys", true, false, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Petrel", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(app, &[&new, &capture, &show, &sep, &quit])?;
+    let menu = Menu::with_items(app, &[&capture, &new, &show, &sep, &quit])?;
     // Only where the app owns the hotkey; on Wayland the compositor does.
     if crate::desktop::hotkey_supported() {
         menu.insert(&pause, 4)?;
@@ -31,7 +31,7 @@ pub fn build(app: &tauri::App) -> Result<()> {
         // Left click shows the window (Windows); the menu is on the right button. Linux trays only have the menu.
         .show_menu_on_left_click(false)
         .on_menu_event(move |app, event| match event.id.as_ref() {
-            "new" => crate::show_new_draft(app),
+            "picker" => crate::open_picker(app),
             "capture" => crate::open_capture(app),
             "show" => crate::show_main(app),
             "pause" => {

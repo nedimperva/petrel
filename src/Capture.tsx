@@ -1,147 +1,90 @@
-// The capture window (`petrel --capture`, ui.md §3): a new draft and nothing else. One quiet line under the text
-// says where it goes and how to leave. `Esc` saves and closes; `Ctrl Enter` runs the default action, then closes.
-// It never shows an empty state; the only dialogs are the ones an action asks for.
+// The capture window (`petrel --capture`, Ctrl Alt Space): text, and one quiet line under it. The file is made in
+// inbox/ on the first keystroke and saved as you type. Tab picks a note or a collection to file it in when done;
+// Ctrl Enter or Esc saves and closes. An empty capture leaves nothing behind.
 
-import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
-import { api, type Action, type Draft, type Folder, type HostRequest, type TagCount } from "./api";
-import { firstAction } from "./actions/ActionList";
-import HostDialog from "./actions/HostDialog";
-import { createAutosave, createCloser, type SaveState } from "./editor/autosave";
+import { createSignal, onCleanup, onMount, Show } from "solid-js";
+import { api, inTauri, type Note } from "./api";
 import { createEditor, type EditorHandle } from "./editor/editor";
-import { applyEditorPrefs, parsePrefs } from "./settings/prefs";
+import Destination, { targetLabel, type Target } from "./inbox/Destination";
+import { fileCapture } from "./inbox/file";
+import { createNoteSaver, type SaveState } from "./notes/saver";
+import { applyPrefs, parsePrefs } from "./settings/prefs";
 
 export default function Capture() {
-  let editorEl!: HTMLDivElement;
-  let tagInput: HTMLInputElement | undefined;
+  let host!: HTMLDivElement;
   let editor: EditorHandle | undefined;
-  const [draft, setDraft] = createSignal<Draft | null>(null);
+  const [note, setNote] = createSignal<Note | null>(null);
   const [save, setSave] = createSignal<SaveState>("saved");
-  const [folder, setFolder] = createSignal<Folder>("inbox");
-  const [tags, setTags] = createSignal<string[]>([]);
-  const [tagging, setTagging] = createSignal(false);
-  const [allTags, setAllTags] = createSignal<TagCount[]>([]);
-  const [actions, setActions] = createSignal<Action[]>([]);
-  const [requests, setRequests] = createSignal<HostRequest[]>([]);
-  const [running, setRunning] = createSignal<string | null>(null);
-  const [note, setNote] = createSignal<string | null>(null);
+  const [target, setTarget] = createSignal<Target | null>(null);
+  const [choosing, setChoosing] = createSignal(false);
+  const [msg, setMsg] = createSignal<string | null>(null);
+  let closing = false;
 
-  // Nothing until the first save: an empty window has nothing to report.
-  const saveLabel = () =>
-    ({ saved: draft() ? "saved" : "", dirty: "…", saving: "saving…", error: "not saved — retrying" })[save()];
-
-  const autosave = createAutosave({ store: () => api, editor: () => editor, draft, setDraft, setSave });
-  const defaultAction = () => firstAction(actions());
-
-  /** Folder and tags are chosen before the draft may exist, so they are applied when it is done. */
-  async function applyChoices() {
-    const d = draft();
-    if (!d) return;
-    const a = await api;
-    if (tags().length) await a.setTags(d.id, tags());
-    if (folder() !== "inbox") await a.moveDrafts([d.id], folder());
-  }
-
-  /** `Esc` and the close button: the window closes only once the text is saved (or, closing twice, in a file). */
-  const finish = createCloser({
-    autosave,
-    text: () => editor?.text() ?? "",
-    rescue: async (text) => (await api).rescueText(text),
-    close: async () => {
-      try {
-        await applyChoices();
-      } catch (e) {
-        // The text is saved; a lost tag is not worth keeping the window open for.
-        console.error(e);
-      }
-      await (await api).closeCapture();
+  const saver = createNoteSaver({
+    // A capture is made by the engine, in inbox/, named by the time.
+    store: async () => {
+      const s = await api();
+      return { createNote: (_f: string, _t: string, body: string) => s.captureNote(body), saveNote: s.saveNote };
     },
-    say: setNote,
+    editor: () => editor,
+    note,
+    setNote,
+    setSave,
+    fresh: () => ({ folder: "inbox", title: "capture" }),
+    conflict: () => {},
   });
 
-  async function runDefault() {
-    const a = defaultAction();
-    // Nothing typed, or nothing to run: Ctrl Enter is just "done".
-    if (!a || (!draft() && !editor?.text())) return finish();
-    setRunning(a.name);
-    // Typing during the run would be lost: the action may rewrite the draft.
-    editor?.setReadOnly(true);
+  async function done() {
+    if (closing) return;
+    closing = true;
+    const s = await api();
+    const text = editor?.text() ?? "";
+    if (!(await saver.flush())) {
+      // The engine will not take it: keep the words in a file rather than in a window that is about to close.
+      const path = await s.rescueText(text).catch(() => null);
+      if (!path) {
+        closing = false;
+        return setMsg(`Not saved: ${saver.error() ?? "unknown error"}`);
+      }
+    }
+    const n = note();
     try {
-      if (!(await autosave.flush())) return setNote(`Not saved: ${autosave.error() ?? "unknown error"}.`);
-      const d = draft()!;
-      await applyChoices();
-      const r = await (await api).runAction(a.uuid, d.id, editor?.selection() ?? null, "shortcut");
-      const o = r.outcome;
-      if (o.status === "failed") return setNote(`${a.name} failed at step ${o.step}: ${o.message}`);
-      if (o.status === "cancelled") return setNote(`${a.name}: cancelled.`);
-      if (o.status === "conflict") return setNote(`${a.name}: not applied, ${o.message}.`);
-      // Saved before the run, and the action may have changed the text since: close without saving again.
-      await (await api).closeCapture();
+      if (n && !text.trim()) await s.trashNote(n.id);
+      else if (n && target()) await fileCapture({ ...n, body: text }, target()!);
     } catch (e) {
-      setNote(`${a.name}: ${String(e).replace(/^Error: /, "")}`);
-    } finally {
-      editor?.setReadOnly(false);
-      setRunning(null);
+      // The text is safe in the inbox; filing can be done from there.
+      console.error(e);
     }
+    await s.closeCapture();
   }
 
-  async function startTagging() {
-    setAllTags(await (await api).tagCounts(null));
-    setTagging(true);
-    queueMicrotask(() => tagInput?.focus());
-  }
-
-  function addTags() {
-    const names = (tagInput?.value ?? "").split(/[,\s]+/).map((t) => t.replace(/^#/, "")).filter(Boolean);
-    setTags((t) => [...new Set([...t, ...names])]);
-    setTagging(false);
-    editor?.view.focus();
-  }
-
-  function onKey(e: KeyboardEvent) {
-    // An action's dialog takes every key; the tag input handles its own Enter and Esc.
-    if (requests().length || e.target === tagInput) return;
-    const ctrl = e.ctrlKey || e.metaKey;
-    if (e.key === "Escape") {
+  const onKey = (e: KeyboardEvent) => {
+    if (choosing()) return;
+    if (e.key === "Escape" || ((e.ctrlKey || e.metaKey) && e.key === "Enter")) {
       e.preventDefault();
       e.stopPropagation();
-      if (running()) api.then((a) => a.cancelRun());
-      else finish();
-    } else if (ctrl && !e.shiftKey && !e.altKey && e.key === "Enter") {
-      // Capture phase: CodeMirror's own Mod-Enter would insert a line first.
+      void done();
+    } else if (e.key === "Tab" && !e.shiftKey && !e.ctrlKey) {
       e.preventDefault();
       e.stopPropagation();
-      if (!running()) runDefault();
+      setChoosing(true);
     }
-  }
+  };
 
   onMount(async () => {
-    editor = createEditor(editorEl, autosave.changed);
+    editor = createEditor(host, () => saver.changed(), { placeholder: "Write it down. File it later." });
     editor.view.focus();
-    const a = await api;
-    await a.showWindow();
-    // The writer's type size and face, as in the main window.
-    a.uiSettings().then((m) => applyEditorPrefs(parsePrefs(m)), (e) => console.error("preferences:", e));
+    const s = await api();
+    await s.showWindow();
+    s.uiSettings().then((m) => applyPrefs(parsePrefs(m)), () => {});
     window.addEventListener("keydown", onKey, true);
-    window.addEventListener("beforeunload", () => void autosave.flush());
-    if ("__TAURI_INTERNALS__" in window) {
+    await s.listen({ quit: () => void done(), openNote: () => {}, focus: () => {}, changed: () => {} });
+    if (inTauri) {
       const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-      // The close button saves like Esc does.
       await getCurrentWebviewWindow().onCloseRequested((e) => {
         e.preventDefault();
-        void finish();
+        void done();
       });
-    }
-    // Tray "Quit": save and close like Esc, so the quit can finish.
-    await a.listenApp({ newDraft: () => {}, quit: () => void finish(), links: () => {} });
-    await a.listenHost({
-      request: (r) => setRequests((q) => [...q, r]),
-      closed: (id) => setRequests((q) => q.filter((x) => x.id !== id)),
-      message: (_kind, text) => setNote(text),
-    });
-    try {
-      setActions(await a.listActions());
-    } catch {
-      // Without actions, Ctrl Enter saves and closes.
     }
   });
   onCleanup(() => {
@@ -149,95 +92,42 @@ export default function Capture() {
     editor?.destroy();
   });
 
-  async function answer(r: HostRequest, value: unknown) {
-    setRequests((q) => q.filter((x) => x.id !== r.id));
-    await (await api).hostReply(r.id, value);
-  }
+  const saveLabel = () => (note() || save() !== "saved" ? { saved: "Saved", dirty: "Editing", saving: "Saving…", error: "Not saved, retrying" }[save()] : "");
 
   return (
-    <div class="capture">
-      <main class="editor" ref={editorEl} />
-      <footer class="capture-foot">
-        <select
-          aria-label="Folder"
-          value={folder()}
-          onChange={(e) => {
-            setFolder(e.currentTarget.value as Folder);
+    // No window frame: the empty parts of the panel drag the window (Tauri reads data-tauri-drag-region).
+    <div class="capture" data-tauri-drag-region>
+      <div class="capture-text-host" ref={host} />
+      <footer class="capture-foot" data-tauri-drag-region>
+        <button class="chip" classList={{ on: !!target() }} onClick={() => setChoosing(true)}>
+          {target()?.kind === "note" ? "Add to " : ""}
+          {targetLabel(target())}
+        </button>
+        <span class="muted" data-tauri-drag-region>
+          <kbd>Tab</kbd> somewhere else
+        </span>
+        <span class="grow" data-tauri-drag-region />
+        <Show when={msg()} fallback={<span class="muted">{saveLabel()}</span>}>
+          <span class="bad">{msg()}</span>
+        </Show>
+        <button class="btn small" onClick={() => void done()}>
+          Done <kbd>Esc</kbd>
+        </button>
+      </footer>
+      <Show when={choosing()}>
+        <Destination
+          onPick={(t) => {
+            setTarget(t);
+            setChoosing(false);
             editor?.view.focus();
           }}
-        >
-          <option value="inbox">Inbox</option>
-          <option value="archive">Archive</option>
-        </select>
-        <For each={tags()}>
-          {(t) => (
-            <button
-              class="chip"
-              title="Remove tag"
-              aria-label={`Remove tag ${t}`}
-              onClick={() => {
-                setTags((x) => x.filter((y) => y !== t));
-                editor?.view.focus();
-              }}
-            >
-              #{t}
-            </button>
-          )}
-        </For>
-        <Show
-          when={tagging()}
-          fallback={
-            <button class="add-tag" onClick={startTagging}>
-              + tag
-            </button>
-          }
-        >
-          <input
-            ref={tagInput}
-            list="capture-tags"
-            aria-label="Tags"
-            placeholder="work, idea"
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === "Escape") e.preventDefault();
-              if (e.key === "Enter") addTags();
-              else if (e.key === "Escape") {
-                setTagging(false);
-                editor?.view.focus();
-              }
-            }}
-            onBlur={() => tagging() && addTags()}
-          />
-          <datalist id="capture-tags">
-            <For each={allTags()}>{(t) => <option value={t.name} />}</For>
-          </datalist>
-        </Show>
-        <span class="grow" />
-        <Show
-          when={running()}
-          fallback={
-            <Show when={note()} fallback={<span class={`save-${save()}`}>{saveLabel()}</span>}>
-              <span class="toast" title={note()!}>
-                {note()}
-              </span>
-            </Show>
-          }
-        >
-          <span>
-            {running()} running · <kbd>Esc</kbd> stop
-          </span>
-        </Show>
-        <Show when={defaultAction()}>
-          {(a) => (
-            <span>
-              <kbd>Ctrl Enter</kbd> {a().name}
-            </span>
-          )}
-        </Show>
-        <span>
-          <kbd>Esc</kbd> done
-        </span>
-      </footer>
-      <Show when={requests()[0]}>{(r) => <HostDialog request={r()} onAnswer={(v) => answer(r(), v)} />}</Show>
+          onClose={() => {
+            setChoosing(false);
+            editor?.view.focus();
+          }}
+        />
+      </Show>
     </div>
   );
 }
+

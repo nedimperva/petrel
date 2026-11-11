@@ -1,20 +1,18 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod ai;
 mod cli;
-mod cli_host;
 mod commands;
 mod desktop;
-mod host;
+mod notes;
 mod tray;
-mod uri;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
-use petrel_core::host::{system, CancelToken};
 use petrel_core::Store;
-use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 pub struct AppState {
     /// Launched as `petrel --capture`, or `--hidden` at login: the main window stays hidden until something asks
@@ -22,36 +20,15 @@ pub struct AppState {
     pub stay_hidden: AtomicBool,
     pub store: Mutex<Store>,
     pub db_path: PathBuf,
-    /// Dialogs an action is waiting on.
-    pub broker: host::Broker,
     pub clipboard: Mutex<Option<arboard::Clipboard>>,
-    /// The running action's token, for `Esc`.
-    pub running: Mutex<Option<CancelToken>>,
     /// The tray icon is up, so closing the last window keeps Petrel running (package 07).
     pub tray: AtomicBool,
     /// Quit was chosen: windows are saving and closing, and the last one to go ends the process.
     pub quitting: AtomicBool,
-    /// The global capture hotkey (package 07).
+    /// The global capture hotkey.
     pub hotkey: Mutex<desktop::Hotkey>,
-    /// `petrel://` links waiting for the main window to take them.
-    pub links: Mutex<Vec<uri::Link>>,
-}
-
-/// The login shell's `PATH` is cached here and refreshed off the start path (actions.md "Shell").
-const PATH_SETTING: &str = "actions.command_path";
-
-fn refresh_command_path(app: &tauri::AppHandle) {
-    let Some(path) = system::login_path() else { return };
-    if system::command_path().as_deref() == Some(path.as_str()) {
-        return;
-    }
-    system::use_path(Some(path.clone()));
-    let state = app.state::<AppState>();
-    if let Ok(store) = state.store.lock() {
-        if let Err(e) = store.set_setting(PATH_SETTING, &path) {
-            log::warn!("caching the login PATH: {e:#}");
-        }
-    };
+    /// The quick picker's hotkey.
+    pub picker_hotkey: Mutex<desktop::Hotkey>,
 }
 
 /// Where the database lives: `PETREL_DB` if set; otherwise `<app data>/petrel.db`, or `<app data>/dev/petrel.db`
@@ -75,8 +52,8 @@ fn wants_capture(args: &[String]) -> bool {
     args.iter().skip(1).any(|a| a == "--capture")
 }
 
-fn wants_new(args: &[String]) -> bool {
-    args.iter().skip(1).any(|a| a == "--new" || a == "-n")
+fn wants_picker(args: &[String]) -> bool {
+    args.iter().skip(1).any(|a| a == "--picker")
 }
 
 /// Shows the main window and brings it to the front.
@@ -86,12 +63,6 @@ pub fn show_main(app: &tauri::AppHandle) {
         let _ = w.show();
         let _ = w.set_focus();
     }
-}
-
-/// Shows the main window on a new draft: the UI saves the open one first.
-pub fn show_new_draft(app: &tauri::AppHandle) {
-    show_main(app);
-    let _ = app.emit_to("main", "petrel-new", ());
 }
 
 /// Handles `--new TEXT`, `--stdin` and `--help` without a window. `None` means start the app.
@@ -111,53 +82,22 @@ fn run_cli() -> Option<i32> {
             return Some(0);
         }
         cli::Command::Write { text, tags } => (text, tags),
-        cli::Command::Run { action, draft, tags } => {
-            return Some(run_from_cli(&action, draft.as_deref(), &tags))
-        }
     };
     let saved = (|| {
         let text = match text {
             Some(t) => t,
             None => cli::read_stdin()?,
         };
-        cli::write_draft(&cli::db_path()?, &text, &tags)
+        cli::write_capture(&cli::db_path()?, &text, &tags)
     })();
     match saved {
-        Ok(uuid) => {
-            println!("{uuid}");
+        Ok(path) => {
+            println!("{path}");
             Some(0)
         }
         Err(e) => {
             eprintln!("petrel: {e:#}");
             Some(1)
-        }
-    }
-}
-
-/// `petrel run`: the draft's uuid on stdout when it worked, the reason on stderr when it did not. Commands get
-/// the terminal's own `PATH`, not the login shell's that the app caches.
-fn run_from_cli(action: &str, draft: Option<&str>, tags: &[String]) -> i32 {
-    let ran = (|| {
-        let text = if draft.is_none() { Some(cli::read_stdin()?) } else { None };
-        let mut host = cli_host::CliHost::new();
-        cli::run_action(&cli::db_path()?, action, draft, text.as_deref(), tags, &mut host)
-    })();
-    match ran {
-        Ok((cli::RunEnd::Ok, uuid)) => {
-            println!("{uuid}");
-            0
-        }
-        Ok((end, message)) => {
-            eprintln!("petrel: {message}");
-            if end == cli::RunEnd::Stopped {
-                cli::RUN_STOPPED
-            } else {
-                cli::RUN_FAILED
-            }
-        }
-        Err(e) => {
-            eprintln!("petrel: {e:#}");
-            cli::RUN_FAILED
         }
     }
 }
@@ -173,8 +113,11 @@ pub fn open_capture(app: &tauri::AppHandle) {
     }
     let built = WebviewWindowBuilder::new(app, "capture", WebviewUrl::App("index.html".into()))
         .title("Petrel capture")
-        .inner_size(560.0, 320.0)
+        .inner_size(640.0, 260.0)
         .min_inner_size(360.0, 160.0)
+        // No frame: the text on a panel, dragged by its empty space (data-tauri-drag-region in the UI).
+        .decorations(false)
+        .center()
         // A quick note over whatever you were doing; it closes itself when you're done.
         .always_on_top(true)
         .visible(false)
@@ -182,6 +125,28 @@ pub fn open_capture(app: &tauri::AppHandle) {
         .build();
     if let Err(e) = built {
         log::error!("cannot open the capture window: {e}");
+    }
+}
+
+/// Opens the quick picker, or focuses it: a small search over the collections that copies and closes.
+pub fn open_picker(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("picker") {
+        let _ = w.show();
+        let _ = w.set_focus();
+        return;
+    }
+    let built = WebviewWindowBuilder::new(app, "picker", WebviewUrl::App("index.html".into()))
+        .title("Petrel picker")
+        .inner_size(620.0, 440.0)
+        .min_inner_size(420.0, 240.0)
+        .always_on_top(true)
+        .decorations(false)
+        .center()
+        .visible(false)
+        .initialization_script("window.__PETREL_PICKER__ = true;")
+        .build();
+    if let Err(e) = built {
+        log::error!("cannot open the picker: {e}");
     }
 }
 
@@ -194,6 +159,21 @@ fn sweep(store: &mut Store) {
         }
         Ok(_) => {}
         Err(e) => log::warn!("sweep failed: {e:#}"),
+    }
+}
+
+/// Drafts were the old capture store. Their text is written out as files once (Inbox drafts to `inbox/`, the
+/// rest to `drafts/`), and the drafts table is left as it was, so nothing is lost if the export is wrong.
+fn export_drafts(store: &mut Store, db: &std::path::Path) {
+    let default = notes::default_root(db);
+    let exported = store.notes_root_or(&default).and_then(|root| {
+        std::fs::create_dir_all(&root)?;
+        store.export_drafts_once()
+    });
+    match exported {
+        Ok(0) => {}
+        Ok(n) => log::info!("exported {n} drafts to the notes folder"),
+        Err(e) => log::warn!("exporting drafts: {e:#}"),
     }
 }
 
@@ -244,16 +224,10 @@ fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            // A second launch focuses the running one, opens capture, or starts a new draft. `--new TEXT` and
-            // `--stdin` never get here: they write the draft and exit before Tauri starts.
-            let links = uri::from_args(&args);
-            if !links.is_empty() {
-                if let Some(state) = app.try_state::<AppState>() {
-                    state.links.lock().map(|mut q| q.extend(links)).ok();
-                }
-                show_main(app);
-                let _ = app.emit_to("main", "petrel-links", ());
-                return;
+            // A second launch focuses the running one or opens capture or the picker. `--new TEXT` and `--stdin`
+            // never get here: they write the capture and exit before Tauri starts.
+            if wants_picker(&args) {
+                return open_picker(app);
             }
             if wants_capture(&args) {
                 return open_capture(app);
@@ -261,9 +235,6 @@ fn main() {
             // Start at login while Petrel already runs: it is already where it should be.
             if desktop::wants_hidden(&args) {
                 return;
-            }
-            if wants_new(&args) {
-                return show_new_draft(app);
             }
             show_main(app);
         }))
@@ -273,10 +244,8 @@ fn main() {
                 .build(),
         )
         .plugin(tauri_plugin_autostart::Builder::new().arg(desktop::HIDDEN_ARG).build())
-        // Registers `petrel://` with the OS (the bundles declare it too); links arrive as arguments.
-        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
-        // The folder picker in the action editor.
+        // The notes folder picker in Settings.
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             init_logging(app);
@@ -286,35 +255,21 @@ fn main() {
                 e
             })?;
             sweep(&mut store);
-            match store.seed_default_actions() {
-                Ok(0) => {}
-                Ok(n) => log::info!("added {n} default actions"),
-                Err(e) => log::warn!("default actions: {e:#}"),
-            }
-            system::use_path(store.setting(PATH_SETTING).ok().flatten());
+            export_drafts(&mut store, &path);
             log::info!("Petrel {} · {}", env!("CARGO_PKG_VERSION"), path.display());
             let args: Vec<String> = std::env::args().collect();
             let capture = wants_capture(&args);
+            let picker = wants_picker(&args);
             app.manage(AppState {
-                stay_hidden: AtomicBool::new(capture),
+                stay_hidden: AtomicBool::new(capture || picker),
                 store: Mutex::new(store),
                 db_path: path,
-                broker: host::Broker::default(),
                 clipboard: Mutex::new(None),
-                running: Mutex::new(None),
                 tray: AtomicBool::new(false),
                 quitting: AtomicBool::new(false),
                 hotkey: Mutex::new(desktop::Hotkey::default()),
-                links: Mutex::new(uri::from_args(&args)),
+                picker_hotkey: Mutex::new(desktop::Hotkey::default()),
             });
-            // A debug build registers itself so links can be tried from `tauri dev`; installers register a release.
-            #[cfg(all(debug_assertions, any(windows, target_os = "linux")))]
-            {
-                use tauri_plugin_deep_link::DeepLinkExt;
-                if let Err(e) = app.deep_link().register_all() {
-                    log::warn!("registering petrel:// links: {e}");
-                }
-            }
             // Without a tray (no StatusNotifier host on Linux, say), closing the window quits, as before.
             // The Linux tray loads libayatana-appindicator at run time and panics if it is missing.
             match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| tray::build(app))) {
@@ -324,16 +279,20 @@ fn main() {
                     "no tray icon (is libayatana-appindicator installed?); closing the window will quit"
                 ),
             }
-            if desktop::start_hidden(app.handle(), &args) && uri::from_args(&args).is_empty() {
+            if desktop::start_hidden(app.handle(), &args) {
                 app.state::<AppState>().stay_hidden.store(true, Ordering::SeqCst);
                 log::info!("started hidden in the tray");
             }
             desktop::init(app.handle());
-            // Petrel can stay open for weeks; the Trash and version policies still apply, and the login PATH
-            // may change.
+            // Petrel's own title bar is for Windows, as in Tern. On Linux the window manager frames the main
+            // window (Hyprland draws no frame at all), and the UI leaves the window buttons out.
+            #[cfg(target_os = "linux")]
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.set_decorations(true);
+            }
+            // Petrel can stay open for weeks; the version policies still apply.
             let handle = app.handle().clone();
             std::thread::spawn(move || loop {
-                refresh_command_path(&handle);
                 std::thread::sleep(SWEEP_EVERY);
                 let state = handle.state::<AppState>();
                 let Ok(mut store) = state.store.lock() else { return };
@@ -342,49 +301,61 @@ fn main() {
             if capture {
                 open_capture(app.handle());
             }
+            if picker {
+                open_picker(app.handle());
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::app_info,
-            commands::new_draft,
-            commands::open_draft,
-            commands::peek_draft,
-            commands::save_draft,
-            commands::save_cursor,
             commands::rescue_text,
             commands::close_window,
-            commands::list_drafts,
-            commands::search_drafts,
-            commands::set_tags,
-            commands::tag_counts,
-            commands::rename_tag,
-            commands::merge_tags,
-            commands::move_drafts,
-            commands::flag_drafts,
-            commands::add_tags,
-            commands::undo,
-            commands::empty_trash,
-            commands::sweep,
             commands::show_window,
             commands::close_capture,
             commands::open_capture_window,
+            commands::open_picker_window,
+            commands::close_picker,
+            commands::show_note_in_main,
+            commands::copy_text,
             commands::desktop_settings,
             commands::ui_settings,
-            commands::list_versions,
-            commands::take_links,
-            commands::find_draft,
-            commands::version_text,
-            commands::restore_version,
             commands::set_ui_setting,
             commands::set_hotkey,
             commands::set_autostart,
-            commands::list_actions,
-            commands::save_action,
-            commands::delete_action,
-            commands::action_log,
-            commands::run_action,
-            commands::cancel_run,
-            commands::host_reply,
+            notes::notes_info,
+            notes::set_notes_root,
+            notes::scan_notes,
+            notes::list_notes,
+            notes::find_notes,
+            notes::search_notes,
+            notes::note_folders,
+            notes::open_note,
+            notes::peek_note,
+            notes::create_note,
+            notes::save_note,
+            notes::rename_note,
+            notes::pin_note,
+            notes::set_note_tags,
+            notes::trash_note,
+            notes::capture_note,
+            notes::move_note,
+            notes::merge_note,
+            notes::undo_note,
+            notes::note_versions,
+            notes::note_version_text,
+            notes::restore_note_version,
+            notes::record_copy,
+            notes::copy_counts,
+            notes::link_targets,
+            notes::resolve_link,
+            notes::backlinks,
+            notes::link_mention,
+            ai::ai_status,
+            ai::set_ai_key,
+            ai::ai_write,
+            ai::ai_ask,
+            ai::ai_suggest_home,
+            ai::ai_related,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Petrel")

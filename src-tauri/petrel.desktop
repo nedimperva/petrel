@@ -1,17 +1,20 @@
 [Desktop Entry]
 Type=Application
 Name={{name}}
-GenericName=Text capture
-Comment=Capture text first, act on it later
-Exec={{exec}} %u
+GenericName=Notes
+Comment=Quick capture and notes, as Markdown files
+Exec={{exec}}
 StartupWMClass={{exec}}
 Icon={{icon}}
 Terminal=false
 Categories=Utility;TextEditor;Office;
-Keywords=notes;drafts;capture;text;markdown;actions;
-MimeType=x-scheme-handler/petrel;
-Actions=new;
+Keywords=notes;capture;text;markdown;snippets;prompts;
+Actions=capture;picker;
 
-[Desktop Action new]
-Name=New draft
-Exec={{exec}} --new
+[Desktop Action capture]
+Name=Capture
+Exec={{exec}} --capture
+
+[Desktop Action picker]
+Name=Quick picker
+Exec={{exec}} --picker

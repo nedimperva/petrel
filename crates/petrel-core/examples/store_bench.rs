@@ -5,8 +5,6 @@
 
 use std::time::{Duration, Instant};
 
-use petrel_core::action::{self, Action, AfterSuccess, Source};
-use petrel_core::host::{CancelToken, RecordingHost};
 use petrel_core::{Folder, ListQuery, Sort, Store};
 
 struct Row<'a> {
@@ -171,31 +169,6 @@ fn main() -> anyhow::Result<()> {
         store.undo(&tok.token).unwrap();
     });
     rows.push(Row { what: "archive 50 + undo", target_ms: 5.0, p50, p95 });
-
-    // PLAN: an action of built-in steps (no shell, no network) < 20 ms, store time included: the version taken
-    // first, the steps, the commit and the log row.
-    store.seed_default_actions()?;
-    let filing = Action {
-        name: "File it".into(),
-        steps: serde_json::from_value(serde_json::json!([
-            { "type": "insertText", "text": "Filed [[date]]\n", "position": "start" },
-            { "type": "setTags", "add": ["filed"] },
-            { "type": "clipboard", "text": "[[title]]" }
-        ]))?,
-        after_success: AfterSuccess::Archive,
-        ..Action::default()
-    };
-    store.save_action(&filing, true)?;
-    for (label, key) in [("action: Copy", "Copy to clipboard"), ("action: 3 steps + archive", "File it")] {
-        let (p50, p95) = measure(100, || {
-            let mut host = RecordingHost::default();
-            let id = pick(&mut rng);
-            let r = action::run(&mut store, key, id, None, Source::Ui, &mut host, &CancelToken::default())
-                .unwrap();
-            assert_eq!(r.outcome, action::RunOutcome::Ok);
-        });
-        rows.push(Row { what: label, target_ms: 20.0, p50, p95 });
-    }
 
     println!(
         "{:<28} {:>9} {:>9} {:>9}  {}",

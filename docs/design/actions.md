@@ -1,5 +1,8 @@
 # Actions: engine, templates, scripting
 
+> **Superseded on 2026-11-09.** Petrel no longer has actions, drafts or `petrel://` links. The current design is
+> [docs/design/petrel.md](petrel.md). This file is kept for history.
+
 The contract for package 03 (engine, built-in steps) and package 04 (scripting). Read before touching
 `crates/petrel-core/src/{template,action,script}.rs`. Changes to this file are decisions and go through the owner.
 

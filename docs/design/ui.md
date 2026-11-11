@@ -1,5 +1,8 @@
 # Petrel UI spec
 
+> **Superseded on 2026-11-09.** Petrel no longer has actions, drafts or `petrel://` links. The current design is
+> [docs/design/petrel.md](petrel.md). This file is kept for history.
+
 The single source of truth for how Petrel looks and behaves on screen. Package files say *when* a screen is
 built; this file says *what it must look like*. If a package needs something not covered here, add it here
 first, then build it. Delivery scope comes from `docs/PLAN.md`.

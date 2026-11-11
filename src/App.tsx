@@ -1,850 +1,326 @@
-import { createSignal, For, lazy, onCleanup, onMount, Show } from "solid-js";
-import { api, type Link, type Action, type AppInfo, type Draft, type Folder, type HostRequest, type RunLogEntry, type RunReport, type TagCount, type UndoToken } from "./api";
-import ActionList, { firstAction, type ActionListHandle } from "./actions/ActionList";
-import type { LogHandle } from "./actions/ActionLog";
-import HostDialog from "./actions/HostDialog";
-import { fromEvent, isChord, same } from "./actions/shortcut";
-import { countWords, createAutosave, createCloser, type SaveState } from "./editor/autosave";
-import { createEditor, type EditorHandle } from "./editor/editor";
-import { openSearchPanel } from "@codemirror/search";
-import { applyEditorPrefs, awayThreshold, parsePrefs, prefs, setPrefs } from "./settings/prefs";
-import DraftList, { type ListHandle, type Tab } from "./list/DraftList";
-// Not lazy: they take keys the moment they open, and keys typed while a chunk loads would be lost (5 kB gz).
+// The main window is the page you write on. It opens on an empty page (or the note you left less than ten minutes
+// ago); Ctrl L swaps the page for the library of cards and Esc brings it back. Ctrl K finds, runs or asks, Ctrl N
+// is a new page, Ctrl H history, Ctrl , settings. The title bar is Petrel's own (TitleBar.tsx).
+
+import { createResource, createSignal, lazy, onCleanup, onMount, Show, Suspense } from "solid-js";
+import { api, errText, inTauri, type AiStatus } from "./api";
+import { plainText } from "./copy";
+import TitleBar from "./TitleBar";
+import { libraryTabs, loadLibrary } from "./library/Library";
+import NotePage, { type NotePageHandle } from "./note/NotePage";
 import CommandBar, { type Command } from "./palette/CommandBar";
-import Versions, { type VersionsHandle } from "./versions/Versions";
+import { applyPrefs, parsePrefs, prefs, setPrefs } from "./settings/prefs";
+import { folderName, say, ToastView, typing, undoLast } from "./ui";
+import Destination, { type Target } from "./inbox/Destination";
 
-// Not on the launch path: loaded the first time they open.
-const ActionEditor = lazy(() => import("./actions/ActionEditor"));
-const ActionLog = lazy(() => import("./actions/ActionLog"));
+const Library = lazy(() => import("./library/Library"));
 const Settings = lazy(() => import("./settings/Settings"));
+const Versions = lazy(() => import("./versions/Versions"));
 
+type View = { kind: "library"; tab: string } | { kind: "note"; id: number | null; folder: string };
 
-/** How long a toast stays in the strip. */
-const TOAST_MS = 5000;
-
-/** A run shows as running only after this long; most runs are done by then. The editor stops taking keys at once. */
-const RUNNING_AFTER_MS = 150;
-
-const ACTIONS_KEY = "petrel.actions.visible";
-
-// Hidden until asked for: the launch screen is the text and nothing else.
-function actionsVisible(): boolean {
-  try {
-    return localStorage.getItem(ACTIONS_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-interface Undoable {
-  label: string;
-  token: string;
-  /** The draft the editor showed when it was archived or trashed from the editor, reopened on undo. */
-  reopen?: number;
-}
+/** What the empty page files into: like the capture window, it goes to the inbox until you move it. */
+const NEW_FOLDER = "inbox";
+/** Coming back within this long opens the note you left instead of an empty page. */
+const RESUME_MS = 10 * 60 * 1000;
 
 export default function App() {
-  let editorEl!: HTMLDivElement;
-  let tagInput: HTMLInputElement | undefined;
-  let editor: EditorHandle | undefined;
-  let list: ListHandle | undefined;
-  let actionList: ActionListHandle | undefined;
-  let actionLog: LogHandle | undefined;
-  const [draft, setDraft] = createSignal<Draft | null>(null);
-  const [save, setSave] = createSignal<SaveState>("saved");
-  const [words, setWords] = createSignal(0);
-  const [info, setInfo] = createSignal<AppInfo | null>(null);
-  const [listOpen, setListOpen] = createSignal(false);
-  /** Where the list opens next (the command bar picks a tab or a tag). */
-  const [listStart, setListStart] = createSignal<{ tab?: Tab; tag?: string; query?: string } | undefined>(undefined);
-  const [paletteOpen, setPaletteOpen] = createSignal(false);
-  const [settingsOpen, setSettingsOpen] = createSignal(false);
-  /** The history panel (`Ctrl H`) for the open draft. */
-  const [historyOpen, setHistoryOpen] = createSignal(false);
-  let history: VersionsHandle | undefined;
-  /** Focus mode (`Ctrl Shift D`): the text alone, the paragraph being written in full colour. */
-  const [focusMode, setFocusMode] = createSignal(false);
-  const [tagging, setTagging] = createSignal(false);
-  const [allTags, setAllTags] = createSignal<TagCount[]>([]);
-  const [toast, setToast] = createSignal<{ text: string; undo: boolean; log?: boolean } | null>(null);
-  const [actions, setActions] = createSignal<Action[]>([]);
-  const [actionsOpen, setActionsOpen] = createSignal(actionsVisible());
-  /** The action editor is open; `action` null is a new one. */
-  const [editing, setEditing] = createSignal<{ action: Action | null } | null>(null);
-  const [logOpen, setLogOpen] = createSignal(false);
-  const [requests, setRequests] = createSignal<HostRequest[]>([]);
-  /** The action that is running, and whether it has run long enough to show. */
-  const [running, setRunning] = createSignal<{ name: string; shown: boolean } | null>(null);
-  let undoStack: Undoable[] = [];
-  let toastTimer: number | undefined;
-  let wordsTimer: number | undefined;
-  let awaySince: number | null = null;
-  let gPending = false;
+  const [view, setView] = createSignal<View>({ kind: "note", id: null, folder: NEW_FOLDER });
+  const [title, setTitle] = createSignal("");
+  const [tab, setTab] = createSignal("all");
+  const [bar, setBar] = createSignal<"all" | "notes" | null>(null);
+  const [settings, setSettings] = createSignal<false | "all" | "ai">(false);
+  const [history, setHistory] = createSignal(false);
+  const [moving, setMoving] = createSignal(false);
+  const [ai, setAi] = createSignal<AiStatus>({ ready: false, model: "", error: null });
+  const [root, setRoot] = createSignal("");
+  const [rev, setRev] = createSignal(0);
+  const [lib] = createResource(rev, loadLibrary);
+  let page: NotePageHandle | undefined;
+  const back: View[] = [];
 
-  const autosave = createAutosave({ store: () => api, editor: () => editor, draft, setDraft, setSave });
-  const close = createCloser({
-    autosave,
-    text: () => editor?.text() ?? "",
-    rescue: async (text) => (await api).rescueText(text),
-    close: async () => (await api).closeWindow(),
-    say,
-  });
+  const go = async (v: View, remember = true) => {
+    if (view().kind === "note") await page?.flush();
+    if (remember) {
+      back.push(view());
+      if (back.length > 30) back.shift();
+    }
+    setView(v);
+    if (v.kind !== "note") page = undefined;
+    setRev(rev() + 1);
+  };
+  const openNote = (id: number) => go({ kind: "note", id, folder: "" });
+  const newNote = (folder?: string) => go({ kind: "note", id: null, folder: folder ?? NEW_FOLDER });
+  const library = (t = tab()) => (setTab(t), go({ kind: "library", tab: t }));
+  /** Back to the page you were writing on, or an empty one. */
+  const writing = () => {
+    for (let i = back.length - 1; i >= 0; i--) if (back[i].kind === "note") return go(back.splice(i)[0], false);
+    return newNote();
+  };
+  const remember = async () => {
+    const n = current();
+    await (await api()).setUiSetting("last.note", n ? `${n.id}:${Date.now()}` : "").catch(() => {});
+  };
+  const current = () => (view().kind === "note" ? (page?.note() ?? null) : null);
+  const onNote = () => view().kind === "note" && !!current();
 
-  function countLater() {
-    window.clearTimeout(wordsTimer);
-    wordsTimer = window.setTimeout(() => setWords(editor ? countWords(editor.text()) : 0), 300);
+  async function copy(how: "plain" | "markdown" | "html") {
+    const n = current();
+    if (!n || !page) return;
+    const text = page.selectedText();
+    const whole = text === page.text();
+    const md = how !== "plain" && whole ? `# ${n.title}\n\n${text}` : text;
+    try {
+      await (await api()).copyText(how === "plain" ? plainText(text) : md, how === "html");
+      say(how === "plain" ? "Copied as text" : how === "markdown" ? "Copied as Markdown" : "Copied with formatting");
+    } catch (e) {
+      say(errText(e), { error: true });
+    }
   }
 
-  function onChange() {
-    autosave.changed();
-    countLater();
-  }
-
-  /** Saves what is typed. False, said in the strip, when it can't be: the text stays in the editor (saving keeps
-   * retrying), so nothing may replace it. */
-  async function saved(): Promise<boolean> {
-    if (await autosave.flush()) return true;
-    say(`Not saved: ${autosave.error() ?? "unknown error"}. The text stays here until it is.`);
-    return false;
-  }
-
-  /** Shows a draft without saving the editor's text; callers have saved it, or must not (after an action). */
-  function show(d: Draft | null) {
-    autosave.load(d);
-    setListOpen(false);
-    setWords(d ? countWords(d.content) : 0);
-  }
-
-  /** Saves, then shows what `next` loads. Nothing is awaited between the last save and the switch, so keys typed
-   * while the next draft loads are saved first rather than dropped. */
-  async function leaveFor(next: () => Promise<Draft | null>) {
-    for (let round = 0; round < 3; round++) {
-      if (!(await saved())) return;
-      let d: Draft | null;
-      try {
-        d = await next();
-      } catch (e) {
-        return say(`Cannot open: ${e}`);
+  async function moveTo(t: Target) {
+    setMoving(false);
+    const n = current();
+    if (!n) return;
+    await page?.flush();
+    const s = await api();
+    try {
+      if (t.kind === "note") {
+        const ch = await s.mergeNote(n.id, t.id);
+        say(`Added to ${t.title}`, { undo: () => s.undo(ch.token.token).then(() => openNote(n.id)) });
+        void openNote(ch.note.id);
+      } else {
+        const ch = await s.moveNote(n.id, t.folder, n.title);
+        say(`Moved to ${folderName(t.folder)}`, { undo: () => s.undo(ch.token.token).then(() => page?.reload()) });
+        await page?.reload();
       }
-      if (!autosave.dirty()) return show(d);
-    }
-  }
-
-  const newDraft = () => leaveFor(async () => null);
-
-  async function openDraft(id: number) {
-    await leaveFor(async () => (await api).openDraft(id));
-  }
-
-  function say(text: string, undo = false, log = false) {
-    window.clearTimeout(toastTimer);
-    setToast({ text, undo, log });
-    toastTimer = window.setTimeout(() => setToast(null), TOAST_MS);
-  }
-
-  function remember(u: Undoable, count: number) {
-    if (count === 0) {
-      say(`${u.label}: nothing changed.`);
-      return;
-    }
-    undoStack.push(u);
-    if (undoStack.length > 20) undoStack.shift();
-    say(u.label, true);
-  }
-
-  async function undo() {
-    const u = undoStack.pop();
-    if (!u) {
-      say("Nothing to undo.");
-      return;
-    }
-    try {
-      const n = await (await api).undo(u.token);
-      say(`Undone: ${u.label.toLowerCase()} (${n}).`);
-      if (u.reopen && !draft() && editor?.text() === "") await openDraft(u.reopen);
-      else if (draft()) refreshDraft();
-      list?.reload();
     } catch (e) {
-      say(String(e).replace(/^Error: /, ""));
+      say(errText(e), { error: true });
     }
   }
 
-  async function refreshDraft() {
-    const d = draft();
-    if (d) setDraft({ ...(await (await api).openDraft(d.id)), content: d.content });
-  }
-
-  /** Archive or trash the draft in the editor, then start a new one (Drafts' habit: the next thing is new). */
-  async function moveCurrent(folder: "archive" | "trash") {
-    if (!(await saved())) return;
-    const d = draft();
-    if (!d) return;
-    const label = folder === "archive" ? "Archived" : "Trashed";
+  async function trash() {
+    const n = current();
+    if (!n) return;
+    await page?.flush();
+    const s = await api();
     try {
-      const t: UndoToken = await (await api).moveDrafts([d.id], folder);
-      await newDraft();
-      remember({ label: `${label} “${d.title || "untitled"}”`, token: t.token, reopen: d.id }, t.count);
+      const t = await s.trashNote(n.id);
+      say(`Deleted “${n.title}”`, { undo: () => s.undo(t.token).then(() => openNote(n.id)) });
+      void newNote();
     } catch (e) {
-      say(`${label} failed: ${e}`);
+      say(errText(e), { error: true });
     }
   }
 
-  async function flagCurrent() {
-    if (!(await saved())) return;
-    const d = draft();
-    if (!d) return;
-    const flagged = !d.flagged;
-    const t = await (await api).flagDrafts([d.id], flagged);
-    setDraft({ ...d, flagged });
-    remember({ label: flagged ? "Flagged" : "Unflagged", token: t.token }, t.count);
+  async function pin() {
+    const n = current();
+    if (!n) return;
+    await (await api()).pinNote(n.id, !n.pinned);
+    await page?.reload();
+    say(n.pinned ? "Unpinned" : "Pinned to the front of its collection");
   }
 
-  async function startTagging() {
-    if (!(await saved())) return;
-    if (!draft()) {
-      say("Type something first: an empty draft has nothing to tag.");
-      return;
-    }
-    setAllTags(await (await api).tagCounts(null));
-    setTagging(true);
-    queueMicrotask(() => {
-      if (!tagInput) return;
-      tagInput.value = draft()!.tags.join(", ");
-      tagInput.focus();
-      tagInput.select();
-    });
-  }
-
-  async function saveTags() {
-    const d = draft();
-    const names = (tagInput?.value ?? "").split(/[,\s]+/).filter(Boolean);
-    setTagging(false);
-    editor?.view.focus();
-    if (!d) return;
-    try {
-      const tags = await (await api).setTags(d.id, names);
-      setDraft({ ...d, tags });
-      say(tags.length ? `Tags: ${tags.join(", ")}` : "Tags cleared.");
-    } catch (e) {
-      say(`Tagging failed: ${e}`);
-    }
-  }
-
-  function toggleList() {
-    if (listOpen()) {
-      setListOpen(false);
-      editor?.view.focus();
-    } else {
-      openList();
-    }
-  }
-
-  /** Opens the list, fresh, on `start` (Inbox when not given). */
-  function openList(start?: { tab?: Tab; tag?: string; query?: string }) {
-    void autosave.flush();
-    setLogOpen(false);
-    // The list reads where to start when it mounts, so an open one is remounted.
-    setListOpen(false);
-    setListStart(start);
-    setListOpen(true);
-  }
-
-  // ---- command bar (package 05) ----------------------------------------------------------------------------
-
-  const TAB_NAMES: [Tab, string][] = [
-    ["inbox", "Inbox"],
-    ["flagged", "Flagged"],
-    ["archive", "Archive"],
-    ["trash", "Trash"],
-    ["all", "All drafts"],
+  const commands: Command[] = [
+    { id: "new", label: "New note", keys: "Ctrl N", run: () => void newNote() },
+    { id: "capture", label: "Quick capture window", keys: "Ctrl Alt Space", run: () => void api().then((s) => s.openCapture()) },
+    { id: "picker", label: "Quick picker: copy a prompt or snippet", keys: "Ctrl Alt V", run: () => void api().then((s) => s.openPicker()) },
+    { id: "library", label: "Library", keys: "Ctrl L", run: () => void library("all") },
+    { id: "inbox", label: "Inbox", run: () => void library("inbox") },
+    { id: "copy", label: "Copy", when: onNote, run: () => void copy("plain") },
+    { id: "copy-md", label: "Copy as Markdown", keys: "Ctrl Shift C", when: onNote, run: () => void copy("markdown") },
+    { id: "copy-html", label: "Copy formatted (for mail and docs)", when: onNote, run: () => void copy("html") },
+    { id: "tidy", label: "AI: Tidy this note", when: onNote, run: () => page?.ai("tidy") },
+    { id: "continue", label: "AI: Continue writing", when: onNote, run: () => page?.ai("continue") },
+    { id: "summarize", label: "AI: Summarize this note", when: onNote, run: () => page?.ai("summarize") },
+    { id: "title", label: "AI: Suggest a title", when: onNote, run: () => page?.ai("title") },
+    { id: "related", label: "AI: Find related notes", when: onNote, run: () => page?.findRelated() },
+    { id: "move", label: "Move to a note or collection…", when: onNote, run: () => setMoving(true) },
+    { id: "pin", label: "Pin or unpin this note", when: onNote, run: () => void pin() },
+    { id: "history", label: "History", keys: "Ctrl H", when: onNote, run: () => setHistory(true) },
+    { id: "delete", label: "Delete this note", when: onNote, run: () => void trash() },
+    { id: "rescan", label: "Look for changes in the folder", run: () => void rescan(true) },
+    { id: "settings", label: "Settings", keys: "Ctrl ,", run: () => setSettings("all") },
   ];
 
-  /** Every command the bar offers, with the key that does the same, so the bar teaches the keys. */
-  function commands(): Command[] {
-    const inTauri = "__TAURI_INTERNALS__" in window;
-    const list: Command[] = [
-      { id: "new", name: "New draft", keys: "Ctrl N", run: newDraft },
-      { id: "drafts", name: "Show drafts", keys: "Ctrl L", run: () => openList() },
-      ...TAB_NAMES.map(([tab, name]): Command => ({ id: `tab:${tab}`, name: `Go to ${name}`, run: () => openList({ tab }) })),
-      { id: "find", name: "Find in this draft", keys: "Ctrl F", run: () => editor && openSearchPanel(editor.view) },
-      { id: "archive", name: "Archive this draft", keys: "Ctrl E", run: () => moveCurrent("archive") },
-      { id: "trash", name: "Move this draft to Trash", keys: "Ctrl #", run: () => moveCurrent("trash") },
-      { id: "flag", name: "Flag or unflag this draft", keys: "Ctrl Shift F", run: flagCurrent },
-      { id: "tags", name: "Tag this draft", keys: "Ctrl T", run: startTagging },
-      { id: "focus", name: "Focus mode", keys: "Ctrl Shift D", run: toggleFocus },
-      { id: "history", name: "History of this draft: see and restore older text", keys: "Ctrl H", run: openHistory },
-      { id: "undo", name: "Undo the last move, flag or tag", run: undo },
-      { id: "actions", name: "Show or hide actions", keys: "Ctrl 2", run: toggleActions },
-      { id: "new-action", name: "New action", keys: "Ctrl Shift A", run: () => editAction(null) },
-      { id: "log", name: "Action log", run: openLog },
-      { id: "settings", name: "Settings: capture hotkey, start at login", keys: "Ctrl ,", run: () => setSettingsOpen(true) },
-    ];
-    if (inTauri) {
-      list.splice(2, 0, { id: "capture", name: "Open the capture window", run: async () => (await api).openCapture() });
-    }
-    return list;
-  }
-
-  function closePalette() {
-    setPaletteOpen(false);
-    editor?.view.focus();
-  }
-
-  // ---- petrel:// links (package 07) ------------------------------------------------------------------------
-
-  /** Runs the links that arrived. One at a time, in order: each may switch the open draft. */
-  async function takeLinks() {
-    let links: Link[];
+  /** Drive (or another app) may have changed the folder while Petrel was in the background. */
+  let lastScan = 0;
+  async function rescan(loud = false) {
+    if (!loud && Date.now() - lastScan < 5000) return;
+    lastScan = Date.now();
     try {
-      links = await (await api).takeLinks();
+      await page?.flush();
+      const r = await (await api()).scanNotes();
+      const n = r.added + r.changed + r.removed;
+      // The capture window and the picker write through the same index, so a zero here can still mean new
+      // captures: always redraw the lists.
+      if (view().kind !== "note") setRev(rev() + 1);
+      else if (r.changed) await page?.reload();
+      if (loud) say(n ? `${r.added} new, ${r.changed} changed, ${r.removed} gone` : "Up to date");
     } catch (e) {
-      return say(`Links cannot be read: ${e}`);
-    }
-    for (const l of links) {
-      try {
-        await followLink(l);
-      } catch (e) {
-        say(`Link failed: ${String(e).replace(/^Error: /, "")}`);
-      }
+      if (loud) say(errText(e), { error: true });
     }
   }
 
-  async function followLink(l: Link) {
-    const a = await api;
-    if (l.kind === "unknown") return say(`Link not followed: ${l.why}.`);
-    if (l.kind === "search") return openList({ tab: "all", query: l.query });
-    if (l.kind === "create") {
-      if (!l.text.trim()) return newDraft();
-      if (!(await saved())) return;
-      const d = await a.newDraft(l.text);
-      if (l.tags.length) await a.setTags(d.id, l.tags);
-      await openDraft(d.id);
-      return say("New draft from a link.");
-    }
-    const id = await a.findDraft(l.uuid);
-    if (id === null) return say("That link's draft is not in this Petrel.");
-    if (l.kind === "open") return openDraft(id);
-    // The open draft is changed in the editor, so the next autosave keeps the addition instead of overwriting it.
-    if (id === draft()?.id && editor) {
-      editor.insert(l.text, l.prepend);
-      return say(l.prepend ? "Added at the top from a link." : "Added at the end from a link.");
-    }
-    const d = await a.peekDraft(id);
-    const glue = (x: string, y: string) => (!x ? y : !y ? x : x.endsWith("\n") ? x + y : `${x}\n${y}`);
-    const content = l.prepend ? glue(l.text, d.content) : glue(d.content, l.text);
-    if (!(await a.saveDraft(id, content, d.cursor))) return say("That link's draft is in the Trash or gone.");
-    list?.reload();
-    say(`Added to “${d.title || "untitled"}” from a link.`);
-  }
+  const overlay = () => !!(bar() || settings() || history() || moving());
 
-  /** Panels that take keys: until one has loaded and focused itself, keys must not land in the text. */
-  function leaveEditor() {
-    editor?.view.contentDOM.blur();
-  }
-
-  function openPalette() {
-    leaveEditor();
-    setTagging(false);
-    setPaletteOpen(true);
-    // The actions may have changed in the editor since they were loaded; the bar shows what is there now.
-    void loadActions();
-  }
-
-  // ---- actions ------------------------------------------------------------------------------------------------
-
-  async function loadActions() {
-    try {
-      setActions(await (await api).listActions());
-    } catch (e) {
-      say(`Actions cannot be read: ${e}`);
-    }
-  }
-
-  /** `Ctrl 2`: show and focus the column; from inside it, hide it. */
-  function toggleActions() {
-    const inside = !!document.activeElement?.closest("aside.actions");
-    const show = !actionsOpen() || !inside;
-    setActionsOpen(show);
-    try {
-      localStorage.setItem(ACTIONS_KEY, show ? "1" : "0");
-    } catch {
-      // Remembering is a convenience.
-    }
-    if (show) queueMicrotask(() => actionList?.focus());
-    else editor?.view.focus();
-  }
-
-  function openLog() {
-    setListOpen(false);
-    setLogOpen(true);
-  }
-
-  function closeLog() {
-    setLogOpen(false);
-    editor?.view.focus();
-  }
-
-  function editAction(a: Action | null) {
-    setListOpen(false);
-    setLogOpen(false);
-    setEditing({ action: a });
-  }
-
-  function closeEditor() {
-    setEditing(null);
-    editor?.view.focus();
-  }
-
-  async function runAction(a: Action, source: "ui" | "shortcut", draftId?: number) {
-    if (running()) {
-      say(`${running()!.name} is still running. Esc stops it.`);
-      return;
-    }
-    const onEditor = draftId === undefined || draftId === draft()?.id;
-    const folder = draft()?.folder ?? "inbox";
-    setRunning({ name: a.name, shown: false });
-    // From here until the result is shown, a key typed would be overwritten by the result or would overwrite it.
-    if (onEditor) editor?.setReadOnly(true);
-    const slow = window.setTimeout(() => setRunning((r) => r && { ...r, shown: true }), RUNNING_AFTER_MS);
-    try {
-      if (!(await saved())) return;
-      const id = draftId ?? draft()?.id;
-      if (id === undefined) return say("Type something first: an action needs a draft.");
-      const report = await (await api).runAction(a.uuid, id, onEditor && editor ? editor.selection() : null, source);
-      await afterRun(report, onEditor, folder);
-    } catch (e) {
-      say(`${a.name}: ${String(e).replace(/^Error: /, "")}`);
-    } finally {
-      window.clearTimeout(slow);
-      editor?.setReadOnly(false);
-      setRunning(null);
-      if (logOpen()) actionLog?.reload();
-    }
-  }
-
-  async function afterRun(r: RunReport, onEditor: boolean, folder: Folder) {
-    const o = r.outcome;
-    if (o.status === "failed") {
-      say(`${r.action}: failed at step ${o.step}: ${o.message}`, false, true);
-      return;
-    }
-    if (o.status === "cancelled") return say(`${r.action}: cancelled.`);
-    if (o.status === "conflict") return say(`${r.action}: not applied, ${o.message}.`, false, true);
-    // Stopped is a clean exit (a dismissed prompt): nothing to say.
-    if (o.status === "stopped") return;
-    const unknown = r.unknownTags.length ? ` Unknown tags left as written: ${r.unknownTags.join(", ")}.` : "";
-    const last = r.log.length ? ` ${r.log[r.log.length - 1]}` : "";
-    say(`${r.action}: done.${last}${unknown}`, false, !!unknown);
-    list?.reload();
-    if (!onEditor) return r.openDraft !== null ? openDraft(r.openDraft) : undefined;
-    // The editor still holds the text the run started from (saved, and read-only since), while the stored draft
-    // may now be the action's result: show what is stored, never save the old text over it.
-    if (autosave.dirty()) return;
-    if (r.openDraft !== null) return show(await (await api).openDraft(r.openDraft));
-    const fresh = await (await api).openDraft(r.draftId);
-    // Drafts' habit: a draft the action filed away makes room for the next one.
-    if (r.newDraft || fresh.folder !== folder) return show(null);
-    if (!r.changed) return setDraft(fresh);
-    show({ ...fresh, cursor: r.selection.head });
-    editor?.select(r.selection.anchor, r.selection.head);
-  }
-
-  async function runAgain(e: RunLogEntry) {
-    const a = actions().find((x) => x.uuid === e.actionUuid);
-    if (!a) return say("That action is gone.");
-    if (e.draftId !== null && e.draftId !== draft()?.id) await openDraft(e.draftId);
-    await runAction(a, "ui", e.draftId ?? undefined);
-  }
-
-  async function answer(r: HostRequest, value: unknown) {
-    setRequests((q) => q.filter((x) => x.id !== r.id));
-    await (await api).hostReply(r.id, value);
-  }
-
-  function onKey(e: KeyboardEvent) {
-    // A dialog, the action editor or the command bar takes every key.
-    if (requests().length || editing() || paletteOpen() || settingsOpen()) return;
+  const key = (e: KeyboardEvent) => {
+    const mod = e.ctrlKey || e.metaKey;
     const k = e.key.toLowerCase();
-    const ctrl = e.ctrlKey || e.metaKey;
-    if (ctrl && !e.shiftKey && !e.altKey && k === "k") return stop(e, openPalette);
-    if (ctrl && !e.shiftKey && !e.altKey && e.key === ",") return stop(e, () => setSettingsOpen(true));
-    if (ctrl && !e.shiftKey && !e.altKey && k === "h") return stop(e, openHistory);
-    if (e.key === "Escape" && running()) return stop(e, async () => (await api).cancelRun());
-    if (ctrl && e.shiftKey && !e.altKey && k === "a") {
-      const inside = !!document.activeElement?.closest("aside.actions");
-      return stop(e, () => editAction(inside ? (actionList?.current() ?? null) : null));
-    }
-    if (ctrl && !e.shiftKey && !e.altKey) {
-      if (k === "n") return stop(e, newDraft);
-      if (k === "l") return stop(e, toggleList);
-      if (k === "2") return stop(e, toggleActions);
-      if (k === "enter") {
-        const first = actionList?.first() ?? firstAction(actions());
-        return stop(e, () => (first ? runAction(first, "shortcut") : say("No actions yet. Ctrl Shift A makes one.")));
-      }
-      if (k === "e" && !listOpen()) return stop(e, () => moveCurrent("archive"));
-      if (k === "t" && !listOpen()) return stop(e, startTagging);
-    }
-    if (ctrl && e.shiftKey && !e.altKey && !listOpen()) {
-      if (k === "f") return stop(e, flagCurrent);
-      if (k === "d") return stop(e, toggleFocus);
-      // `Ctrl #` is Ctrl Shift 3 on most layouts; match the key and the physical key.
-      if (e.key === "#" || e.code === "Digit3") return stop(e, () => moveCurrent("trash"));
-    }
-    // An action's own chord works anywhere.
-    const chord = fromEvent(e);
-    if (chord && isChord(chord)) {
-      const a = actions().find((x) => x.shortcut && isChord(x.shortcut) && same(x.shortcut, chord));
-      if (a) return stop(e, () => runAction(a, "shortcut"));
-    }
-    const el = e.target as HTMLElement | null;
-    const typing = !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
-    if (typing) return;
-    if (logOpen()) {
-      if (actionLog?.key(e)) e.preventDefault();
-      return;
-    }
-    if (historyOpen()) {
-      if (history?.key(e)) e.preventDefault();
-      return;
-    }
-    if (listOpen()) {
-      if (list?.key(e)) e.preventDefault();
-      return;
-    }
-    if (el?.closest("aside.actions") && !ctrl && !e.altKey) {
-      if (gPending) {
-        gPending = false;
-        if (e.key === "l") return stop(e, openLog);
-        if ("ifatd".includes(e.key)) return stop(e, toggleList);
-      }
-      if (e.key === "g") {
-        gPending = true;
-        return stop(e, () => {});
-      }
-      if (actionList?.key(e)) e.preventDefault();
-    }
-  }
-
-  function stop(e: KeyboardEvent, run: () => unknown) {
+    if (mod && k === "k") setBar(bar() ? null : "all");
+    else if (mod && k === "p") setBar(bar() ? null : "notes");
+    else if (overlay()) return;
+    else if (mod && k === "n") void newNote();
+    else if (mod && k === "l") void (view().kind === "library" ? writing() : library());
+    else if (mod && e.key === ",") setSettings("all");
+    else if (mod && k === "h" && onNote()) setHistory(true);
+    else if (mod && e.shiftKey && k === "c" && onNote()) void copy("markdown");
+    else if (e.key === "Escape" && view().kind === "library") {
+      if (document.querySelector(".scrim")) return;
+      void writing();
+    } else if (!mod && !typing(e) && e.key === "z" && view().kind === "note") {
+      if (!undoLast()) return;
+    } else return;
     e.preventDefault();
-    e.stopPropagation();
-    run();
-  }
-
-  async function openHistory() {
-    if (historyOpen()) return closeHistory();
-    if (!(await saved())) return;
-    if (!draft()) return say("Type something first: a new draft has no history.");
-    setListOpen(false);
-    setLogOpen(false);
-    leaveEditor();
-    setHistoryOpen(true);
-  }
-
-  function closeHistory() {
-    setHistoryOpen(false);
-    editor?.view.focus();
-  }
-
-  async function restoreVersion(versionId: number) {
-    const d = draft();
-    if (!d || !(await saved())) return;
-    try {
-      const restored = await (await api).restoreVersion(d.id, versionId);
-      setHistoryOpen(false);
-      show(restored);
-      say("Restored. The text it replaced is kept in History (Ctrl H).");
-    } catch (e) {
-      say(`Restore failed: ${String(e).replace(/^Error: /, "")}`);
-    }
-  }
-
-  function toggleFocus() {
-    const on = !focusMode();
-    setFocusMode(on);
-    editor?.setFocusMode(on);
-    say(on ? "Focus mode. Ctrl Shift D to leave." : "Focus mode off.");
-  }
-
-  /** Back after the "open to a new draft" time with a draft open: start a new one, as Drafts does. The old one
-   * is saved. */
-  function away(hidden: boolean) {
-    if (hidden) {
-      awaySince ??= Date.now();
-      void autosave.flush();
-      return;
-    }
-    const since = awaySince;
-    awaySince = null;
-    const after = awayThreshold(prefs());
-    if (since !== null && after !== null && Date.now() - since >= after && draft() && !listOpen() && !tagging()) {
-      newDraft();
-    }
-  }
+  };
 
   onMount(async () => {
-    editor = createEditor(editorEl, onChange);
-    editor.view.focus();
-    const a = await api;
-    await a.showWindow();
-    setInfo(await a.appInfo());
-    // After the window is up: preferences only change the type, never what is on screen first.
+    document.addEventListener("keydown", key);
+    const s = await api();
     try {
-      const p = parsePrefs(await a.uiSettings());
+      const p = parsePrefs(await s.uiSettings());
       setPrefs(p);
-      applyEditorPrefs(p);
-      editor.setTypewriter(p.typewriter);
-    } catch (e) {
-      console.error("preferences:", e);
+      applyPrefs(p);
+    } catch {
+      applyPrefs(prefs());
     }
-    window.addEventListener("blur", () => away(true));
-    window.addEventListener("focus", () => away(false));
-    window.addEventListener("beforeunload", () => void autosave.flush());
-    document.addEventListener("visibilitychange", () => away(document.hidden));
-    window.addEventListener("keydown", onKey, true);
-    if ("__TAURI_INTERNALS__" in window) {
+    setRoot((await s.notesInfo().catch(() => ({ root: "" }))).root);
+    const [lastId, at] = (((await s.uiSettings().catch(() => ({}) as Record<string, string>))["last.note"] ?? "") as string).split(":").map(Number);
+    if (lastId && Date.now() - at < RESUME_MS) void go({ kind: "note", id: lastId, folder: "" }, false);
+    setAi(await s.aiStatus().catch(() => ({ ready: false, model: "", error: null })));
+    await s.scanNotes().catch((e) => say(`The Petrel folder cannot be read: ${errText(e)}`, { error: true }));
+    setRev(rev() + 1);
+    await s.showWindow();
+    await s.listen({
+      quit: async () => {
+        await page?.flush();
+        await remember();
+        await s.closeWindow();
+      },
+      openNote: (id) => void openNote(id),
+      focus: () => void rescan(),
+      // Hidden to the tray counts as leaving: coming back soon opens the same note.
+      changed: () => view().kind !== "note" && setRev(rev() + 1),
+    });
+    if (inTauri) {
       const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-      // Closing waits for the save: `beforeunload` can't wait for one.
-      await getCurrentWebviewWindow().onCloseRequested((e) => {
+      // The close button waits for the text to be saved; a save that keeps failing goes to a file instead.
+      await getCurrentWebviewWindow().onCloseRequested(async (e) => {
         e.preventDefault();
-        void close();
+        if (page && !(await page.flush())) {
+          const path = await s.rescueText(page.text()).catch(() => null);
+          if (path) say(`Saved to ${path}`);
+        }
+        await remember();
+        await s.closeWindow();
       });
     }
-    await a.listenHost({
-      request: (r) => setRequests((q) => [...q, r]),
-      closed: (id) => setRequests((q) => q.filter((x) => x.id !== id)),
-      message: (_kind, text) => say(text),
-    });
-    await a.listenApp({
-      // Tray "New draft" or `petrel --new`: the window is already being shown.
-      newDraft: async () => {
-        await newDraft();
-        editor?.view.focus();
-      },
-      quit: () => void close(),
-      links: () => void takeLinks(),
-    });
-    // Links that started Petrel, or came before the window listened.
-    void takeLinks();
-    loadActions();
   });
-  onCleanup(() => editor?.destroy());
+  onCleanup(() => document.removeEventListener("keydown", key));
+
+  const noteView = () => {
+    const v = view();
+    return v.kind === "note" ? v : null;
+  };
 
   return (
-    <div class="app" classList={{ focus: focusMode() }}>
-      <div class="work">
-        <div class="center">
-          <main class="editor" ref={editorEl} />
-          <Show when={listOpen()}>
-            <DraftList
-              ref={(h) => (list = h)}
-              start={listStart()}
-              openId={draft()?.id ?? null}
-              onOpen={openDraft}
-              onClose={toggleList}
-              onBatch={(label, t) => remember({ label, token: t.token }, t.count)}
-              onUndo={undo}
-              onToast={say}
-              onLog={openLog}
+    <div class="app" classList={{ "in-library": view().kind === "library" }}>
+      <TitleBar
+        library={view().kind === "library"}
+        title={title() || (noteView()?.id === null ? "New note" : "")}
+        tabs={libraryTabs(lib())}
+        tab={tab()}
+        onTab={(t) => void library(t)}
+        onLibrary={() => void (view().kind === "library" ? writing() : library())}
+        onNew={() => void newNote()}
+        onSearch={() => setBar("all")}
+      />
+
+      <main class="view">
+        <Suspense>
+          <Show when={view().kind === "library"}>
+            <Library
+              tab={tab()}
+              data={lib()}
+              aiReady={ai().ready}
+              onTab={(t) => void library(t)}
+              onEdit={(id) => void openNote(id)}
+              onNew={(folder) => void newNote(folder)}
+              onChanged={() => setRev(rev() + 1)}
+              onAiSetup={() => setSettings("ai")}
             />
           </Show>
-          <Show when={historyOpen() && draft()}>
-            {(d) => (
-              <Versions
-                ref={(h) => (history = h)}
-                draftId={d().id}
-                title={d().title}
-                current={() => editor?.text() ?? ""}
-                actions={actions()}
-                onRestore={restoreVersion}
-                onClose={closeHistory}
+          <Show when={noteView()}>
+            {(v) => (
+              <NotePage
+                id={v().id}
+                folder={v().folder}
+                root={root()}
+                aiReady={ai().ready}
+                onOpen={openNote}
+                onFolder={(folder) => void library(folder === "inbox" ? "inbox" : `c:${folder.split("/")[0]}`)}
+                onHome={() => void newNote()}
+                onHistory={() => setHistory(true)}
+                onAiSetup={() => setSettings("ai")}
+                onTitle={setTitle}
+                ref={(h) => (page = h)}
               />
             )}
           </Show>
-          <Show when={logOpen()}>
-            <ActionLog
-              ref={(h) => (actionLog = h)}
-              onRunAgain={runAgain}
-              onOpenDraft={(id) => {
-                setLogOpen(false);
-                openDraft(id);
-              }}
-              onClose={closeLog}
-            />
-          </Show>
-          <Show when={editing()}>
-            {(a) => (
-              <ActionEditor
-                action={a().action}
-                all={actions()}
-                onSaved={async (saved) => {
-                  await loadActions();
-                  actionList?.reveal(saved.uuid);
-                  say(`Saved “${saved.name}”.`);
-                }}
-                onDeleted={() => {
-                  loadActions();
-                  closeEditor();
-                  say("Action deleted.");
-                }}
-                onClose={closeEditor}
-              />
-            )}
-          </Show>
-          <Show when={tagging()}>
-            <div class="bar tagbar">
-              <span>Tags:</span>
-              <input
-                ref={tagInput}
-                list="petrel-tags"
-                placeholder="work, idea"
-                onKeyDown={(e) => {
-                  e.stopPropagation();
-                  // preventDefault: focus moves to the editor before the key's default action would type there.
-                  if (e.key === "Enter" || e.key === "Escape") e.preventDefault();
-                  if (e.key === "Enter") saveTags();
-                  else if (e.key === "Escape") {
-                    setTagging(false);
-                    editor?.view.focus();
-                  }
-                }}
-              />
-              <span class="hint">
-                <kbd>Enter</kbd> save <kbd>Esc</kbd> cancel
-              </span>
-            </div>
-          </Show>
-        </div>
-        <Show when={actionsOpen()}>
-          <ActionList
-            ref={(h) => (actionList = h)}
-            actions={actions()}
-            running={running()?.shown ? running()!.name : null}
-            onRun={runAction}
-            onEdit={editAction}
-            onBack={() => editor?.view.focus()}
-          />
-        </Show>
-      </div>
-      <Show when={paletteOpen()}>
+        </Suspense>
+      </main>
+
+      <Show when={bar()}>
         <CommandBar
-          commands={commands()}
-          actions={actions()}
-          onAction={(a) => runAction(a, "ui")}
-          onDraft={openDraft}
-          onTag={(tag) => openList({ tag })}
-          onClose={closePalette}
-        />
-      </Show>
-      <Show when={settingsOpen()}>
-        <Settings
-          onPrefs={(p) => editor?.setTypewriter(p.typewriter)}
+          commands={commands}
+          notesOnly={bar() === "notes"}
+          aiReady={ai().ready}
+          onOpen={openNote}
+          onAiSetup={() => setSettings("ai")}
           onClose={() => {
-            setSettingsOpen(false);
-            editor?.view.focus();
+            setBar(null);
+            page?.focus();
           }}
         />
       </Show>
-      <Show when={requests()[0]}>
-        {(r) => <HostDialog request={r()} onAnswer={(v) => answer(r(), v)} />}
+      <Show when={moving()}>
+        <Destination exclude={current()?.id} onPick={moveTo} onClose={() => setMoving(false)} />
       </Show>
-      <datalist id="petrel-tags">
-        <For each={allTags()}>{(t) => <option value={t.name} />}</For>
-      </datalist>
-      {/* Quiet by design: what the writer needs to trust (saved), a count, and the two ways out. */}
-      <footer class="strip">
-        <span class={`save save-${save()}`}>
-          {save() === "saved" && "saved"}
-          {save() === "dirty" && "…"}
-          {save() === "saving" && "saving…"}
-          {save() === "error" && "not saved — retrying"}
-        </span>
-        <Show when={words()}>
-          <span class="meta">{words() === 1 ? "1 word" : `${words().toLocaleString()} words`}</span>
+      <Suspense>
+        <Show when={settings()}>
+          <Settings
+            section={settings() === "ai" ? "ai" : undefined}
+            onClose={() => setSettings(false)}
+            onRoot={(r) => (setRoot(r), setRev(rev() + 1))}
+            onAi={setAi}
+          />
         </Show>
-        <Show when={draft()}>
-          {(d) => (
-            <>
-              <Show when={d().flagged}>
-                <span class="flag on" title="Flagged" />
-              </Show>
-              <Show when={d().folder !== "inbox"}>
-                <span class="meta">{d().folder}</span>
-              </Show>
-              <For each={d().tags}>{(t) => <span class="meta">#{t}</span>}</For>
-            </>
+        <Show when={history() && current()}>
+          {(n) => (
+            <Versions
+              noteId={n().id}
+              title={n().title}
+              current={page?.text() ?? ""}
+              onClose={() => (setHistory(false), page?.focus())}
+              onRestored={() => {
+                setHistory(false);
+                void page?.reload();
+              }}
+            />
           )}
         </Show>
-        <Show when={toast()}>
-          {(t) => (
-            <>
-              <span class="toast">{t().text}</span>
-              <Show when={t().log}>
-                <button class="link" onClick={openLog}>
-                  Log
-                </button>
-              </Show>
-              <Show when={t().undo}>
-                <button class="link" onClick={undo}>
-                  Undo
-                </button>
-              </Show>
-            </>
-          )}
-        </Show>
-        <span class="grow" />
-        <Show when={running()?.shown}>
-          <span class="meta">
-            {running()!.name} running · <kbd>Esc</kbd> stop
-          </span>
-        </Show>
-        <Show
-          when={listOpen()}
-          fallback={
-            <span class="meta keys">
-              <span>
-                <kbd>Ctrl K</kbd> commands
-              </span>
-              <span>
-                <kbd>Ctrl L</kbd> drafts
-              </span>
-              <span>
-                <kbd>Ctrl 2</kbd> actions
-              </span>
-            </span>
-          }
-        >
-          <span class="meta keys">
-            <span>
-              <kbd>j k</kbd> move
-            </span>
-            <span>
-              <kbd>Enter</kbd> write
-            </span>
-            <span>
-              <kbd>x</kbd> select
-            </span>
-            <span>
-              <kbd>e</kbd> archive
-            </span>
-            <span>
-              <kbd>f</kbd> flag
-            </span>
-            <span>
-              <kbd>z</kbd> undo
-            </span>
-            <span>
-              <kbd>Esc</kbd> back
-            </span>
-          </span>
-        </Show>
-        <Show when={info()?.debug}>
-          <span class="meta" title={info()?.dbPath}>
-            dev
-          </span>
-        </Show>
-      </footer>
+      </Suspense>
+      <ToastView />
     </div>
   );
 }
