@@ -317,7 +317,7 @@ export function fakeApi(): Api {
       const time = `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`;
       const text = a.body.trim();
       const glue = day.body.trimEnd() ? `${day.body.trimEnd()}\n\n` : "";
-      day.body = `${glue}${time}${/^[>\-*#!|`]/.test(text) ? "\n" : " "}${text}\n`;
+      day.body = /^[>\-*#!|`]/.test(text) ? `${glue}${time}\n${text}\n\n_from capture_\n` : `${glue}${time} ${text}  \n_from capture_\n`;
       day.modifiedAt = Date.now();
       notes.delete(id);
       return {
@@ -332,6 +332,11 @@ export function fakeApi(): Api {
     },
     notesBetween: async (from, to) =>
       [...notes.values()].filter((n) => n.modifiedAt >= from && n.modifiedAt < to).sort((a, b) => b.modifiedAt - a.modifiedAt).map((n) => ({ ...n })),
+    notesHaving: async (what) =>
+      [...notes.values()]
+        .filter((n) => (what === "link" ? /\[\[.+\]\]/ : what === "picture" ? /!\[[^\]]*\]\([^)]+\)/ : /^\s*[-*+] \[ \] /m).test(n.body))
+        .sort((a, b) => b.modifiedAt - a.modifiedAt)
+        .map((n) => n.id),
     topicFaces: async () => ({ ...faces }),
     setTopicFace: async (top, face) => {
       faces[top] = { ...face };
@@ -350,8 +355,13 @@ export function fakeApi(): Api {
     },
     captureContext: async () =>
       location.search.includes("quote")
-        ? { text: "A long, cold proof gives the bread a deeper, slightly sour taste.", app: "Firefox", title: "The Bread Book, chapter 3" }
-        : { text: null, app: null, title: null },
+        ? {
+            text: "A long, cold proof gives the bread a deeper, slightly sour taste.",
+            app: "Firefox",
+            title: "The Bread Book, chapter 3",
+            link: "https://breadbook.example/chapter-3",
+          }
+        : { text: null, app: null, title: null, link: null },
 
     aiStatus: async () => ({ ready: aiKey !== null, model: "claude-opus-5-5", error: null }),
     setAiKey: async (key) => {

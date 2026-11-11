@@ -1,7 +1,7 @@
 // A few words in Ctrl K that narrow what is found: `in:travel`, `pinned`, `today`, `this week`, `has:link`,
 // `has:picture`, `has:task`. The rest of the text is searched as before. Pure, for `npm test`.
 
-import type { Note, NoteSummary } from "../api";
+import type { NoteSummary } from "../api";
 
 export interface Filters {
   words: string;
@@ -51,11 +51,4 @@ export function keep(n: NoteSummary, f: Filters): boolean {
   if (f.pinned && !n.pinned) return false;
   if (f.since !== null && n.modifiedAt < f.since) return false;
   return true;
-}
-
-/** The `has:` checks need the text, not the preview. */
-export function hasAll(n: Note, has: Filters["has"]): boolean {
-  return has.every((h) =>
-    h === "link" ? /\[\[[^\]]+\]\]/.test(n.body) : h === "picture" ? /!\[[^\]]*\]\([^)]+\)/.test(n.body) : /^\s*[-*+] \[ \]/m.test(n.body),
-  );
 }

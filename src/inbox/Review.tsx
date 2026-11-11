@@ -1,6 +1,7 @@
 // Inbox review (`r` in the library, or the command bar): one capture at a time, oldest first. A number files it
 // in one of the places offered (the ones used most and lately come first), `/` finds another, Space keeps it for
-// later, `e` edits, `d` deletes, `s` asks Claude for a home (only then), `z` undoes. When the last one is gone:
+// later (it comes back in tomorrow's review), `e` edits, `d` deletes, `s` asks Claude for a home (only then), `z`
+// undoes. When the last one is gone:
 // "Inbox clear." and the petrel crosses the page.
 
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
@@ -10,6 +11,9 @@ import Mark from "../library/Mark";
 import { ago, say, undoLast } from "../ui";
 import Destination, { placeRows, type Row, type Target } from "./Destination";
 import { fileCapture, filedCounts } from "./file";
+import { keepUntil, laterOf, parseLater } from "./later";
+
+const LATER = "ui.review.later";
 
 const PLACES = 6;
 
@@ -23,10 +27,21 @@ export default function Review(p: { aiReady: boolean; onDone(): void; onEdit(id:
   const [hint, setHint] = createSignal<AiSuggestion | "asking" | null>(null);
   const [rev, setRev] = createSignal(0);
 
+  /** Captures kept for later, by path, until when. */
+  let later: Record<string, number> = {};
+  const [waiting, setWaiting] = createSignal(0);
+
   async function load() {
     const s = await api();
+    later = parseLater((await s.uiSettings().catch(() => ({}) as Record<string, string>))[LATER]);
     const inbox = await s.listNotes({ folder: "inbox", limit: 1000 });
-    const ids = inbox.sort((a, b) => a.modifiedAt - b.modifiedAt).map((n) => n.id).filter((id) => !kept().includes(id));
+    const now = Date.now();
+    const kept = laterOf(later, now);
+    const ids = inbox
+      .sort((a, b) => a.modifiedAt - b.modifiedAt)
+      .filter((n) => !kept.has(n.path))
+      .map((n) => n.id);
+    setWaiting(inbox.length - ids.length);
     setQueue(ids);
     if (!total()) setTotal(ids.length);
   }
@@ -85,11 +100,13 @@ export default function Review(p: { aiReady: boolean; onDone(): void; onEdit(id:
   }
 
   function keep() {
-    const n = id();
-    if (n == null) return;
+    const n = note();
+    if (!n) return;
     setHint(null);
-    setKept([...kept(), n]);
-    setQueue((q) => q?.filter((x) => x !== n) ?? q);
+    setKept([...kept(), n.id]);
+    setQueue((q) => q?.filter((x) => x !== n.id) ?? q);
+    later = keepUntil(later, n.path);
+    void api().then((s) => s.setUiSetting(LATER, JSON.stringify(later)).catch(() => {}));
   }
 
   async function remove() {
@@ -172,7 +189,7 @@ export default function Review(p: { aiReady: boolean; onDone(): void; onEdit(id:
             <Petrel />
             <p class="review-clear-title">Inbox clear.</p>
             <p class="muted">
-              {filed()} filed{kept().length ? ` · ${kept().length} kept for later` : ""}
+              {filed()} filed{kept().length + waiting() ? ` · ${kept().length + waiting()} kept for later, back tomorrow` : ""}
             </p>
             <button class="btn" onClick={p.onDone}>
               Back to writing <kbd>Enter</kbd>

@@ -2021,3 +2021,10 @@ kbd {
 .mark {
   min-width: 14px;
 }
+
+/* `_from capture_` under an entry on a day's page. */
+.cm-from-capture {
+  font-family: var(--font-ui);
+  font-size: 0.68em;
+  color: var(--faint);
+}

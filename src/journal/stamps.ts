@@ -1,5 +1,6 @@
-// A day's page in the editor: the `21:14` at the start of an entry is drawn small and quiet, and on today's page
-// Enter on an empty line under an entry starts the next one with the time. The file stays plain text.
+// A day's page in the editor: the `21:14` at the start of an entry and the `_from capture_` under a filed capture
+// are drawn small and quiet, and on today's page Enter on an empty line under an entry starts the next one with the
+// time. The file stays plain text.
 
 import { Prec, RangeSetBuilder, type Extension } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView, keymap, ViewPlugin, type ViewUpdate } from "@codemirror/view";
@@ -7,6 +8,8 @@ import { clock } from "./days";
 
 const STAMP = /^(\d{1,2}:\d{2})(?=\s|$)/;
 const mark = Decoration.mark({ class: "cm-stamp" });
+const FROM = "_from capture_";
+const from = Decoration.line({ class: "cm-from-capture" });
 
 const draw = ViewPlugin.fromClass(
   class {
@@ -24,6 +27,7 @@ const draw = ViewPlugin.fromClass(
           const line = view.state.doc.lineAt(pos);
           const m = STAMP.exec(line.text);
           if (m) b.add(line.from, line.from + m[1].length, mark);
+          else if (line.text.trim() === FROM) b.add(line.from, line.from, from);
           pos = line.to + 1;
         }
       }

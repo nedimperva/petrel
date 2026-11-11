@@ -174,6 +174,8 @@ export interface CaptureContext {
   text: string | null;
   app: string | null;
   title: string | null;
+  /** The page's address, when it was a browser. */
+  link: string | null;
 }
 
 /** A collection's look in the library: colour and mark names from `src/library/faces.ts`; empty is the default. */
@@ -249,6 +251,8 @@ export interface Api {
   fileIntoDay(id: number, date: string): Promise<NoteChange>;
   /** Notes changed between two moments (ms), with their text. */
   notesBetween(from: number, to: number): Promise<Note[]>;
+  /** Ids of the notes with a `[[link]]`, a picture or an open task. */
+  notesHaving(what: "link" | "picture" | "task"): Promise<number[]>;
   topicFaces(): Promise<Record<string, TopicFace>>;
   setTopicFace(top: string, face: TopicFace): Promise<TopicFace>;
   /** Writes a pasted picture next to notes in `folder`; returns the link (`attachments/<name>`). */
@@ -339,6 +343,7 @@ async function tauriApi(): Promise<Api> {
     dayNote: (date) => invoke("day_note", { date }),
     fileIntoDay: (id, date) => invoke("file_into_day", { id, date }),
     notesBetween: (from, to) => invoke("notes_between", { from, to }),
+    notesHaving: (what) => invoke("notes_having", { what }),
     topicFaces: () => invoke("topic_faces"),
     setTopicFace: (top, face) => invoke("set_topic_face", { top, color: face.color, mark: face.mark }),
     saveAttachment: (folder, name, bytes) =>

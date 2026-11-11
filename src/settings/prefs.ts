@@ -5,7 +5,7 @@ import { createSignal } from "solid-js";
 
 /** `system` follows the OS; `clock` is Paper by day, Linen after sunset, Night late. */
 export type Theme = "system" | "light" | "linen" | "dark" | "clock";
-export type WriteFont = "literata" | "serif" | "inter" | "mono";
+export type WriteFont = "literata" | "quattro" | "serif" | "inter" | "mono";
 
 export interface Prefs {
   theme: Theme;
@@ -42,6 +42,7 @@ export const THEMES: { id: Theme; label: string }[] = [
 ];
 export const FONTS: { id: WriteFont; label: string; css: string }[] = [
   { id: "literata", label: "Literata", css: "var(--font-write)" },
+  { id: "quattro", label: "iA Writer Quattro", css: '"iA Writer Quattro", var(--font-ui)' },
   { id: "serif", label: "Charter", css: 'Charter, "Bitstream Charter", "Sitka Text", Cambria, Georgia, serif' },
   { id: "inter", label: "Inter", css: "var(--font-ui)" },
   { id: "mono", label: "JetBrains Mono", css: "var(--font-mono)" },

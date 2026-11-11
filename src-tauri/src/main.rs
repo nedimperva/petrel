@@ -383,6 +383,7 @@ fn main() {
             notes::day_note,
             notes::file_into_day,
             notes::notes_between,
+            notes::notes_having,
             notes::topic_faces,
             notes::set_topic_face,
             notes::save_attachment,

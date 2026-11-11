@@ -6,6 +6,10 @@ import "@fontsource-variable/inter";
 import "@fontsource-variable/literata";
 import "@fontsource-variable/literata/wght-italic.css";
 import "@fontsource/jetbrains-mono/400.css";
+// iA Writer Quattro, one of the writing fonts in Settings (SIL Open Font License).
+import "@fontsource/ia-writer-quattro/400.css";
+import "@fontsource/ia-writer-quattro/400-italic.css";
+import "@fontsource/ia-writer-quattro/700.css";
 import "./styles/tokens.css";
 import "./styles.css";
 

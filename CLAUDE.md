@@ -25,7 +25,8 @@ keys; `docs/design/petrel.md` is the design; this file covers state and decision
   `<folder>/attachments/` carried on move and merge, inbox review (`src/inbox/Review.tsx`), collection looks in
   `<top>/.petrel`, `p` pins, Ctrl K filters, today's page (`journal/`, `src/journal/`), Linen and clock paper, a
   writing font, the petrel, an optional typing sound, the week on Ctrl J (`ai_week`). Left out by the owner: one line
-  from a terminal, the greeting page. Not tried: the selection quote in a real window on either OS.
+  from a terminal, the greeting page. Not tried: the selection quote and the browser address in a real window on
+  either OS. The owner chose to keep this work on `main` (no PR), 2026-11-11.
 - Resources read under App's `<Suspense>` suspend the whole page (focus leaves the editor): new screens use signals.
 - Tried headless: the debug build boots under `xvfb-run -a dbus-run-session` (capture, `--new`, `--stdin` and the
   picker work); the UI was driven with Playwright against the fake store (`src/fake.ts`). Not tried: a real

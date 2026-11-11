@@ -62,9 +62,23 @@ test("filing learns, and recent beats old", () => {
 
 test("a quote keeps its source", () => {
   assert.equal(
-    quoteBlock({ text: "A cold proof.\nDeeper taste.", app: "Firefox", title: "The Bread Book" }),
+    quoteBlock({ text: "A cold proof.\nDeeper taste.", app: "Firefox", title: "The Bread Book", link: null }),
     "> A cold proof.\n> Deeper taste.\n>\n> — Firefox · The Bread Book\n\n",
   );
-  assert.equal(quoteBlock({ text: "x", app: null, title: null }), "> x\n\n");
-  assert.equal(quoteBlock({ text: null, app: "Firefox", title: "t" }), "");
+  assert.equal(quoteBlock({ text: "x", app: null, title: null, link: null }), "> x\n\n");
+  assert.equal(quoteBlock({ text: null, app: "Firefox", title: "t", link: null }), "");
+  assert.equal(
+    quoteBlock({ text: "x", app: "Edge", title: null, link: "https://www.example.com/a b" }),
+    "> x\n>\n> — Edge · [example.com](<https://www.example.com/a b>)\n\n",
+  );
+});
+
+test("kept for later comes back the next day", async () => {
+  const { keepUntil, laterOf, parseLater } = await import("../src/inbox/later.ts");
+  const evening = new Date(2026, 10, 11, 21, 0);
+  const l = keepUntil(parseLater('{"old.md": 1}'), "inbox/a.md", evening);
+  assert.deepEqual(Object.keys(l), ["inbox/a.md"]);
+  assert.ok(laterOf(l, evening.getTime()).has("inbox/a.md"));
+  assert.equal(laterOf(l, new Date(2026, 10, 12, 0, 1).getTime()).size, 0);
+  assert.deepEqual(parseLater("[1]"), {});
 });

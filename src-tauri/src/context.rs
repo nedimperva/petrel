@@ -4,8 +4,9 @@
 //! where it can be deleted like any other text.
 //!
 //! Windows reads the selection through UI Automation (no key presses are faked, the clipboard is not touched,
-//! password fields are skipped). Linux reads the primary selection, which only holds what was selected, and asks
-//! Hyprland which window was active. Either side may know nothing, and then the capture is just empty.
+//! password fields are skipped), and in a browser the page's address from its address bar. Linux reads the primary
+//! selection, which only holds what was selected, and asks Hyprland which window was active; it has no address.
+//! Either side may know nothing, and then the capture is just empty.
 
 use std::sync::mpsc;
 use std::time::Duration;
@@ -14,8 +15,10 @@ use serde::Serialize;
 
 /// Longest quote taken; a whole page selected by mistake is not a quote.
 const QUOTE_MAX: usize = 4_000;
-/// How long the capture window waits for the selection before it opens without one.
-const WAIT: Duration = Duration::from_millis(400);
+/// How long the capture window waits for the selection and the address before it opens without them.
+const WAIT: Duration = Duration::from_millis(700);
+/// Browsers whose address bar is read for the page's link.
+const BROWSERS: &[&str] = &["Firefox", "Chrome", "Edge", "Brave", "Zen", "Opera", "Vivaldi"];
 
 /// The context on its way, and the primary selection Linux saw (for the next capture's stale check).
 pub type Pending = mpsc::Receiver<(CaptureContext, Option<String>)>;
@@ -29,13 +32,15 @@ pub struct CaptureContext {
     pub app: Option<String>,
     /// The window's title without the app's name at the end: usually the page or document.
     pub title: Option<String>,
+    /// The page's address, when the window is a browser and its address bar could be read.
+    pub link: Option<String>,
 }
 
 /// Starts reading the context. The window's name is read now, while the other app is still in front; the
 /// selection may take longer and arrives on the channel.
 pub fn start(last_primary: Option<String>) -> Pending {
     let (tx, rx) = mpsc::channel();
-    let (app, title, own) = platform::front_window();
+    let (app, title, own, handle) = platform::front_window();
     if own {
         let _ = tx.send((CaptureContext::default(), last_primary));
         return rx;
@@ -48,16 +53,32 @@ pub fn start(last_primary: Option<String>) -> Pending {
             _ => title,
         }
         .filter(|t| !t.is_empty());
-        let _ = tx.send((CaptureContext { text, app, title }, primary));
+        let browser = app.as_deref().is_some_and(|a| BROWSERS.contains(&a));
+        let link = if browser { platform::address(handle).and_then(|a| as_url(&a)) } else { None };
+        let _ = tx.send((CaptureContext { text, app, title, link }, primary));
     });
     rx
 }
 
 /// Waits a little for what `start` reads.
-pub fn wait(
-    rx: &mpsc::Receiver<(CaptureContext, Option<String>)>,
-) -> Option<(CaptureContext, Option<String>)> {
+pub fn wait(rx: &Pending) -> Option<(CaptureContext, Option<String>)> {
     rx.recv_timeout(WAIT).ok()
+}
+
+/// What an address bar holds, as a link: browsers hide `https://`, so a bare host gets it back. A search typed
+/// there (spaces, no dot) is not an address.
+fn as_url(s: &str) -> Option<String> {
+    let s = s.trim();
+    if s.is_empty() || s.len() > 2048 || s.chars().any(char::is_whitespace) {
+        return None;
+    }
+    let low = s.to_lowercase();
+    if ["http://", "https://", "file://"].iter().any(|p| low.starts_with(p)) {
+        return Some(s.to_string());
+    }
+    let host = low.split(['/', '?', '#']).next().unwrap_or("");
+    let hosty = host.contains('.') && host.chars().all(|c| c.is_ascii_alphanumeric() || ".-:".contains(c));
+    hosty.then(|| format!("https://{s}"))
 }
 
 /// `The Bread Book — Mozilla Firefox` → `The Bread Book`: browsers and editors end their titles with their name.
@@ -116,28 +137,82 @@ mod platform {
         OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
     };
     use windows::Win32::UI::Accessibility::{
-        CUIAutomation, IUIAutomation, IUIAutomationTextPattern, UIA_TextPatternId,
+        CUIAutomation, IUIAutomation, IUIAutomationTextPattern, IUIAutomationValuePattern,
+        UIA_DocumentControlTypeId, UIA_EditControlTypeId, UIA_TextPatternId, UIA_ValuePatternId,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
         GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId,
     };
 
-    /// The app and title of the window in front, and whether it is one of Petrel's own.
-    pub fn front_window() -> (Option<String>, Option<String>, bool) {
+    /// The app and title of the window in front, whether it is one of Petrel's own, and its handle (for the
+    /// address bar).
+    pub fn front_window() -> (Option<String>, Option<String>, bool, isize) {
         unsafe {
             let hwnd: HWND = GetForegroundWindow();
             if hwnd.is_invalid() {
-                return (None, None, false);
+                return (None, None, false, 0);
             }
             let mut pid = 0u32;
             GetWindowThreadProcessId(hwnd, Some(&mut pid));
             if pid == std::process::id() {
-                return (None, None, true);
+                return (None, None, true, 0);
             }
             let mut buf = [0u16; 512];
             let n = GetWindowTextW(hwnd, &mut buf);
             let title = (n > 0).then(|| String::from_utf16_lossy(&buf[..n as usize]));
-            (exe_of(pid).map(|e| super::app_name(&e)), title, false)
+            (exe_of(pid).map(|e| super::app_name(&e)), title, false, hwnd.0 as isize)
+        }
+    }
+
+    /// A browser's address bar: the first edit field in the window outside the page itself. The walk is short
+    /// (a few hundred elements, a quarter of a second) and never goes into the page, which can be huge.
+    pub fn address(handle: isize) -> Option<String> {
+        if handle == 0 {
+            return None;
+        }
+        unsafe {
+            let inited = CoInitializeEx(None, COINIT_MULTITHREADED).is_ok();
+            let found = (|| -> windows::core::Result<Option<String>> {
+                let ua: IUIAutomation = CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)?;
+                let walker = ua.ControlViewWalker()?;
+                let deadline = std::time::Instant::now() + std::time::Duration::from_millis(250);
+                let mut stack = vec![ua.ElementFromHandle(HWND(handle as *mut _))?];
+                let mut seen = 0;
+                while let Some(el) = stack.pop() {
+                    seen += 1;
+                    if seen > 400 || std::time::Instant::now() > deadline {
+                        break;
+                    }
+                    let kind = el.CurrentControlType()?;
+                    if kind == UIA_DocumentControlTypeId {
+                        continue;
+                    }
+                    if kind == UIA_EditControlTypeId {
+                        if let Ok(v) = el.GetCurrentPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId)
+                        {
+                            let text = v.CurrentValue()?.to_string();
+                            if super::as_url(&text).is_some() {
+                                return Ok(Some(text));
+                            }
+                        }
+                        continue;
+                    }
+                    let mut kids = Vec::new();
+                    let mut next = walker.GetFirstChildElement(&el).ok();
+                    while let Some(k) = next {
+                        next = walker.GetNextSiblingElement(&k).ok();
+                        kids.push(k);
+                    }
+                    stack.extend(kids.into_iter().rev());
+                }
+                Ok(None)
+            })()
+            .ok()
+            .flatten();
+            if inited {
+                CoUninitialize();
+            }
+            found
         }
     }
 
@@ -189,22 +264,27 @@ mod platform {
 #[cfg(target_os = "linux")]
 mod platform {
     /// Hyprland knows the active window; other desktops are not asked.
-    pub fn front_window() -> (Option<String>, Option<String>, bool) {
+    pub fn front_window() -> (Option<String>, Option<String>, bool, isize) {
         if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_none() {
-            return (None, None, false);
+            return (None, None, false, 0);
         }
         let Ok(out) = std::process::Command::new("hyprctl").args(["activewindow", "-j"]).output() else {
-            return (None, None, false);
+            return (None, None, false, 0);
         };
         let Ok(v) = serde_json::from_slice::<serde_json::Value>(&out.stdout) else {
-            return (None, None, false);
+            return (None, None, false, 0);
         };
         let class = v["class"].as_str().unwrap_or("").to_string();
         let title = v["title"].as_str().map(str::to_string);
         if class.to_lowercase().contains("petrel") || v["pid"].as_u64() == Some(std::process::id() as u64) {
-            return (None, None, true);
+            return (None, None, true, 0);
         }
-        ((!class.is_empty()).then(|| super::app_name(&class)), title, false)
+        ((!class.is_empty()).then(|| super::app_name(&class)), title, false, 0)
+    }
+
+    /// No address bar to read on Linux.
+    pub fn address(_handle: isize) -> Option<String> {
+        None
     }
 
     /// The primary selection: what is selected now, or what was selected last. The second value is what it
@@ -223,8 +303,11 @@ mod platform {
 
 #[cfg(not(any(windows, target_os = "linux")))]
 mod platform {
-    pub fn front_window() -> (Option<String>, Option<String>, bool) {
-        (None, None, false)
+    pub fn front_window() -> (Option<String>, Option<String>, bool, isize) {
+        (None, None, false, 0)
+    }
+    pub fn address(_handle: isize) -> Option<String> {
+        None
     }
     pub fn selection(last: Option<String>) -> (Option<String>, Option<String>) {
         (None, last)
@@ -248,5 +331,15 @@ mod tests {
         assert_eq!(app_name("msedge.exe"), "Edge");
         assert_eq!(app_name("org.gnome.Nautilus"), "Nautilus");
         assert_eq!(app_name("kitty"), "Kitty");
+    }
+
+    #[test]
+    fn addresses() {
+        assert_eq!(as_url("example.com/bread?x=1").as_deref(), Some("https://example.com/bread?x=1"));
+        assert_eq!(as_url("https://a.b/c").as_deref(), Some("https://a.b/c"));
+        assert_eq!(as_url("localhost:5173").as_deref(), None);
+        assert_eq!(as_url("sourdough recipe"), None);
+        assert_eq!(as_url("sourdough"), None);
+        assert_eq!(as_url(""), None);
     }
 }

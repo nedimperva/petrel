@@ -7,7 +7,7 @@ import { createResource, createSignal, For, onMount, Show } from "solid-js";
 import { api, errText, type AiAnswer, type NoteSummary } from "../api";
 import { answerHtml } from "../copy";
 import { folderName, Kbd, say } from "../ui";
-import { hasAll, keep, noFilters, parseFilters } from "./filters";
+import { keep, noFilters, parseFilters } from "./filters";
 import { rank } from "./match";
 
 export interface Command {
@@ -54,10 +54,9 @@ export default function CommandBar(p: {
       found = [...byTitle, ...byWords.filter((n) => !seen.has(n.id))];
     } else found = await s.listNotes({ limit: 1000 });
     found = found.filter((n) => keep(n, f));
-    if (f.has.length) {
-      // `has:` needs the text: the most recent notes that pass the rest are read in full.
-      const full = await Promise.all(found.slice(0, 120).map((n) => s.peekNote(n.id).catch(() => null)));
-      const ok = new Set(full.filter((n) => n && hasAll(n, f.has)).map((n) => n!.id));
+    // `has:` is asked of the engine, which reads every note's text.
+    for (const h of f.has) {
+      const ok = new Set(await s.notesHaving(h));
       found = found.filter((n) => ok.has(n.id));
     }
     return found.slice(0, 30);

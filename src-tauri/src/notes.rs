@@ -209,6 +209,12 @@ pub fn file_into_day(state: State<AppState>, id: i64, date: String) -> R<NoteCha
     with(&state, |s| s.file_into_day(id, &date))
 }
 
+/// `has:link`, `has:picture`, `has:task` in Ctrl K.
+#[tauri::command]
+pub fn notes_having(state: State<AppState>, what: String) -> R<Vec<i64>> {
+    with(&state, |s| s.notes_having(&what))
+}
+
 /// What "the week" reads, and what the week's page counts and lists without AI.
 #[tauri::command]
 pub fn notes_between(state: State<AppState>, from: i64, to: i64) -> R<Vec<Note>> {

@@ -19,7 +19,8 @@ Decided by the owner on 2026-11-06. Design doc and canvas: https://claude.ai/art
   png, jpg, gif and webp, 20 MB at most, names cleaned to letters, digits, `.`, `_` and `-`. A move or merge into
   another folder moves the pictures the note links and fixes the links, and undo moves them back.
 - A collection's look is `<top folder>/.petrel` (`color: teal`, `mark: plane`); other lines in it are kept.
-- A day's page is `journal/YYYY-MM-DD.md`. Filing a capture there adds `HH:MM text` at the end.
+- A day's page is `journal/YYYY-MM-DD.md`. Filing a capture there adds `HH:MM text` at the end, with a
+  `_from capture_` line under it.
 - Versions of a note are in `note_versions`, keyed by the note's uuid. A rename made in another app starts a new
   history.
 

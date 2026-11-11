@@ -1280,6 +1280,23 @@ impl Store {
         self.merge_with(from_id, into, steps, |body| day_entry(&time, body))
     }
 
+    /// The notes whose text has a `[[link]]` (`link`), a picture (`picture`) or an open task (`task`): `has:` in
+    /// Ctrl K. Read from the index, so every note counts, not only recent ones. Newest first.
+    pub fn notes_having(&self, what: &str) -> Result<Vec<i64>> {
+        let cond = match what {
+            "link" => "content LIKE '%[[%]]%'",
+            "picture" => "content LIKE '%![%](%)%'",
+            "task" => "(content LIKE '%- [ ] %' OR content LIKE '%* [ ] %' OR content LIKE '%+ [ ] %')",
+            _ => bail!("{what} is not something a note can have (link, picture, task)"),
+        };
+        let ids = self
+            .conn
+            .prepare(&format!("SELECT id FROM notes WHERE {cond} ORDER BY modified_at DESC"))?
+            .query_map([], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(ids)
+    }
+
     /// Notes changed between two moments (ms), newest first, with their text: what "the week" reads.
     pub fn notes_between(&self, from: i64, to: i64) -> Result<Vec<Note>> {
         let ids: Vec<i64> = self
@@ -1992,14 +2009,19 @@ fn check_day(date: &str) -> Result<String> {
     Ok(d.format("%Y-%m-%d").to_string())
 }
 
-/// One entry on a day's page: the time, then the text. A quote, a list or a heading keeps its own line.
+/// The line under an entry that came from the capture window, drawn small on the page.
+pub const FROM_CAPTURE: &str = "_from capture_";
+
+/// One entry on a day's page: the time, then the text, then where it came from. A quote, a list or a heading keeps
+/// its own line and the mark goes after a blank line (a line right under a list would join its last item); plain
+/// text ends with a hard break (two spaces) so the mark sits under it in any Markdown app.
 fn day_entry(time: &str, body: &str) -> String {
     let body = body.trim();
     let block = body.starts_with(['>', '-', '*', '#', '!', '|', '`']) || body.starts_with("1.");
     if block {
-        format!("{time}\n{body}\n")
+        format!("{time}\n{body}\n\n{FROM_CAPTURE}\n")
     } else {
-        format!("{time} {body}\n")
+        format!("{time} {body}  \n{FROM_CAPTURE}\n")
     }
 }
 
@@ -2422,7 +2444,9 @@ mod tests {
         assert_eq!(ch.note.path, "journal/2026-11-11.md");
         let body = &ch.note.body;
         assert!(
-            body.len() > 6 && body.as_bytes()[2] == b':' && body.trim_end().ends_with("Lunch with Amra"),
+            body.len() > 6
+                && body.as_bytes()[2] == b':'
+                && body.contains(" Lunch with Amra  \n_from capture_"),
             "{body}"
         );
         let q = s.capture_note("> a quote\n").unwrap();
@@ -2433,7 +2457,8 @@ mod tests {
         let other = s.file_into_day(c2.id, "2026-11-12").unwrap();
         s.undo_notes(&other.token.token).unwrap();
         assert!(dir.join(&c2.path).exists() && !dir.join("journal/2026-11-12.md").exists());
-        assert_eq!(day_entry("09:05", "- [ ] milk"), "09:05\n- [ ] milk\n");
+        assert_eq!(day_entry("09:05", "- [ ] milk"), "09:05\n- [ ] milk\n\n_from capture_\n");
+        assert_eq!(day_entry("09:05", "milk"), "09:05 milk  \n_from capture_\n");
         std::fs::remove_dir_all(dir).ok();
     }
 
@@ -2493,6 +2518,21 @@ mod tests {
         assert!(s.set_topic_face("Nowhere", "teal", "").is_err());
         // The face file is not a note.
         assert_eq!(s.scan_notes().unwrap().added, 0);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn notes_that_have_things() {
+        let dir = tmp();
+        let mut s = store_in(&dir);
+        let a = s.create_note("", "A", "See [[B]]\n", &[]).unwrap();
+        let b = s.create_note("", "B", "- [ ] milk\n- [x] eggs\n", &[]).unwrap();
+        let c = s.create_note("", "C", "![](attachments/x.png)\n", &[]).unwrap();
+        s.create_note("", "D", "- [x] done\n[[ not closed\n", &[]).unwrap();
+        assert_eq!(s.notes_having("link").unwrap(), vec![a.id]);
+        assert_eq!(s.notes_having("task").unwrap(), vec![b.id]);
+        assert_eq!(s.notes_having("picture").unwrap(), vec![c.id]);
+        assert!(s.notes_having("x; DROP TABLE notes").is_err());
         std::fs::remove_dir_all(dir).ok();
     }
 
