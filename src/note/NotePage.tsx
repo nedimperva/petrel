@@ -86,6 +86,9 @@ const LABELS: Record<AiTask, string> = {
   prompt: "Your prompt",
 };
 
+/** Where the cursor and the scroll were in each note this session, so going back never jumps. */
+const places = new Map<number, { anchor: number; head: number; top: number }>();
+
 export default function NotePage(p: Props) {
   let host!: HTMLDivElement;
   let titleInput!: HTMLInputElement;
@@ -130,8 +133,16 @@ export default function NotePage(p: Props) {
 
   const loadLinks = async (id: number) => setLinks(await (await api()).backlinks(id).catch(() => ({ linked: [], mentioned: [] })));
 
+  const keepPlace = () => {
+    const n = note();
+    if (!n || !editor) return;
+    const sel = editor.selection();
+    places.set(n.id, { ...sel, top: host.closest(".page-main")?.scrollTop ?? 0 });
+  };
+
   async function load(id: number | null) {
     await saver?.flush();
+    keepPlace();
     setRelated(null);
     setMenu(null);
     setExplain(null);
@@ -156,6 +167,15 @@ export default function NotePage(p: Props) {
       measure();
       void loadLinks(n.id);
       editor?.view.focus();
+      // Coming back to a note (Back, a link, the library) finds the cursor and the scroll where they were.
+      const at = places.get(n.id);
+      if (at && editor) {
+        editor.select(at.anchor, at.head);
+        requestAnimationFrame(() => {
+          const sc = host.closest(".page-main");
+          if (sc) sc.scrollTop = at.top;
+        });
+      }
     } catch (e) {
       say(errText(e), { error: true });
       p.onHome();
@@ -519,6 +539,7 @@ export default function NotePage(p: Props) {
   }, { defer: true }));
 
   onCleanup(() => {
+    keepPlace();
     void saver?.flush();
     editor?.destroy();
   });
@@ -705,11 +726,7 @@ export default function NotePage(p: Props) {
         <Show when={words()}>
           <span>{words()} words</span>
         </Show>
-        <Show when={dayPage()}>
-          <span>
-            <kbd>Alt ←</kbd> <kbd>Alt →</kbd> other days
-          </span>
-        </Show>
+        <KeyHints hints={[!!dayPage() && ["Alt ← →", "other days"], ["Ctrl K", "find"], ["Ctrl J", "AI"], ["Ctrl L", "library"]]} />
         <Show when={p.notice}>
           <span class="notice">{p.notice}</span>
         </Show>

@@ -1,5 +1,5 @@
 // Ctrl K: search or ask. Typing finds notes (by title first, then by words) and commands. A question (ending in
-// `?`, or `Tab` on any text) asks Claude to answer from the notes, with the notes it used as cards to open.
+// `?`, or the Ask row at the end of the list) asks Claude to answer from the notes, with the notes it used as cards to open.
 // Ctrl P opens the same bar on notes only. A few words narrow the notes found: `in:travel`, `pinned`, `today`,
 // `this week`, `has:link`, `has:picture`, `has:task` (palette/filters.ts). After an answer, Tab asks again: the
 // follow-up goes with the earlier answers and the same notes, and Ctrl Enter keeps the whole exchange as a note.
@@ -195,7 +195,6 @@ export default function CommandBar(p: {
     }
     if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) setI((i() + 1) % Math.max(1, n));
     else if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p" && !p.notesOnly)) setI((i() + n - 1) % Math.max(1, n));
-    else if (e.key === "Tab" && !p.notesOnly && q().trim() && noFilters(filters())) void ask();
     else if (e.key === "Enter" && answer() && answer() !== "loading" && e.ctrlKey) void saveAnswer();
     else if (e.key === "Enter") choose(rows()[i()]);
     else if (e.key === "Escape") p.onClose();
@@ -223,9 +222,9 @@ export default function CommandBar(p: {
             }}
             onKeyDown={key}
           />
-          <Show when={!p.notesOnly && q().trim() && noFilters(filters())}>
+          <Show when={!p.notesOnly && answer() && answer() !== "loading"}>
             <span class="muted small nowrap">
-              <kbd>Tab</kbd> {answer() && answer() !== "loading" ? "ask again" : "ask"}
+              <kbd>Tab</kbd> ask again
             </span>
           </Show>
         </div>

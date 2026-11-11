@@ -4,7 +4,7 @@
 
 import { createMemo, createSignal, For, onMount, Show } from "solid-js";
 import { api, errText, type OpenTask } from "../api";
-import { folderName, say } from "../ui";
+import { folderName, KeyHints, say } from "../ui";
 
 export default function Tasks(p: { onClose(): void; onOpen(id: number): void; onTicked(noteId: number): void }) {
   let input!: HTMLInputElement;
@@ -109,16 +109,9 @@ export default function Tasks(p: { onClose(): void; onOpen(id: number): void; on
           </Show>
         </div>
         <footer class="picker-foot">
-          <span>
-            <kbd>x</kbd> tick
-          </span>
-          <span>
-            <kbd>Enter</kbd> open the note
-          </span>
+          <KeyHints hints={[["↑ ↓", "move"], ["x", "tick"], ["Enter", "open the note"]]} />
           <span class="grow" />
-          <span>
-            <kbd>Esc</kbd>
-          </span>
+          <KeyHints hints={[["Esc", "back"]]} />
         </footer>
       </div>
     </div>

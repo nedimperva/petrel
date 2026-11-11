@@ -2533,3 +2533,22 @@ kbd {
   border-top: 1px solid var(--line);
   font-size: var(--t-xs);
 }
+
+/* ---- one overlay that grows into a panel: Ctrl K, tasks, the week, history -------------------------------- */
+
+/* Every overlay comes and goes the same way. */
+.palette,
+.panel,
+.dialog,
+.lsheet,
+.settle,
+.switcher,
+.menu {
+  animation: rise var(--d-base) var(--ease);
+}
+.scrim.top > .panel {
+  max-height: 78vh;
+}
+.scrim.top > .history.panel {
+  height: min(640px, 78vh);
+}

@@ -126,8 +126,8 @@ export default function Week(p: { aiReady: boolean; onClose(): void; onOpen(id: 
   onCleanup(() => document.removeEventListener("keydown", key, true));
 
   return (
-    <div class="scrim" onMouseDown={(e) => e.target === e.currentTarget && p.onClose()}>
-      <div class="dialog week" role="dialog" aria-label="Your week">
+    <div class="scrim top" onMouseDown={(e) => e.target === e.currentTarget && p.onClose()}>
+      <div class="dialog week panel" role="dialog" aria-label="Your week">
         <header class="dialog-head">
           <h2>Your week, {range.label}</h2>
           <span class="grow" />

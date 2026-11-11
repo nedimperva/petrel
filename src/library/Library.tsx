@@ -5,13 +5,13 @@
 // m files the card you are on and r reviews the inbox one card at a time. A note changed in two places is a card
 // in the inbox until it is settled (Settle.tsx).
 
-import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, lazy, on, onCleanup, onMount, Show } from "solid-js";
 import { api, errText, type AiSuggestion, type Conflict, type Note, type NoteSummary } from "../api";
 import { hasVersions, versionsOf } from "../collection/versions";
 import { copyFilled, itemText } from "../collection/copyItem";
 import Destination, { type Target } from "../inbox/Destination";
 import { fileCapture } from "../inbox/file";
-import { folderName, say, typing, undoLast } from "../ui";
+import { folderName, KeyHints, say, typing, undoLast } from "../ui";
 import type { Tab } from "../TitleBar";
 import Card, { topOf } from "./Card";
 import FacePicker from "./FacePicker";
@@ -19,6 +19,9 @@ import Mark, { faces, loadFaces } from "./Mark";
 import { toCopy } from "./faces";
 import Settle from "./Settle";
 import Sheet from "./Sheet";
+
+// The review is a mode of the inbox's cards: one at a time, in the library's place.
+const Review = lazy(() => import("../inbox/Review"));
 
 export interface LibraryData {
   notes: NoteSummary[];
@@ -87,6 +90,9 @@ export default function Library(p: {
   onChanged(): void;
   onAiSetup(): void;
   onReview(): void;
+  /** The inbox, one card at a time. */
+  reviewing?: boolean;
+  onReviewDone?(): void;
 }) {
   let grid!: HTMLDivElement;
   let filterInput!: HTMLInputElement;
@@ -224,7 +230,7 @@ export default function Library(p: {
   }
 
   const key = (e: KeyboardEvent) => {
-    if (open() !== null || moving() || facing() !== null || settling() || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (p.reviewing || open() !== null || moving() || facing() !== null || settling() || e.ctrlKey || e.metaKey || e.altKey) return;
     if (typing(e)) {
       if (e.target === filterInput && (e.key === "ArrowDown" || e.key === "Enter")) {
         e.preventDefault();
@@ -322,6 +328,10 @@ export default function Library(p: {
 
   return (
     <div class="library" ref={grid}>
+      <Show when={p.reviewing}>
+        <Review aiReady={p.aiReady} onDone={() => p.onReviewDone?.()} onEdit={p.onEdit} onAiSetup={p.onAiSetup} onChanged={p.onChanged} />
+      </Show>
+      <Show when={!p.reviewing}>
       <div class="lib-head">
         <Show when={heading()}>
           <div class="lib-title">
@@ -455,38 +465,20 @@ export default function Library(p: {
       </Show>
 
       <footer class="lib-foot">
-        <span>
-          <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd> move
-        </span>
-        <span>
-          <kbd>Enter</kbd> open
-        </span>
-        <span>
-          <kbd>c</kbd> copy
-        </span>
-        <span>
-          <kbd>e</kbd> edit
-        </span>
-        <Show when={p.tab === "inbox"}>
-          <span>
-            <kbd>m</kbd> move
-          </span>
-          <span>
-            <kbd>r</kbd> review
-          </span>
-        </Show>
-        <Show when={p.tab !== "inbox"}>
-          <span>
-            <kbd>p</kbd> pin
-          </span>
-          <span>
-            <kbd>t</kbd> colour and mark
-          </span>
-        </Show>
+        <KeyHints
+          hints={[
+            ["← → ↑ ↓", "move"],
+            ["Enter", "open"],
+            ["c", "copy"],
+            ["e", "edit"],
+            p.tab === "inbox" && ["m", "file"],
+            p.tab === "inbox" && ["r", "one at a time"],
+            p.tab !== "inbox" && ["p", "pin"],
+            p.tab !== "inbox" && ["t", "look and kind"],
+          ]}
+        />
         <span class="grow" />
-        <span>
-          <kbd>Esc</kbd> back to writing
-        </span>
+        <KeyHints hints={[["Esc", "back to writing"]]} />
       </footer>
 
       <Show when={open()} keyed>
@@ -497,7 +489,7 @@ export default function Library(p: {
             aiReady={p.aiReady}
             onClose={() => setOpen(null)}
             onEdit={(i) => (setOpen(null), p.onEdit(i))}
-            onMove={(n) => setMoving(n)}
+            onMove={(n) => (setOpen(null), setMoving(n))}
             onFile={fileSuggested}
             onDelete={remove}
             onAiSetup={p.onAiSetup}
@@ -519,6 +511,7 @@ export default function Library(p: {
             }}
           />
         )}
+      </Show>
       </Show>
     </div>
   );
