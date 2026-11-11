@@ -379,7 +379,7 @@ export default function App() {
     else if (e.key === "Escape" && view().kind === "library") {
       if (document.querySelector(".scrim")) return;
       void writing();
-    } else if (e.key === "Escape" && beside() !== null && view().kind === "note" && !e.defaultPrevented && !document.querySelector(".scrim, .menu, .ai-bar, .explain")) {
+    } else if (e.key === "Escape" && beside() !== null && view().kind === "note" && !e.defaultPrevented && !document.querySelector(".scrim, .menu, .explain")) {
       void closeBeside();
     } else if (!mod && !typing(e) && e.key === "z" && view().kind === "note") {
       if (!undoLast()) return;

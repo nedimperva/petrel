@@ -914,54 +914,7 @@ kbd {
 }
 
 /* AI in the text: the bar, the slash menu, the suggestion in place. */
-.ai-bar {
-  position: fixed;
-  z-index: 30;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 4px 4px 4px 10px;
-  border-radius: var(--r-lg);
-  background: var(--ink);
-  color: var(--paper);
-  box-shadow: var(--shadow-lg);
-  animation: rise var(--d-base) var(--ease);
-}
-.ai-bar .spark {
-  color: #b3b3ff;
-  margin-right: 4px;
-}
-.ai-bar-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 9px;
-  border-radius: 7px;
-  font-size: var(--t-md);
-  font-weight: 500;
-}
-.ai-bar-btn:hover {
-  background: rgba(255, 255, 255, 0.12);
-}
-.ai-bar kbd {
-  background: transparent;
-  border-color: rgba(255, 255, 255, 0.25);
-  color: rgba(255, 255, 255, 0.6);
-}
-.ai-ask {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.ai-ask input {
-  width: 340px;
-  height: 30px;
-  border: 0 !important;
-  background: rgba(255, 255, 255, 0.1) !important;
-  color: var(--paper);
-  box-shadow: none !important;
-}
+
 .menu,
 .explain {
   position: fixed;
@@ -2273,48 +2226,6 @@ kbd {
 }
 
 /* ---- your prompts under Ctrl J's built-in tasks ---------------------------------------------------------- */
-
-.ai-bar {
-  flex-wrap: wrap;
-  max-width: min(560px, calc(100vw - 24px));
-}
-.ai-prompts {
-  flex-basis: 100%;
-  display: flex;
-  flex-direction: column;
-  margin-top: 4px;
-  padding: 4px 4px 2px 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.12);
-}
-.ai-prompts .menu-head {
-  padding: 4px 6px;
-  color: rgba(255, 255, 255, 0.7);
-  font-size: var(--t-xs);
-}
-.ai-prompts .menu-item {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--s-3);
-  padding: 5px 6px;
-  border: 0;
-  border-radius: var(--r-sm);
-  background: none;
-  color: inherit;
-  font: inherit;
-  font-size: var(--t-sm);
-  text-align: left;
-  cursor: pointer;
-}
-.ai-prompts .menu-item:hover,
-.ai-prompts .menu-item.on {
-  background: rgba(255, 255, 255, 0.12);
-}
-.ai-prompts .muted {
-  color: rgba(255, 255, 255, 0.55);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 
 /* ---- ask again ------------------------------------------------------------------------------------------- */
 
