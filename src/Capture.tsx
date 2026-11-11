@@ -12,7 +12,8 @@ import { createEditor, type EditorHandle } from "./editor/editor";
 import { pictureExtensions } from "./editor/pictures";
 import Destination, { targetFolder, targetLabel, type Target } from "./inbox/Destination";
 import { fileCapture } from "./inbox/file";
-import { quoteBlock } from "./inbox/quote";
+import { quoteBlock, titleLine } from "./inbox/quote";
+import { titleFrom } from "./copy";
 import { pickRoute, strip, tokens, typingToken } from "./inbox/route";
 import Mark, { loadFaces } from "./library/Mark";
 import { completionTheme } from "./notes/links";
@@ -105,6 +106,20 @@ export default function Capture() {
     } else setTarget(r.route.kind === "day" ? { kind: "day" } : { kind: "folder", folder: r.route.folder });
   }
 
+  /** A capture left in the inbox is named by its words, not the time it was made: easy to find again. A name
+   * already taken gets a number; if none is free it keeps the time. */
+  async function nameCapture(id: number, title: string) {
+    const s = await api();
+    for (const t of [title, `${title} 2`, `${title} 3`, `${title} 4`]) {
+      try {
+        await s.renameNote(id, t);
+        return;
+      } catch {
+        // Taken: try the next.
+      }
+    }
+  }
+
   async function done() {
     if (closing) return;
     closing = true;
@@ -123,6 +138,7 @@ export default function Capture() {
     try {
       if (n && !text.trim()) await s.trashNote(n.id);
       else if (n && target()) await fileCapture({ ...n, body: text }, target()!);
+      else if (n) await nameCapture(n.id, titleFrom(titleLine(text)));
     } catch (e) {
       // The text is safe in the inbox; filing can be done from there.
       console.error(e);

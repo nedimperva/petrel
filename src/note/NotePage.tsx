@@ -6,6 +6,7 @@
 
 import { createEffect, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 import { api, errText, type AiRelated, type AiTask, type Backlinks, type Note } from "../api";
+import { toggleTask } from "../editor/commands";
 import { createEditor, type EditorHandle } from "../editor/editor";
 import { pictureExtensions } from "../editor/pictures";
 import { addDays, clock, dayTitle, isDayNote, JOURNAL, monthGrid, today } from "../journal/days";
@@ -25,6 +26,8 @@ export interface NotePageHandle {
   selectedText(): string;
   ai(task: AiTask): void;
   findRelated(): void;
+  /** The line (or the selected lines) becomes a task, or a task is ticked. */
+  task(): void;
   reload(): Promise<void>;
   focus(): void;
 }
@@ -390,6 +393,10 @@ export default function NotePage(p: Props) {
         void run(task, s.empty ? r.from : s.from, s.empty ? r.to : s.to);
       },
       findRelated,
+      task: () => {
+        toggleTask(view());
+        view().focus();
+      },
       reload: () => load(note()?.id ?? null),
       focus: () => editor?.view.focus(),
     });

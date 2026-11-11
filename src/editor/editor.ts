@@ -19,6 +19,7 @@ import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { syntaxHighlighting, HighlightStyle } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
 import { insertLink, toggleBold, toggleItalic, toggleList, toggleTask } from "./commands";
+import { taskExtensions } from "./tasks";
 
 export interface EditorHandle {
   view: EditorView;
@@ -159,6 +160,7 @@ export function createEditor(
       extra.of([]),
       markdown({ base: markdownLanguage }),
       syntaxHighlighting(markdownHighlight),
+      taskExtensions,
       placeholder(o.placeholder ?? "Start writing. It saves as you type."),
       search({ top: true }),
       // Petrel's own keys first. Alt ↑/↓ (move line), Shift Alt ↓ (duplicate line) and Enter continuing lists

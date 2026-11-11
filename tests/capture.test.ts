@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { pickRoute, strip, tokens, typingToken } from "../src/inbox/route.ts";
 import { addDays, isDayNote, isoWeek, monthGrid, parseDay } from "../src/journal/days.ts";
 import { bump, parseCounts, score } from "../src/inbox/learn.ts";
-import { quoteBlock } from "../src/inbox/quote.ts";
+import { quoteBlock, titleLine } from "../src/inbox/quote.ts";
 
 test("words are found outside code and Markdown", () => {
   const t = tokens("Rest the dough #recipes\n# Heading\n> quote\n`#code` and >Groceries\n```\n#fenced\n```\nend #today");
@@ -63,14 +63,23 @@ test("filing learns, and recent beats old", () => {
 test("a quote keeps its source", () => {
   assert.equal(
     quoteBlock({ text: "A cold proof.\nDeeper taste.", app: "Firefox", title: "The Bread Book", link: null }),
-    "> A cold proof.\n> Deeper taste.\n>\n> — Firefox · The Bread Book\n\n",
+    "> A cold proof.\n> Deeper taste.\n>\n> — The Bread Book\n\n",
   );
   assert.equal(quoteBlock({ text: "x", app: null, title: null, link: null }), "> x\n\n");
   assert.equal(quoteBlock({ text: null, app: "Firefox", title: "t", link: null }), "");
   assert.equal(
     quoteBlock({ text: "x", app: "Edge", title: null, link: "https://www.example.com/a b" }),
-    "> x\n>\n> — Edge · [example.com](<https://www.example.com/a b>)\n\n",
+    "> x\n>\n> — [example.com](<https://www.example.com/a b>)\n\n",
   );
+  assert.equal(quoteBlock({ text: "x", app: "Word", title: null, link: null }), "> x\n>\n> — Word\n\n");
+});
+
+test("a capture is named by its words", () => {
+  const quote = "> A long, cold proof.\n>\n> — The Bread Book · [breadbook.example](<https://breadbook.example/3>)\n\n";
+  assert.equal(titleLine(`${quote}Grandma's trick: rest it overnight`), "Grandma's trick: rest it overnight");
+  assert.equal(titleLine(quote), "The Bread Book");
+  assert.equal(titleLine("> Only a quote here.\n"), "Only a quote here.");
+  assert.equal(titleLine("Call the bank before Friday"), "Call the bank before Friday");
 });
 
 test("kept for later comes back the next day", async () => {

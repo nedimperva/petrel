@@ -2028,3 +2028,18 @@ kbd {
   font-size: 0.68em;
   color: var(--faint);
 }
+
+/* Tasks: a real checkbox where `- [ ]` is, and a done task goes quiet. */
+.cm-task-box {
+  width: 0.9em;
+  height: 0.9em;
+  margin: 0 0.45em 0 0;
+  vertical-align: -0.08em;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.cm-task-done {
+  color: var(--faint);
+  text-decoration: line-through;
+  text-decoration-color: var(--line-strong);
+}

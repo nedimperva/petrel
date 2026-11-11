@@ -167,6 +167,7 @@ export default function App() {
     { id: "title", label: "AI: Suggest a title", when: onNote, run: () => page?.ai("title") },
     { id: "related", label: "AI: Find related notes", when: onNote, run: () => page?.findRelated() },
     { id: "move", label: "Move to a note or collection…", when: onNote, run: () => setMoving(true) },
+    { id: "task", label: "Add a task, or tick one", keys: "Ctrl Shift X", when: () => view().kind === "note", run: () => page?.task() },
     { id: "pin", label: "Pin or unpin this note", when: onNote, run: () => void pin() },
     { id: "history", label: "History", keys: "Ctrl H", when: onNote, run: () => setHistory(true) },
     { id: "delete", label: "Delete this note", when: onNote, run: () => void trash() },
