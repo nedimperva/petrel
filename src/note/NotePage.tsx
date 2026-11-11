@@ -86,6 +86,9 @@ const LABELS: Record<AiTask, string> = {
   prompt: "Your prompt",
 };
 
+/** The AI menu's height at most, to open it above the text near the bottom of the window. */
+const MENU_H = 400;
+
 /** Where the cursor and the scroll were in each note this session, so going back never jumps. */
 const places = new Map<number, { anchor: number; head: number; top: number }>();
 
@@ -167,6 +170,15 @@ export default function NotePage(p: Props) {
       measure();
       void loadLinks(n.id);
       editor?.view.focus();
+      // Coming back to today's page starts a new entry under the last one, the time already there. It is not
+      // written until something is typed after it.
+      if (editor && n.folder === JOURNAL && n.title === today() && n.body.trim()) {
+        const t = `${n.body.replace(/\s+$/, "")}\n\n${clock()} `;
+        saver.load({ ...n, body: t });
+        editor.select(t.length, t.length);
+        requestAnimationFrame(() => editor?.view.dispatch({ effects: EditorView.scrollIntoView(t.length, { y: "center" }) }));
+        return;
+      }
       // Coming back to a note (Back, a link, the library) finds the cursor and the scroll where they were.
       const at = places.get(n.id);
       if (at && editor) {
@@ -297,7 +309,10 @@ export default function NotePage(p: Props) {
     if (r.from !== r.to) v.dispatch({ selection: { anchor: r.from, head: r.to } });
     const c = v.coordsAtPos(r.from !== r.to ? r.to : sel.head);
     void loadPrompts();
-    setMenu({ x: c?.left ?? 0, y: (c?.bottom ?? 0) + 6, i: 0, q: "", whole: sel.empty, from: r.from, to: r.to, head: sel.head });
+    // Near the bottom of the window the menu opens above the text, so it never runs off.
+    const above = (c?.bottom ?? 0) + MENU_H > innerHeight;
+    const y = above ? Math.max(56, (c?.top ?? 0) - 6 - MENU_H) : (c?.bottom ?? 0) + 6;
+    setMenu({ x: c?.left ?? 0, y, i: 0, q: "", whole: sel.empty, from: r.from, to: r.to, head: sel.head });
   }
 
   const closeMenu = () => {
@@ -345,6 +360,8 @@ export default function NotePage(p: Props) {
   interface MenuItem {
     label: string;
     hint: string;
+    /** The heading it sits under. */
+    group?: string;
     go(): void;
   }
 
@@ -363,17 +380,17 @@ export default function NotePage(p: Props) {
         ["checklist", "Turn into a checklist"],
         ["explain", "Explain"],
       ] as const)
-        out.push({ label, hint: m.whole ? "this paragraph" : "the selection", go: () => void run(task, m.from, m.to) });
+        out.push({ label, hint: m.whole ? "this paragraph" : "the selection", group: "Rewrite", go: () => void run(task, m.from, m.to) });
     } else {
       const above = paragraphAbove(m.head);
-      if (above) out.push({ label: "Turn into a checklist", hint: "the paragraph above", go: () => void run("checklist", above.from, above.to) });
+      if (above) out.push({ label: "Turn into a checklist", hint: "the paragraph above", group: "Rewrite", go: () => void run("checklist", above.from, above.to) });
     }
-    out.push({ label: "Continue writing", hint: "from the cursor", go: () => void run("continue", m.head, m.head) });
-    out.push({ label: "Summarize", hint: "the text above the cursor", go: () => void run("summarize", m.head, m.head) });
-    out.push({ label: "Suggest a title", hint: "renames the note if you keep it", go: () => void run("title", 0, len) });
+    out.push({ label: "Continue writing", hint: "from the cursor", group: "Write", go: () => void run("continue", m.head, m.head) });
+    out.push({ label: "Summarize", hint: "the text above the cursor", group: "Write", go: () => void run("summarize", m.head, m.head) });
+    out.push({ label: "Suggest a title", hint: "renames the note if you keep it", group: "Write", go: () => void run("title", 0, len) });
     const promptRange = m.whole ? { from: 0, to: len } : { from: m.from, to: m.to };
     for (const n of prompts())
-      out.push({ label: n.title, hint: m.whole ? "your prompt · the whole note" : "your prompt · the selection", go: () => void runPrompt(n, promptRange) });
+      out.push({ label: n.title, hint: m.whole ? "the whole note" : "the selection", group: "Your prompts", go: () => void runPrompt(n, promptRange) });
     const q = m.q.trim();
     if (!q) return out;
     const found = rank(q, out, (x) => x.label);
@@ -387,8 +404,9 @@ export default function NotePage(p: Props) {
     const items = menuItems();
     const n = items.length;
     const digit = Number(e.key);
-    if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) setMenu({ ...m, i: (m.i + 1) % Math.max(1, n) });
-    else if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p")) setMenu({ ...m, i: (m.i + n - 1) % Math.max(1, n) });
+    const show = () => queueMicrotask(() => document.querySelector(".ai-menu .menu-item.on")?.scrollIntoView({ block: "nearest" }));
+    if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) (setMenu({ ...m, i: (m.i + 1) % Math.max(1, n) }), show());
+    else if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p")) (setMenu({ ...m, i: (m.i + n - 1) % Math.max(1, n) }), show());
     else if (e.key === "Enter") {
       const it = items[m.i];
       setMenu(null);
@@ -794,7 +812,7 @@ export default function NotePage(p: Props) {
         {(m) => (
           <div
             class="menu ai-menu"
-            style={{ left: `${Math.max(12, Math.min(m().x, innerWidth - 380))}px`, top: `${Math.max(56, Math.min(m().y, innerHeight - 380))}px` }}
+            style={{ left: `${Math.max(12, Math.min(m().x, innerWidth - 380))}px`, top: `${m().y}px` }}
             role="dialog"
             aria-label="Ask Claude"
           >
@@ -812,6 +830,10 @@ export default function NotePage(p: Props) {
             <div class="ai-menu-list" role="listbox">
               <For each={menuItems()}>
                 {(x, i) => (
+                  <>
+                  <Show when={x.group && x.group !== menuItems()[i() - 1]?.group}>
+                    <div class="ai-menu-group">{x.group}</div>
+                  </Show>
                   <button
                     class="menu-item"
                     role="option"
@@ -824,17 +846,15 @@ export default function NotePage(p: Props) {
                       x.go();
                     }}
                   >
-                    <Show when={!m().q && i() < 9}>
-                      <kbd>{i() + 1}</kbd>
-                    </Show>
                     <span>{x.label}</span>
                     <span class="muted">{x.hint}</span>
                   </button>
+                  </>
                 )}
               </For>
             </div>
             <footer class="ai-menu-foot">
-              <KeyHints hints={[["1–9", "pick"], ["Enter", "run"], ["Esc", "close"]]} />
+              <KeyHints hints={[["↑ ↓", "choose"], ["Enter", "run"], ["Esc", "close"]]} />
             </footer>
           </div>
         )}

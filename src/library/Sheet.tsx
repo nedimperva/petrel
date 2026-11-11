@@ -23,6 +23,8 @@ export default function Sheet(p: {
   onFile(note: Note, s: AiSuggestion): void;
   onDelete(note: Note): void;
   onAiSetup(): void;
+  /** In the library's preview pane, always open: no scrim, Esc is the library's, the fields wait for a click. */
+  inline?: boolean;
 }) {
   const [note] = createResource(
     () => p.id,
@@ -80,8 +82,10 @@ export default function Sheet(p: {
   const key = (e: KeyboardEvent) => {
     const n = note();
     if (!n) return;
-    if (e.key === "Escape") p.onClose();
-    else if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight") && versions().length > 1) step(e.key === "ArrowLeft");
+    if (e.key === "Escape") {
+      if (p.inline) return;
+      p.onClose();
+    } else if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight") && versions().length > 1) step(e.key === "ArrowLeft");
     else if (e.key === "Enter" && !(e.target instanceof HTMLTextAreaElement && !e.ctrlKey)) {
       const s = sugg();
       if (inbox() && Array.isArray(s) && s[0]) p.onFile(n, s[0]);
@@ -105,10 +109,10 @@ export default function Sheet(p: {
   const shown = () => parts(text());
 
   return (
-    <div class="scrim sheet-scrim" onMouseDown={(e) => e.target === e.currentTarget && p.onClose()}>
+    <div class={p.inline ? "sheet-inline" : "scrim sheet-scrim"} onMouseDown={(e) => !p.inline && e.target === e.currentTarget && p.onClose()}>
       <Show when={note()}>
         {(n) => (
-          <div class={`lsheet ${hueClass(n().folder)} kind-${kindOf(n().folder)}`} role="dialog" aria-label={n().title}>
+          <div class={`lsheet ${hueClass(n().folder)} kind-${kindOf(n().folder)}`} role={p.inline ? "region" : "dialog"} aria-label={n().title}>
             <div class="lsheet-main">
               <div class="lsheet-top">
                 <span class="lcard-where">
@@ -193,7 +197,7 @@ export default function Sheet(p: {
               >
                 <Show when={fields().length}>
                   <div class="side-head">Fill in</div>
-                  <BlankFields state={state} side />
+                  <BlankFields state={state} side focusFirst={!p.inline} />
                 </Show>
                 <div class="side-actions">
                   <button type="button" class="btn primary wide big" onClick={() => copy()}>

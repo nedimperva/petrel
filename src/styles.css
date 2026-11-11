@@ -2773,3 +2773,148 @@ kbd {
 .margin-related {
   align-self: flex-start;
 }
+
+/* ---- Ctrl L: a list and a big preview ---------------------------------------------------------------------- */
+
+.library.lib-split {
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  gap: 0;
+  display: grid;
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  background: var(--paper);
+}
+.lib-review {
+  grid-column: 1 / -1;
+  grid-row: 1 / -1;
+  overflow: auto;
+}
+.lib-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--line);
+}
+.lib-list-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-4) var(--s-4) var(--s-2);
+}
+.lib-list-head h1 {
+  margin: 0;
+  font: 600 var(--t-lg) / 1.3 var(--font-ui);
+}
+.lib-split .lib-filter {
+  flex: none;
+  height: 34px;
+  margin: 0 var(--s-3) var(--s-2);
+}
+.lib-rows {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border-top: 1px solid var(--line);
+}
+.lib-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 10px var(--s-4);
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  font: inherit;
+  text-align: left;
+  color: var(--ink);
+  cursor: pointer;
+}
+.lib-row:hover {
+  background: var(--hover);
+}
+.lib-row.on,
+.lib-row:focus-visible {
+  outline: none;
+  background: var(--accent-soft);
+}
+.lib-row-top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.lib-row-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-md);
+  font-weight: 500;
+}
+.lib-row-meta {
+  flex: none;
+  font-size: var(--t-xs);
+  color: var(--muted);
+}
+.lib-row-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-sm);
+  color: var(--muted);
+}
+.lib-row.conflict .lib-row-meta {
+  color: var(--bad);
+}
+.lib-new {
+  margin: var(--s-3) var(--s-4);
+  height: 32px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--t-sm);
+  cursor: pointer;
+}
+.lib-preview {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+.sheet-inline {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+}
+.sheet-inline .lsheet {
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--paper);
+  animation: none;
+}
+.lib-split .lib-foot {
+  grid-column: 1 / -1;
+  position: static;
+  margin: 0;
+  padding: 0 var(--s-4);
+  background: var(--paper);
+  border-top: 1px solid var(--line);
+}
+.ai-menu-group {
+  padding: 10px 10px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.ai-menu-list {
+  max-height: 300px;
+}

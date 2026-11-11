@@ -7,6 +7,15 @@ import { say } from "../ui";
 import { tick } from "../joy/sound";
 import { applyPrefs, FONTS, prefs, setPrefs, SIZES, storedValue, THEMES, type Prefs } from "./prefs";
 
+/** Ctrl+Alt with a letter, digit or sign is AltGr+that key to Windows, which types a character on many layouts. */
+export function typesCharacter(hotkey: string): boolean {
+  const parts = hotkey.split("+").map((x) => x.trim().toLowerCase());
+  const key = parts[parts.length - 1] ?? "";
+  const mods = parts.slice(0, -1);
+  const altGr = mods.includes("alt") && (mods.includes("ctrl") || mods.includes("control"));
+  return altGr && !mods.includes("shift") && (key.length === 1 || /^(key|digit)[a-z0-9]$/.test(key));
+}
+
 export default function Settings(p: { section?: "ai"; onClose(): void; onRoot(root: string): void; onAi(s: AiStatus): void }) {
   const [info, { refetch: refetchInfo }] = createResource(async () => (await api()).notesInfo());
   const [desk, { mutate: setDesk }] = createResource<DesktopSettings>(async () => (await api()).desktopSettings());
@@ -153,6 +162,9 @@ export default function Settings(p: { section?: "ai"; onClose(): void; onRoot(ro
                     </button>
                     <Show when={err()}>
                       <span class="bad small">{err()}</span>
+                    </Show>
+                    <Show when={!err() && typesCharacter(hk()[w] ?? cur())}>
+                      <span class="bad small">Ctrl Alt with a key is AltGr on many keyboards (AltGr V is @ in Bosnian): it would take that character from every app.</span>
                     </Show>
                   </div>
                 );
