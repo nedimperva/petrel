@@ -25,9 +25,10 @@ shorten, continue or explain your text and answer questions from your notes, but
 
 | Where | Keys |
 |---|---|
-| Anywhere | `Ctrl K` search, commands or ask · `Ctrl P` find a note · `Ctrl N` new note · `Ctrl 1` home · `Ctrl 2` inbox · `Ctrl ,` settings |
+| Anywhere | `Ctrl K` search, commands or ask · `Ctrl P` find a note · `Ctrl N` new note · `Ctrl L` library · `Ctrl ,` settings |
 | A note | `Ctrl J` AI · `/` on an empty line for AI · `Ctrl Shift C` copy as Markdown · `Ctrl H` history · `[[` link |
-| Inbox | `j` `k` move · `Enter` open · `m` file into a note or collection · `1`–`3` the suggested homes · `d` delete · `z` undo |
+| Library | arrows or `h` `j` `k` `l` move · `Enter` open · `c` copy · `e` edit · `/` filter · `m` file an inbox card · `z` undo · `Esc` back to writing |
+| An opened card | `Enter` copy (fill the blanks first) · `e` edit · in the inbox: `m` move · `s` suggest a home · `1`–`3` pick one · `d` delete |
 | Capture window | `Tab` choose where it goes · `Ctrl Enter` or `Esc` done (an empty capture is dropped) |
 | Quick picker | type to find · `Enter` copy and close · `Tab` next blank · `Ctrl O` open in Petrel |
 
@@ -111,7 +112,7 @@ crates/petrel-core/      the engine (Rust, no UI)
   src/store.rs           SQLite schema, migrations with backup, settings, the old drafts tables
   examples/store_bench.rs  timings on a 50,000-draft store
 src-tauri/               the desktop shell and CLI: commands, windows (main, capture, picker), tray, hotkeys, AI
-src/                     the UI (SolidJS): home, inbox, collections, the writing page, command bar, picker
+src/                     the UI (SolidJS): title bar, card library, the writing page, command bar, picker
 ```
 
 ## License

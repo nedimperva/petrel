@@ -1,23 +1,22 @@
-/* Design tokens. Components use these, never raw colours, sizes or durations. Warm paper in light, warm ink in
-   dark; dark follows the system unless a theme is set on <html data-theme>. */
+/* Design tokens. Components use these, never raw colours, sizes or durations. Tern's colours, so the two apps read as one family; dark follows the system unless a theme is set on <html data-theme>. */
 
 :root {
-  --paper: #faf9f6;
-  --sheet: #fdfcfa;
+  --paper: #fcfbf9;
+  --sheet: #fcfbf9;
   --raised: #ffffff;
-  --sunk: #f3f1ec;
-  --hover: #efece5;
-  --ink: #1f1e1c;
-  --ink-2: #4a4844;
-  --muted: #66645f;
-  --faint: #8f8c85;
-  --line: #e7e4dd;
-  --line-strong: #d9d5cc;
-  --accent: #5b5bd6;
-  --accent-ink: #4646b8;
+  --sunk: #f5f3ef;
+  --hover: #eeebe5;
+  --ink: #1f1e1b;
+  --ink-2: #57534b;
+  --muted: #66625a;
+  --faint: #8a857b;
+  --line: #e9e5dd;
+  --line-strong: #d8d3c9;
+  --accent: #2f4f9a;
+  --accent-ink: #223a73;
   --accent-fg: #ffffff;
-  --accent-soft: #ececfb;
-  --accent-wash: #f5f5fd;
+  --accent-soft: #e9edf5;
+  --accent-wash: #f3f5fa;
   --ok: #2f8a5f;
   --bad: #c2453f;
   --bad-soft: #fbeceb;
@@ -62,25 +61,26 @@
   --editor-size: 18px;
   --editor-leading: 1.7;
   --editor-max: 680px;
+  --titlebar-h: 40px;
 }
 
 :root[data-theme="dark"] {
-  --paper: #191816;
-  --sheet: #1d1c1a;
-  --raised: #24231f;
-  --sunk: #151412;
-  --hover: #2a2925;
-  --ink: #ecebe6;
-  --ink-2: #cfcdc6;
-  --muted: #a3a097;
-  --faint: #7d7a72;
-  --line: #2f2d29;
-  --line-strong: #3b3934;
-  --accent: #8b8bf0;
-  --accent-ink: #a5a5f5;
-  --accent-fg: #15151f;
-  --accent-soft: #2a2a48;
-  --accent-wash: #22223a;
+  --paper: #201f1d;
+  --sheet: #201f1d;
+  --raised: #252422;
+  --sunk: #1a1918;
+  --hover: #2a2926;
+  --ink: #ece8e1;
+  --ink-2: #b5b0a6;
+  --muted: #a29d93;
+  --faint: #7f7a71;
+  --line: #302e2a;
+  --line-strong: #403d38;
+  --accent: #7b97de;
+  --accent-ink: #9db2e8;
+  --accent-fg: #10131b;
+  --accent-soft: #26304a;
+  --accent-wash: #222a3c;
   --ok: #5cc493;
   --bad: #ef7a73;
   --bad-soft: #3a2220;
@@ -95,22 +95,22 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --paper: #191816;
-    --sheet: #1d1c1a;
-    --raised: #24231f;
-    --sunk: #151412;
-    --hover: #2a2925;
-    --ink: #ecebe6;
-    --ink-2: #cfcdc6;
-    --muted: #a3a097;
-    --faint: #7d7a72;
-    --line: #2f2d29;
-    --line-strong: #3b3934;
-    --accent: #8b8bf0;
-    --accent-ink: #a5a5f5;
-    --accent-fg: #15151f;
-    --accent-soft: #2a2a48;
-    --accent-wash: #22223a;
+    --paper: #201f1d;
+    --sheet: #201f1d;
+    --raised: #252422;
+    --sunk: #1a1918;
+    --hover: #2a2926;
+    --ink: #ece8e1;
+    --ink-2: #b5b0a6;
+    --muted: #a29d93;
+    --faint: #7f7a71;
+    --line: #302e2a;
+    --line-strong: #403d38;
+    --accent: #7b97de;
+    --accent-ink: #9db2e8;
+    --accent-fg: #10131b;
+    --accent-soft: #26304a;
+    --accent-wash: #222a3c;
     --ok: #5cc493;
     --bad: #ef7a73;
     --bad-soft: #3a2220;

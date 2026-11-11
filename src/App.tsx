@@ -1,29 +1,33 @@
-// The main window: Home, the Inbox, a collection, or a note. One top bar, one command bar (Ctrl K), and keys:
-// Ctrl N new note, Ctrl 1 home, Ctrl 2 inbox, Ctrl P find a note, Ctrl H history, Ctrl , settings.
+// The main window is the page you write on. It opens on an empty page (or the note you left less than ten minutes
+// ago); Ctrl L swaps the page for the library of cards and Esc brings it back. Ctrl K finds, runs or asks, Ctrl N
+// is a new page, Ctrl H history, Ctrl , settings. The title bar is Petrel's own (TitleBar.tsx).
 
-import { createEffect, createSignal, lazy, on, onCleanup, onMount, Show, Suspense } from "solid-js";
+import { createResource, createSignal, lazy, onCleanup, onMount, Show, Suspense } from "solid-js";
 import { api, errText, inTauri, type AiStatus } from "./api";
-import Home from "./home/Home";
 import { plainText } from "./copy";
+import TitleBar from "./TitleBar";
+import { libraryTabs, loadLibrary } from "./library/Library";
 import NotePage, { type NotePageHandle } from "./note/NotePage";
 import CommandBar, { type Command } from "./palette/CommandBar";
 import { applyPrefs, parsePrefs, prefs, setPrefs } from "./settings/prefs";
-import { folderName, Kbd, say, ToastView, typing, undoLast } from "./ui";
+import { folderName, say, ToastView, typing, undoLast } from "./ui";
 import Destination, { type Target } from "./inbox/Destination";
 
-const Inbox = lazy(() => import("./inbox/Inbox"));
-const Collection = lazy(() => import("./collection/Collection"));
+const Library = lazy(() => import("./library/Library"));
 const Settings = lazy(() => import("./settings/Settings"));
 const Versions = lazy(() => import("./versions/Versions"));
 
-type View =
-  | { kind: "home" }
-  | { kind: "inbox" }
-  | { kind: "collection"; folder: string }
-  | { kind: "note"; id: number | null; folder: string };
+type View = { kind: "library"; tab: string } | { kind: "note"; id: number | null; folder: string };
+
+/** What the empty page files into: like the capture window, it goes to the inbox until you move it. */
+const NEW_FOLDER = "inbox";
+/** Coming back within this long opens the note you left instead of an empty page. */
+const RESUME_MS = 10 * 60 * 1000;
 
 export default function App() {
-  const [view, setView] = createSignal<View>({ kind: "home" });
+  const [view, setView] = createSignal<View>({ kind: "note", id: null, folder: NEW_FOLDER });
+  const [title, setTitle] = createSignal("");
+  const [tab, setTab] = createSignal("all");
   const [bar, setBar] = createSignal<"all" | "notes" | null>(null);
   const [settings, setSettings] = createSignal<false | "all" | "ai">(false);
   const [history, setHistory] = createSignal(false);
@@ -31,7 +35,7 @@ export default function App() {
   const [ai, setAi] = createSignal<AiStatus>({ ready: false, model: "", error: null });
   const [root, setRoot] = createSignal("");
   const [rev, setRev] = createSignal(0);
-  const [inboxCount, setInboxCount] = createSignal(0);
+  const [lib] = createResource(rev, loadLibrary);
   let page: NotePageHandle | undefined;
   const back: View[] = [];
 
@@ -45,11 +49,17 @@ export default function App() {
     if (v.kind !== "note") page = undefined;
     setRev(rev() + 1);
   };
-  const goBack = () => void go(back.pop() ?? { kind: "home" }, false);
   const openNote = (id: number) => go({ kind: "note", id, folder: "" });
-  const newNote = (folder?: string) => {
-    const v = view();
-    return go({ kind: "note", id: null, folder: folder ?? (v.kind === "collection" ? v.folder : "") });
+  const newNote = (folder?: string) => go({ kind: "note", id: null, folder: folder ?? NEW_FOLDER });
+  const library = (t = tab()) => (setTab(t), go({ kind: "library", tab: t }));
+  /** Back to the page you were writing on, or an empty one. */
+  const writing = () => {
+    for (let i = back.length - 1; i >= 0; i--) if (back[i].kind === "note") return go(back.splice(i)[0], false);
+    return newNote();
+  };
+  const remember = async () => {
+    const n = current();
+    await (await api()).setUiSetting("last.note", n ? `${n.id}:${Date.now()}` : "").catch(() => {});
   };
   const current = () => (view().kind === "note" ? (page?.note() ?? null) : null);
   const onNote = () => view().kind === "note" && !!current();
@@ -97,7 +107,7 @@ export default function App() {
     try {
       const t = await s.trashNote(n.id);
       say(`Deleted “${n.title}”`, { undo: () => s.undo(t.token).then(() => openNote(n.id)) });
-      void go({ kind: "home" });
+      void newNote();
     } catch (e) {
       say(errText(e), { error: true });
     }
@@ -108,15 +118,15 @@ export default function App() {
     if (!n) return;
     await (await api()).pinNote(n.id, !n.pinned);
     await page?.reload();
-    say(n.pinned ? "Unpinned" : "Pinned to Home");
+    say(n.pinned ? "Unpinned" : "Pinned to the front of its collection");
   }
 
   const commands: Command[] = [
     { id: "new", label: "New note", keys: "Ctrl N", run: () => void newNote() },
     { id: "capture", label: "Quick capture window", keys: "Ctrl Alt Space", run: () => void api().then((s) => s.openCapture()) },
     { id: "picker", label: "Quick picker: copy a prompt or snippet", keys: "Ctrl Alt V", run: () => void api().then((s) => s.openPicker()) },
-    { id: "home", label: "Home", keys: "Ctrl 1", run: () => void go({ kind: "home" }) },
-    { id: "inbox", label: "Inbox", keys: "Ctrl 2", run: () => void go({ kind: "inbox" }) },
+    { id: "library", label: "Library", keys: "Ctrl L", run: () => void library("all") },
+    { id: "inbox", label: "Inbox", run: () => void library("inbox") },
     { id: "copy", label: "Copy", when: onNote, run: () => void copy("plain") },
     { id: "copy-md", label: "Copy as Markdown", keys: "Ctrl Shift C", when: onNote, run: () => void copy("markdown") },
     { id: "copy-html", label: "Copy formatted (for mail and docs)", when: onNote, run: () => void copy("html") },
@@ -152,8 +162,6 @@ export default function App() {
     }
   }
 
-  createEffect(on(rev, async () => setInboxCount((await (await api()).listNotes({ folder: "inbox", limit: 999 })).length)));
-
   const overlay = () => !!(bar() || settings() || history() || moving());
 
   const key = (e: KeyboardEvent) => {
@@ -163,16 +171,14 @@ export default function App() {
     else if (mod && k === "p") setBar(bar() ? null : "notes");
     else if (overlay()) return;
     else if (mod && k === "n") void newNote();
-    else if (mod && e.key === "1") void go({ kind: "home" });
-    else if (mod && e.key === "2") void go({ kind: "inbox" });
+    else if (mod && k === "l") void (view().kind === "library" ? writing() : library());
     else if (mod && e.key === ",") setSettings("all");
     else if (mod && k === "h" && onNote()) setHistory(true);
     else if (mod && e.shiftKey && k === "c" && onNote()) void copy("markdown");
-    else if (e.key === "Escape" && view().kind !== "home") {
-      if (document.querySelector(".ai-bar, .menu.slash, .explain, .ai-suggest, .scrim")) return;
-      if (typing(e) && view().kind !== "note") return;
-      goBack();
-    } else if (!mod && !typing(e) && e.key === "z" && view().kind !== "inbox" && view().kind !== "collection") {
+    else if (e.key === "Escape" && view().kind === "library") {
+      if (document.querySelector(".scrim")) return;
+      void writing();
+    } else if (!mod && !typing(e) && e.key === "z" && view().kind === "note") {
       if (!undoLast()) return;
     } else return;
     e.preventDefault();
@@ -189,6 +195,8 @@ export default function App() {
       applyPrefs(prefs());
     }
     setRoot((await s.notesInfo().catch(() => ({ root: "" }))).root);
+    const [lastId, at] = (((await s.uiSettings().catch(() => ({}) as Record<string, string>))["last.note"] ?? "") as string).split(":").map(Number);
+    if (lastId && Date.now() - at < RESUME_MS) void go({ kind: "note", id: lastId, folder: "" }, false);
     setAi(await s.aiStatus().catch(() => ({ ready: false, model: "", error: null })));
     await s.scanNotes().catch((e) => say(`The Petrel folder cannot be read: ${errText(e)}`, { error: true }));
     setRev(rev() + 1);
@@ -196,10 +204,12 @@ export default function App() {
     await s.listen({
       quit: async () => {
         await page?.flush();
+        await remember();
         await s.closeWindow();
       },
       openNote: (id) => void openNote(id),
       focus: () => void rescan(),
+      // Hidden to the tray counts as leaving: coming back soon opens the same note.
       changed: () => view().kind !== "note" && setRev(rev() + 1),
     });
     if (inTauri) {
@@ -211,74 +221,44 @@ export default function App() {
           const path = await s.rescueText(page.text()).catch(() => null);
           if (path) say(`Saved to ${path}`);
         }
+        await remember();
         await s.closeWindow();
       });
     }
   });
   onCleanup(() => document.removeEventListener("keydown", key));
 
-  const title = () => {
-    const v = view();
-    if (v.kind === "inbox") return "Inbox";
-    if (v.kind === "collection") return folderName(v.folder);
-    return "";
-  };
   const noteView = () => {
     const v = view();
     return v.kind === "note" ? v : null;
   };
-  const folderView = () => {
-    const v = view();
-    return v.kind === "collection" ? v : null;
-  };
 
   return (
-    <div class="app">
-      <header class="topbar">
-        <button class="brand" onClick={() => go({ kind: "home" })} title="Home (Ctrl 1)">
-          <span class="mark" aria-hidden="true" />
-          Petrel
-        </button>
-        <Show when={title()}>
-          <span class="sep">/</span>
-          <span class="here">{title()}</span>
-        </Show>
-        <span class="grow" />
-        <button class="top-link" classList={{ on: view().kind === "inbox" }} onClick={() => go({ kind: "inbox" })}>
-          Inbox
-          <Show when={inboxCount()}>
-            <span class="count">{inboxCount()}</span>
-          </Show>
-        </button>
-        <button class="top-search" onClick={() => setBar("all")}>
-          <span class="spark">✦</span> Search or ask <Kbd keys="Ctrl K" />
-        </button>
-        <button class="icon-btn" title="Settings (Ctrl ,)" aria-label="Settings" onClick={() => setSettings("all")}>
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7">
-            <circle cx="12" cy="12" r="3" />
-            <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
-          </svg>
-        </button>
-      </header>
+    <div class="app" classList={{ "in-library": view().kind === "library" }}>
+      <TitleBar
+        library={view().kind === "library"}
+        title={title() || (noteView()?.id === null ? "New note" : "")}
+        tabs={libraryTabs(lib())}
+        tab={tab()}
+        onTab={(t) => void library(t)}
+        onLibrary={() => void (view().kind === "library" ? writing() : library())}
+        onNew={() => void newNote()}
+        onSearch={() => setBar("all")}
+      />
 
       <main class="view">
         <Suspense>
-          <Show when={view().kind === "home"}>
-            <Home
-              rev={rev()}
-              onSearch={() => setBar("all")}
-              onNew={() => newNote("")}
-              onCapture={() => void api().then((s) => s.openCapture())}
-              onOpen={openNote}
-              onInbox={() => go({ kind: "inbox" })}
-              onFolder={(folder) => go({ kind: "collection", folder })}
+          <Show when={view().kind === "library"}>
+            <Library
+              tab={tab()}
+              data={lib()}
+              aiReady={ai().ready}
+              onTab={(t) => void library(t)}
+              onEdit={(id) => void openNote(id)}
+              onNew={(folder) => void newNote(folder)}
+              onChanged={() => setRev(rev() + 1)}
+              onAiSetup={() => setSettings("ai")}
             />
-          </Show>
-          <Show when={view().kind === "inbox"}>
-            <Inbox aiReady={ai().ready} onOpen={openNote} onAiSetup={() => setSettings("ai")} onCount={setInboxCount} />
-          </Show>
-          <Show when={folderView()} keyed>
-            {(v) => <Collection folder={v.folder} onOpen={openNote} onNew={() => newNote(v.folder)} />}
           </Show>
           <Show when={noteView()}>
             {(v) => (
@@ -288,10 +268,11 @@ export default function App() {
                 root={root()}
                 aiReady={ai().ready}
                 onOpen={openNote}
-                onFolder={(folder) => go(folder === "inbox" ? { kind: "inbox" } : { kind: "collection", folder })}
-                onHome={() => go({ kind: "home" })}
+                onFolder={(folder) => void library(folder === "inbox" ? "inbox" : `c:${folder.split("/")[0]}`)}
+                onHome={() => void newNote()}
                 onHistory={() => setHistory(true)}
                 onAiSetup={() => setSettings("ai")}
+                onTitle={setTitle}
                 ref={(h) => (page = h)}
               />
             )}

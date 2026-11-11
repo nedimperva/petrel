@@ -1,5 +1,5 @@
-// The writing page: a note's title and text in Literata, a quiet breadcrumb and save state above, a rail with what
-// links here and (on request) related notes, and AI only when asked: `Ctrl J` on a selection, `/` on an empty
+// The writing page: a note's title and text in Literata and one quiet line below (where it lives, words, saved).
+// What links here, and related notes when asked, sit under the text. AI only when asked: `Ctrl J` on a selection, `/` on an empty
 // line. Saves go through the note saver (300 ms, conflict copies), exactly as before the redesign.
 
 import { createEffect, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
@@ -9,7 +9,7 @@ import { linkExtensions } from "../notes/links";
 import { createNoteSaver, type NoteSaver, type SaveState } from "../notes/saver";
 import { prefs } from "../settings/prefs";
 import { wordCount } from "../copy";
-import { ago, folderName, Kbd, say } from "../ui";
+import { folderName, say } from "../ui";
 import { aiPreview, keepPreview, previewOf, setPreview, type Preview } from "./aiPreview";
 
 export interface NotePageHandle {
@@ -34,6 +34,8 @@ interface Props {
   onFolder(folder: string): void;
   onHome(): void;
   onHistory(): void;
+  /** The title as it is typed, for the title bar. */
+  onTitle?(title: string): void;
   onAiSetup(): void;
   ref(h: NotePageHandle): void;
 }
@@ -351,6 +353,7 @@ export default function NotePage(p: Props) {
   });
 
   createEffect(() => editor?.setTypewriter(prefs().typewriter));
+  createEffect(() => p.onTitle?.(title() || (note() ? note()!.title : "")));
 
   createEffect(on(() => p.id, (id) => {
     if (editor && id !== (note()?.id ?? null)) void load(id);
@@ -407,26 +410,6 @@ export default function NotePage(p: Props) {
   return (
     <div class="page">
       <div class="page-main">
-        <div class="crumbs">
-          <button class="link" onClick={p.onHome}>
-            Petrel
-          </button>
-          <span class="sep">/</span>
-          <button class="link" onClick={() => p.onFolder(note()?.folder ?? p.folder)}>
-            {folderName(note()?.folder ?? p.folder)}
-          </button>
-          <span class="sep">/</span>
-          <span class="here">{title() || "New note"}</span>
-          <span class="grow" />
-          <span class="state" classList={{ bad: save() === "error" }}>
-            {saveLabel()}
-          </span>
-          <Show when={synced() && save() === "saved" && note()}>
-            <span class="state synced" title={p.root}>
-              In your Drive folder
-            </span>
-          </Show>
-        </div>
         <div class="sheet">
           <input
             ref={titleInput}
@@ -449,77 +432,60 @@ export default function NotePage(p: Props) {
           />
           <div class="writer" ref={host} />
         </div>
-        <div class="page-foot">
-          <span>{words()} words</span>
-          <Show when={note()}>
-            <span>Edited {ago(note()!.modifiedAt)}</span>
-          </Show>
-          <span class="grow" />
-          <span class="hint">
-            <Kbd keys="Ctrl J" /> AI on a selection
-          </span>
-          <span class="hint">
-            <kbd>/</kbd> on an empty line
-          </span>
-          <span class="hint">
-            <Kbd keys="Ctrl P" /> notes
-          </span>
-          <span class="hint">
-            <Kbd keys="Ctrl K" /> commands
-          </span>
-          <button class="hint link" onClick={p.onHistory}>
-            <Kbd keys="Ctrl H" /> history
-          </button>
-        </div>
-      </div>
-      <aside class="rail">
-        <section>
-          <h4>Linked from</h4>
-          <Show when={links().linked.length} fallback={<p class="muted small">Nothing links here yet. Type [[ in another note.</p>}>
-            <For each={links().linked}>
-              {(b) => (
-                <button class="rail-item" onClick={() => p.onOpen(b.id)}>
-                  <span class="rail-title">{b.title}</span>
-                  <span class="rail-line">{b.line.replace(/\[\[|\]\]/g, "")}</span>
-                </button>
-              )}
-            </For>
-          </Show>
-          <Show when={links().mentioned.length}>
-            <h4>Mentioned in</h4>
-            <For each={links().mentioned}>
-              {(b) => (
-                <button class="rail-item" onClick={() => p.onOpen(b.id)}>
-                  <span class="rail-title">{b.title}</span>
-                  <span class="rail-line">{b.line}</span>
-                </button>
-              )}
-            </For>
-          </Show>
-        </section>
-        <section>
-          <h4>Related</h4>
-          <Show
-            when={Array.isArray(related())}
-            fallback={
-              <button class="btn small ai" disabled={related() === "loading" || !note()} onClick={findRelated}>
-                <span class="spark">✦</span> {related() === "loading" ? "Looking…" : "Find related notes"}
-              </button>
-            }
-          >
-            <Show when={(related() as AiRelated[]).length} fallback={<p class="muted small">Nothing closely related.</p>}>
-              <For each={related() as AiRelated[]}>
-                {(r) => (
-                  <button class="rail-item" onClick={() => p.onOpen(r.id)}>
-                    <span class="rail-title">{r.title}</span>
-                    <span class="rail-line">{r.why}</span>
+        <Show when={links().linked.length || links().mentioned.length || related()}>
+          <div class="page-links">
+            <Show when={links().linked.length}>
+              <h4>Linked from</h4>
+              <For each={links().linked}>
+                {(b) => (
+                  <button class="link-row" onClick={() => p.onOpen(b.id)}>
+                    <span class="link-title">{b.title}</span>
+                    <span class="link-line">{b.line.replace(/\[\[|\]\]/g, "")}</span>
                   </button>
                 )}
               </For>
             </Show>
-          </Show>
-        </section>
-      </aside>
+            <Show when={links().mentioned.length}>
+              <h4>Mentioned in</h4>
+              <For each={links().mentioned}>
+                {(b) => (
+                  <button class="link-row" onClick={() => p.onOpen(b.id)}>
+                    <span class="link-title">{b.title}</span>
+                    <span class="link-line">{b.line}</span>
+                  </button>
+                )}
+              </For>
+            </Show>
+            <Show when={related()}>
+              <h4>
+                <span class="spark">✦</span> Related
+              </h4>
+              <Show when={Array.isArray(related())} fallback={<p class="ai-thinking">Claude is looking through your notes…</p>}>
+                <Show when={(related() as AiRelated[]).length} fallback={<p class="muted small">Nothing closely related.</p>}>
+                  <For each={related() as AiRelated[]}>
+                    {(r) => (
+                      <button class="link-row" onClick={() => p.onOpen(r.id)}>
+                        <span class="link-title">{r.title}</span>
+                        <span class="link-line">{r.why}</span>
+                      </button>
+                    )}
+                  </For>
+                </Show>
+              </Show>
+            </Show>
+          </div>
+        </Show>
+      </div>
+      <footer class="page-foot">
+        <span>{folderName(note()?.folder ?? p.folder)}</span>
+        <Show when={words()}>
+          <span>{words()} words</span>
+        </Show>
+        <span class="grow" />
+        <span class="state" classList={{ bad: save() === "error" }} title={synced() ? p.root : undefined}>
+          {saveLabel()}
+        </span>
+      </footer>
 
       <Show when={bar()}>
         {(b) => (

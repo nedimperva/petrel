@@ -95,22 +95,23 @@ export default function Capture() {
   const saveLabel = () => (note() || save() !== "saved" ? { saved: "Saved", dirty: "Editing", saving: "Saving…", error: "Not saved, retrying" }[save()] : "");
 
   return (
-    <div class="capture">
+    // No window frame: the empty parts of the panel drag the window (Tauri reads data-tauri-drag-region).
+    <div class="capture" data-tauri-drag-region>
       <div class="capture-text-host" ref={host} />
-      <footer class="capture-foot">
+      <footer class="capture-foot" data-tauri-drag-region>
         <button class="chip" classList={{ on: !!target() }} onClick={() => setChoosing(true)}>
           {target()?.kind === "note" ? "Add to " : ""}
           {targetLabel(target())}
         </button>
-        <span class="muted">
-          <kbd>Tab</kbd> picks a note or a collection
+        <span class="muted" data-tauri-drag-region>
+          <kbd>Tab</kbd> somewhere else
         </span>
-        <span class="grow" />
+        <span class="grow" data-tauri-drag-region />
         <Show when={msg()} fallback={<span class="muted">{saveLabel()}</span>}>
           <span class="bad">{msg()}</span>
         </Show>
-        <button class="btn small primary" onClick={() => void done()}>
-          Done <kbd>Ctrl Enter</kbd>
+        <button class="btn small" onClick={() => void done()}>
+          Done <kbd>Esc</kbd>
         </button>
       </footer>
       <Show when={choosing()}>

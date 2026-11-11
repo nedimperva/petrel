@@ -9,10 +9,17 @@ A personal tool for quick notes and for keeping the things you copy often. Minim
 It is not for sale; it may be open source later.
 
 - **Capture.** A hotkey opens a small window; you type; `Esc` and it is saved to `inbox/`.
-- **File it later.** The inbox shows captures as sticky notes. `m` files one into a note (added to the end) or a
-  collection (as its own note). Claude can suggest homes, but only after you press `s`.
+- **Open on a page.** The app opens on an empty writing page (or the note you left less than ten minutes ago).
+  There is no home screen and no sidebar. Everything else is called: `Ctrl L` library, `Ctrl K` find or ask,
+  `Ctrl J` AI.
+- **The library is index cards.** `Ctrl L` shows a shelf: a row of Inbox cards, then a row per collection. The
+  tabs in the title bar open one collection as a grid. A card looks like what it holds: a prompt shows its
+  blanks as chips, a snippet is code, a song is lyrics. `Enter` opens a card on a sheet; blanks become fields on
+  the right and `Enter` copies the filled text.
+- **File it later.** An inbox card opened on the sheet has Move to (`m`), Suggest a home (`s`, Claude, only when
+  pressed) and Delete (`d`). Moving files it into a note (added to the end) or a collection (as its own note).
 - **Collections are folders.** Notes, Prompts, Snippets, Songs, a topic: any top-level folder except `inbox/`.
-  A collection page shows its notes as cards; the most copied come first.
+  The most copied come first.
 - **Copy is the action.** There are no actions. Copy, Copy as Markdown and Copy formatted (HTML for mail and
   docs) are `Ctrl K` commands. `{{name}}` and `{{name|default}}` in a note are blanks filled in as you copy;
   `\{{` is a literal. The quick picker (`Ctrl Alt V`) does the same from any app and closes, so the paste goes
@@ -40,17 +47,20 @@ It is not for sale; it may be open source later.
 
 ## Look
 
-Warm paper, an ink colour for text, indigo `#5b5bd6` as the one accent. Literata for writing, Inter for the
-interface. Light and dark follow the system unless set in Settings. The writing page is the text alone, with a
-quiet footer of hints. Tokens are in `src/styles/tokens.css`.
+Tern's colours: near-white paper `#fcfbf9`, warm greys, ink `#1f1e1b`, one blue accent `#2f4f9a`. Literata for
+writing, Inter for the interface. Light and dark follow the system unless set in Settings. On Windows Petrel
+draws its own 40 px title bar, as Tern does: library and new note on the left, the note's title (or the
+library's tabs) in the middle, find and the window buttons on the right. On Linux the window manager draws the
+frame. The writing page is the text alone; its footer (collection, words, saved) fades while you type. Tokens
+are in `src/styles/tokens.css`.
 
 ## Windows
 
 | Window | What it is |
 |---|---|
-| Main | Home (ask field, inbox strip, collections, recent notes), Inbox, a collection, a note. |
-| Capture | `Ctrl Alt Space`, `petrel --capture`. One line of footer: where it goes, `Tab` to choose, `Esc` done. |
-| Quick picker | `Ctrl Alt V`, `petrel --picker`. Search, a peek pane, blanks filled inline, `Enter` copies and closes. |
+| Main | The writing page, or the library (`Ctrl L`) over it. No home, no sidebar. |
+| Capture | `Ctrl Alt Space`, `petrel --capture`. No frame. One line of footer: where it goes, `Tab` to choose, `Esc` done. |
+| Quick picker | `Ctrl Alt V`, `petrel --picker`. No frame. Search, a peek pane, blanks filled inline, `Enter` copies and closes. |
 
 On Wayland the compositor binds the keys: `bind = SUPER, N, exec, petrel --capture` and
 `bind = SUPER, V, exec, petrel --picker`.

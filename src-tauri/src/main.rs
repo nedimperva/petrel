@@ -113,8 +113,11 @@ pub fn open_capture(app: &tauri::AppHandle) {
     }
     let built = WebviewWindowBuilder::new(app, "capture", WebviewUrl::App("index.html".into()))
         .title("Petrel capture")
-        .inner_size(560.0, 320.0)
+        .inner_size(640.0, 260.0)
         .min_inner_size(360.0, 160.0)
+        // No frame: the text on a panel, dragged by its empty space (data-tauri-drag-region in the UI).
+        .decorations(false)
+        .center()
         // A quick note over whatever you were doing; it closes itself when you're done.
         .always_on_top(true)
         .visible(false)
@@ -281,6 +284,12 @@ fn main() {
                 log::info!("started hidden in the tray");
             }
             desktop::init(app.handle());
+            // Petrel's own title bar is for Windows, as in Tern. On Linux the window manager frames the main
+            // window (Hyprland draws no frame at all), and the UI leaves the window buttons out.
+            #[cfg(target_os = "linux")]
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.set_decorations(true);
+            }
             // Petrel can stay open for weeks; the version policies still apply.
             let handle = app.handle().clone();
             std::thread::spawn(move || loop {
