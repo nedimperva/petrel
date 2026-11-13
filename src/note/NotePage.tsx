@@ -366,8 +366,29 @@ export default function NotePage(p: Props) {
     hint: string;
     /** The heading it sits under. */
     group?: string;
+    /** A key of MENU_ICONS. */
+    icon: string;
     go(): void;
   }
+
+  // Small line icons for the menu, one per kind of thing it does; drawn on a 24 grid.
+  const MENU_ICONS: Record<string, string> = {
+    tidy: "M4 7h16M4 12h10M4 17h13",
+    shorten: "M4 8h16M4 16h8M16 13l3 3-3 3",
+    list: "M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01",
+    checklist: "M4 6l1.5 1.5L8 5M4 12l1.5 1.5L8 11M4 18l1.5 1.5L8 17M11 6h9M11 12h9M11 18h9",
+    explain: "M12 17v.01M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .9-1 1.7M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z",
+    continue: "M4 20l4-1 11-11-3-3L5 16l-1 4zM14 6l3 3",
+    summarize: "M5 5h14M5 10h14M5 15h8M15 18l2 2 4-4",
+    title: "M5 6V4h14v2M12 4v16M9 20h6",
+    prompt: "M7 4h10a2 2 0 0 1 2 2v14l-7-4-7 4V6a2 2 0 0 1 2-2z",
+    ask: "M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3z",
+  };
+  const MenuIcon = (x: { name: string }) => (
+    <svg class="ai-menu-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d={MENU_ICONS[x.name] ?? MENU_ICONS.ask} />
+    </svg>
+  );
 
   /** What the menu offers now, narrowed by what is typed. Typed words that match nothing are an ask. */
   const menuItems = (): MenuItem[] => {
@@ -384,22 +405,26 @@ export default function NotePage(p: Props) {
         ["checklist", "Turn into a checklist"],
         ["explain", "Explain"],
       ] as const)
-        out.push({ label, hint: m.whole ? "this paragraph" : "the selection", group: "Rewrite", go: () => void run(task, m.from, m.to) });
+        out.push({ label, hint: m.whole ? "this paragraph" : "the selection", group: "Rewrite", icon: task, go: () => void run(task, m.from, m.to) });
     } else {
       const above = paragraphAbove(m.head);
-      if (above) out.push({ label: "Turn into a checklist", hint: "the paragraph above", group: "Rewrite", go: () => void run("checklist", above.from, above.to) });
+      if (above)
+        out.push({ label: "Turn into a checklist", hint: "the paragraph above", group: "Rewrite", icon: "checklist", go: () => void run("checklist", above.from, above.to) });
     }
-    out.push({ label: "Continue from here", hint: "from the cursor", group: "Write", go: () => void run("continue", m.head, m.head) });
-    out.push({ label: "Summarize the note", hint: "the text above the cursor", group: "Write", go: () => void run("summarize", m.head, m.head) });
-    out.push({ label: "Suggest a title", hint: "renames the note if you keep it", group: "Write", go: () => void run("title", 0, len) });
+    out.push({ label: "Continue from here", hint: "from the cursor", group: "Write", icon: "continue", go: () => void run("continue", m.head, m.head) });
+    out.push({ label: "Summarize the note", hint: "the text above the cursor", group: "Write", icon: "summarize", go: () => void run("summarize", m.head, m.head) });
+    out.push({ label: "Suggest a title", hint: "renames it if you keep it", group: "Write", icon: "title", go: () => void run("title", 0, len) });
     const promptRange = m.whole ? { from: 0, to: len } : { from: m.from, to: m.to };
     for (const n of prompts())
-      out.push({ label: n.title, hint: m.whole ? "the whole note" : "the selection", group: "Your prompts", go: () => void runPrompt(n, promptRange) });
+      out.push({ label: n.title, hint: m.whole ? "the whole note" : "the selection", group: "Your prompts", icon: "prompt", go: () => void runPrompt(n, promptRange) });
     const q = m.q.trim();
     if (!q) return out;
     const found = rank(q, out, (x) => x.label);
     const target = has ? { from: m.from, to: m.to } : { from: 0, to: len };
-    return [...found, { label: `Ask: “${q}”`, hint: has ? "rewrite it this way" : "rewrite the note this way", go: () => void run("custom", target.from, target.to, q) }];
+    return [
+      ...found,
+      { label: `Ask: “${q}”`, hint: has ? "rewrite it this way" : "rewrite the note this way", icon: "ask", go: () => void run("custom", target.from, target.to, q) },
+    ];
   };
 
   const menuKey = (e: KeyboardEvent) => {
@@ -844,12 +869,12 @@ export default function NotePage(p: Props) {
         {(m) => (
           <div
             class="menu ai-menu"
-            style={{ left: `${Math.max(12, Math.min(m().x, innerWidth - 380))}px`, top: `${m().y}px` }}
+            style={{ left: `${Math.max(12, Math.min(m().x, innerWidth - 432))}px`, top: `${m().y}px` }}
             role="dialog"
             aria-label="Ask Claude"
           >
             <div class="ai-menu-field">
-              <span class="spark">✦</span>
+              <span class="ai-menu-spark" aria-hidden="true">✦</span>
               <input
                 ref={(el) => setTimeout(() => el.focus())}
                 placeholder="Type to find, or say what to do"
@@ -871,7 +896,7 @@ export default function NotePage(p: Props) {
                     class="menu-item"
                     role="option"
                     aria-selected={i() === m().i}
-                    classList={{ on: i() === m().i }}
+                    classList={{ on: i() === m().i, ask: x.icon === "ask" }}
                     onMouseDown={(e) => e.preventDefault()}
                     onMouseMove={() => i() !== m().i && setMenu({ ...m(), i: i() })}
                     onClick={() => {
@@ -879,9 +904,20 @@ export default function NotePage(p: Props) {
                       x.go();
                     }}
                   >
-                    <span>{x.label}</span>
-                    <Show when={i() === m().i}>
-                      <kbd class="ai-menu-enter">Enter</kbd>
+                    <MenuIcon name={x.icon} />
+                    <span class="ai-menu-text">
+                      <span class="ai-menu-label">{x.label}</span>
+                      <span class="ai-menu-hint">{x.hint}</span>
+                    </span>
+                    <Show
+                      when={i() === m().i}
+                      fallback={
+                        <Show when={!m().q && i() < 9}>
+                          <kbd class="ai-menu-num">{i() + 1}</kbd>
+                        </Show>
+                      }
+                    >
+                      <kbd class="ai-menu-enter">↵</kbd>
                     </Show>
                   </button>
                   </>
@@ -889,7 +925,7 @@ export default function NotePage(p: Props) {
               </For>
             </div>
             <footer class="ai-menu-foot">
-              <KeyHints hints={[["↑ ↓", "choose"], ["Enter", "run"], ["Esc", "close"]]} />
+              <KeyHints hints={[["↑ ↓", "choose"], ["1–9", "pick"], ["Enter", "run"], ["Esc", "close"]]} />
             </footer>
           </div>
         )}

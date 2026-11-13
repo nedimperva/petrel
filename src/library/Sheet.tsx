@@ -1,7 +1,7 @@
 // A card, opened: the whole text on a sheet over the library. A prompt's blanks become fields on the right and
 // the text fills in as you type; Enter copies. A prompt or snippet with `## versions` shows one at a time: Alt ←
 // and Alt → step through them, and the one copied last comes first. A capture from the inbox gets
-// its filing buttons instead: Move to (m), Suggest a home (s, Claude, only when pressed) and Delete (d).
+// its filing buttons instead: Move to (m), Suggest a home (s, Claude, only when pressed). Delete (d) works on any card.
 
 import { createMemo, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { api, errText, type AiSuggestion, type Note } from "../api";
@@ -96,7 +96,7 @@ export default function Sheet(p: {
     else if (e.key === "c") void copy();
     else if (inbox() && e.key === "m") p.onMove(n);
     else if (inbox() && e.key === "s") void suggest();
-    else if (inbox() && (e.key === "d" || e.key === "Delete")) p.onDelete(n);
+    else if (e.key === "d" || e.key === "Delete") p.onDelete(n);
     else if (inbox() && /^[123]$/.test(e.key) && Array.isArray(sugg()) && (sugg() as AiSuggestion[])[Number(e.key) - 1])
       p.onFile(n, (sugg() as AiSuggestion[])[Number(e.key) - 1]);
     else return;
@@ -208,6 +208,9 @@ export default function Sheet(p: {
                   </button>
                   <button type="button" class="btn wide" onClick={() => p.onEdit(n().id)}>
                     Edit <kbd>e</kbd>
+                  </button>
+                  <button type="button" class="btn wide" onClick={() => p.onDelete(n())}>
+                    Delete <kbd>d</kbd>
                   </button>
                   <span class="muted small center">{fields().length ? "Tab next blank · ↑ earlier answers · Esc back" : "Esc back"}</span>
                 </div>

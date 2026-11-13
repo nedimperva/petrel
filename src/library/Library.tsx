@@ -189,7 +189,7 @@ export default function Library(p: {
         break;
       default:
         // Typing a letter starts the filter, so finding needs no key first.
-        if (e.key.length === 1 && /\S/.test(e.key) && !/[cejkhlmprtz]/.test(e.key)) {
+        if (e.key.length === 1 && /\S/.test(e.key) && !/[cdejkhlmprtz]/.test(e.key)) {
           filterInput.focus();
           return;
         }
@@ -322,7 +322,7 @@ export default function Library(p: {
               ["Enter", p.tab === "inbox" ? "file" : "copy"],
               ["e", "edit"],
               p.tab === "inbox" && ["m", "move"],
-              p.tab === "inbox" && ["d", "delete"],
+              ["d", "delete"],
               p.tab === "inbox" && ["r", "one at a time"],
               p.tab !== "inbox" && ["p", "pin"],
               p.tab !== "inbox" && ["t", "look and kind"],
