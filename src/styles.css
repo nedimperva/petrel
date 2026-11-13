@@ -3405,3 +3405,66 @@ kbd {
   border-radius: 0 0 var(--r-md) var(--r-md);
   padding-bottom: 6px;
 }
+
+/* ---- review: the count, and Claude's homes on 1–3 ----------------------------------------------------------- */
+
+.review-count {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-3);
+  margin-bottom: var(--s-2);
+  font-size: var(--t-md);
+}
+.review-count b {
+  font-weight: 600;
+  color: var(--ink);
+}
+.review-sugg {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin-bottom: var(--s-4);
+}
+.review-sugg-head {
+  font-size: var(--t-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent-ink);
+}
+.review-sugg-row {
+  display: flex;
+  gap: var(--s-3);
+  align-items: flex-start;
+  width: 100%;
+  padding: var(--s-3);
+  border-radius: var(--r-lg);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  text-align: left;
+}
+.review-sugg-row.first {
+  border-color: var(--accent);
+}
+.review-sugg-row:hover {
+  background: var(--accent-wash);
+}
+.review-sugg-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.review-sugg-what {
+  font-size: var(--t-rd);
+  font-weight: 500;
+  color: var(--ink);
+}
+.review-sugg-why {
+  font-size: var(--t-sm);
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+.review-place kbd.off {
+  opacity: 0.35;
+}

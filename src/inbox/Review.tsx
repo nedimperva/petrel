@@ -1,14 +1,14 @@
 // Inbox review (`r` in the library, or the command bar): one capture at a time, oldest first. A number files it
-// in one of the places offered (the ones used most and lately come first), `/` finds another, Space keeps it for
-// later (it comes back in tomorrow's review), `e` edits, `d` deletes, `s` asks Claude for a home (only then), `z`
-// undoes. When the last one is gone:
+// in one of the places offered (the ones used most and lately come first), `m` or `/` finds another, Space or `l`
+// keeps it for later (it comes back in tomorrow's review), `e` edits, `d` deletes, `s` asks Claude for up to three
+// homes (only then; while they show, 1–3 take them), `z` undoes. When the last one is gone:
 // "Inbox clear." and the petrel crosses the page.
 
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 import { api, errText, type AiSuggestion, type Note } from "../api";
 import Petrel from "../joy/Petrel";
 import Mark from "../library/Mark";
-import { ago, say, undoLast } from "../ui";
+import { ago, folderName, say, undoLast } from "../ui";
 import Destination, { placeRows, type Row, type Target } from "./Destination";
 import { fileCapture, filedCounts } from "./file";
 import { keepUntil, laterOf, parseLater } from "./later";
@@ -22,9 +22,10 @@ export default function Review(p: { aiReady: boolean; onDone(): void; onEdit(id:
   const [total, setTotal] = createSignal(0);
   const [kept, setKept] = createSignal<number[]>([]);
   const [filed, setFiled] = createSignal(0);
+  const [deleted, setDeleted] = createSignal(0);
   const [leaving, setLeaving] = createSignal(false);
   const [finding, setFinding] = createSignal(false);
-  const [hint, setHint] = createSignal<AiSuggestion | "asking" | null>(null);
+  const [hint, setHint] = createSignal<AiSuggestion[] | "asking" | null>(null);
   const [rev, setRev] = createSignal(0);
 
   /** Captures kept for later, by path, until when. */
@@ -119,10 +120,12 @@ export default function Review(p: { aiReady: boolean; onDone(): void; onEdit(id:
       say("Deleted", {
         undo: async () => {
           await s.undo(t.token);
+          setDeleted((x) => Math.max(0, x - 1));
           setQueue((q) => (q ? [n.id, ...q] : q));
           p.onChanged();
         },
       });
+      setDeleted(deleted() + 1);
       setQueue((q) => q?.filter((x) => x !== n.id) ?? q);
       p.onChanged();
     } catch (e) {
@@ -138,7 +141,7 @@ export default function Review(p: { aiReady: boolean; onDone(): void; onEdit(id:
     try {
       const got = await (await api()).aiSuggestHome(n.id);
       if (id() !== n.id) return;
-      setHint(got[0] ?? null);
+      setHint(got.length ? got.slice(0, 3) : null);
       if (!got.length) say("Claude found no good home for this one");
     } catch (e) {
       setHint(null);
@@ -160,13 +163,16 @@ export default function Review(p: { aiReady: boolean; onDone(): void; onEdit(id:
     if (leaving()) return e.preventDefault();
     const n = Number(e.key);
     const h = hint();
-    if (n >= 1 && n <= PLACES && places()[n - 1]) void file(places()[n - 1].t);
-    else if (e.key === " ") keep();
-    else if (e.key === "/") setFinding(true);
+    const sugg = Array.isArray(h) ? h : [];
+    // While Claude's homes show, the numbers are theirs.
+    if (sugg.length && n >= 1 && n <= sugg.length) void takeHint(sugg[n - 1]);
+    else if (!sugg.length && n >= 1 && n <= PLACES && places()[n - 1]) void file(places()[n - 1].t);
+    else if (e.key === " " || e.key === "l") keep();
+    else if (e.key === "/" || e.key === "m") setFinding(true);
     else if (e.key === "e" && note()) p.onEdit(note()!.id);
     else if (e.key === "d") void remove();
     else if (e.key === "s") void suggest();
-    else if (e.key === "Enter" && h && h !== "asking") void takeHint(h);
+    else if (e.key === "Enter" && sugg[0]) void takeHint(sugg[0]);
     else if (e.key === "z") {
       if (!undoLast()) return;
     } else if (e.key === "Escape") p.onDone();
@@ -198,6 +204,16 @@ export default function Review(p: { aiReady: boolean; onDone(): void; onEdit(id:
         }
       >
         <div class="review-main">
+          <div class="review-count">
+            <b>
+              {position()} of {total()}
+            </b>
+            <Show when={filed() || deleted()}>
+              <span class="muted">
+                {[filed() && `${filed()} filed`, deleted() && `${deleted()} deleted`].filter(Boolean).join(" · ")}
+              </span>
+            </Show>
+          </div>
           <div class="review-progress" aria-label={`${position()} of ${total()}`}>
             <For each={Array.from({ length: Math.min(total(), 40) })}>
               {(_, i) => <span classList={{ done: i() < position() - 1, now: i() === position() - 1 }} />}
@@ -215,23 +231,11 @@ export default function Review(p: { aiReady: boolean; onDone(): void; onEdit(id:
                 <article class="review-card" classList={{ leaving: leaving() }}>
                   <div class="review-when">{ago(n.modifiedAt)}</div>
                   <div class="review-text">{n.body.trim() || "(empty)"}</div>
-                  <Show when={hint()}>
-                    {(h) => (
-                      <div class="review-hint">
-                        <span class="spark">✦</span>
-                        <Show when={h() !== "asking"} fallback={<span class="ai-thinking">Claude is looking for a home…</span>}>
-                          <span>
-                            {(h() as AiSuggestion).kind === "merge" ? "Add to the end of " : "File in "}
-                            <b>{(h() as AiSuggestion).kind === "merge" ? (h() as AiSuggestion).title : (h() as AiSuggestion).folder}</b>
-                            {(h() as AiSuggestion).why ? `: ${(h() as AiSuggestion).why}` : ""}
-                          </span>
-                          <span class="grow" />
-                          <button class="btn small" onClick={() => void takeHint(h() as AiSuggestion)}>
-                            Take it <kbd>Enter</kbd>
-                          </button>
-                        </Show>
-                      </div>
-                    )}
+                  <Show when={hint() === "asking"}>
+                    <div class="review-hint">
+                      <span class="spark">✦</span>
+                      <span class="ai-thinking">Claude is looking for a home…</span>
+                    </div>
                   </Show>
                 </article>
               )}
@@ -239,11 +243,34 @@ export default function Review(p: { aiReady: boolean; onDone(): void; onEdit(id:
           </div>
         </div>
         <aside class="review-places">
-          <div class="muted small">File it</div>
+          <Show when={Array.isArray(hint()) && (hint() as AiSuggestion[])}>
+            {(list) => (
+              <div class="review-sugg">
+                <div class="review-sugg-head">
+                  <span class="spark">✦</span> Claude suggests
+                </div>
+                <For each={list()}>
+                  {(h, i) => (
+                    <button class="review-sugg-row" classList={{ first: i() === 0 }} onClick={() => void takeHint(h)}>
+                      <kbd>{i() + 1}</kbd>
+                      <span class="review-sugg-text">
+                        <span class="review-sugg-what">{h.kind === "merge" ? `Add to “${h.title}”` : `New note in ${folderName(h.folder)}`}</span>
+                        <Show when={h.why}>
+                          <span class="review-sugg-why">{h.why}</span>
+                        </Show>
+                      </span>
+                    </button>
+                  )}
+                </For>
+                <p class="muted small">Nothing moves until you press a number. Enter takes the first.</p>
+              </div>
+            )}
+          </Show>
+          <div class="muted small">{Array.isArray(hint()) ? "Or file it" : "File it"}</div>
           <For each={places()}>
             {(r, i) => (
               <button class="review-place" onClick={() => void file(r.t)}>
-                <kbd>{i() + 1}</kbd>
+                <kbd classList={{ off: Array.isArray(hint()) }}>{i() + 1}</kbd>
                 <Show when={r.t.kind !== "note"} fallback={<span class="row-icon">¶</span>}>
                   <Mark folder={r.folder} size={13} />
                 </Show>
@@ -255,7 +282,7 @@ export default function Review(p: { aiReady: boolean; onDone(): void; onEdit(id:
             )}
           </For>
           <button class="review-place" onClick={() => setFinding(true)}>
-            <kbd>/</kbd>
+            <kbd>m</kbd>
             <span class="review-place-label muted">Find another…</span>
           </button>
           <p class="muted small">The places you file into most come first.</p>
@@ -265,7 +292,10 @@ export default function Review(p: { aiReady: boolean; onDone(): void; onEdit(id:
             <kbd>1</kbd>–<kbd>{PLACES}</kbd> file
           </span>
           <span>
-            <kbd>Space</kbd> keep for later
+            <kbd>l</kbd> later
+          </span>
+          <span>
+            <kbd>m</kbd> move
           </span>
           <span>
             <kbd>e</kbd> edit
