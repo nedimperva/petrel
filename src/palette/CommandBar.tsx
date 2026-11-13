@@ -4,10 +4,10 @@
 // `this week`, `has:link`, `has:picture`, `has:task` (palette/filters.ts). After an answer, Tab asks again: the
 // follow-up goes with the earlier answers and the same notes, and Ctrl Enter keeps the whole exchange as a note.
 
-import { createResource, createSignal, For, onMount, Show } from "solid-js";
+import { createEffect, createResource, createSignal, For, onMount, Show } from "solid-js";
 import { api, errText, type AiAnswer, type AiSource, type NoteSummary } from "../api";
 import { answerHtml } from "../copy";
-import { folderName, Kbd, say } from "../ui";
+import { ago, folderName, Kbd, say } from "../ui";
 import { keep, noFilters, parseFilters } from "./filters";
 import { rank } from "./match";
 
@@ -19,6 +19,8 @@ export interface Command {
   when?: () => boolean;
   run(): void;
 }
+
+const escapeRe = (w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 type Row = { kind: "ask" } | { kind: "note"; n: NoteSummary } | { kind: "command"; c: Command };
 
@@ -95,6 +97,47 @@ export default function CommandBar(p: {
     if (q().trim() && !p.notesOnly && !isQuestion() && noFilters(filters())) out.push({ kind: "ask" });
     return out;
   };
+
+  // The highlighted note, shown beside the list with the typed words marked. A signal, not a resource: a
+  // resource read under App's Suspense would suspend the page behind the bar.
+  const [peek, setPeek] = createSignal<{ id: number; title: string; folder: string; at: number; body: string } | null>(null);
+  createEffect(() => {
+    const r = rows()[i()];
+    if (!r || r.kind !== "note") return setPeek(null);
+    const id = r.n.id;
+    void api()
+      .then((s) => s.peekNote(id))
+      .then((n) => {
+        const now = rows()[i()];
+        if (now?.kind === "note" && now.n.id === id) setPeek({ id, title: n.title, folder: n.folder, at: n.modifiedAt, body: n.body });
+      })
+      .catch(() => setPeek(null));
+  });
+  /** The words to mark: what was typed, without the filter words. */
+  const marked = () => (filters().words || "").split(/\s+/).filter((w) => w.length > 1);
+  /** A paragraph cut into plain and marked pieces; never HTML. */
+  const pieces = (text: string): { t: string; on: boolean }[] => {
+    const ws = marked();
+    if (!ws.length) return [{ t: text, on: false }];
+    const re = new RegExp(`(${ws.map(escapeRe).join("|")})`, "giu");
+    return text.split(re).filter(Boolean).map((t) => ({ t, on: ws.some((w) => w.toLowerCase() === t.toLowerCase()) }));
+  };
+  const paragraphs = () =>
+    (peek()?.body ?? "")
+      .slice(0, 2400)
+      .split(/\n{2,}/)
+      .map((x) => x.replace(/^#+\s+/, "").trim())
+      .filter(Boolean)
+      .slice(0, 8);
+
+  /** A note named in an answer, `[[Title]]`: click it to open it. */
+  async function openCited(title: string) {
+    const known = allSources().find((x) => x.title === title);
+    const open = p.onOpen;
+    if (known) return (p.onClose(), open(known.id));
+    const r = await (await api()).resolveLink(title);
+    if (r.kind === "note") (p.onClose(), open(r.id));
+  }
 
   async function ask() {
     const question = q().trim();
@@ -205,7 +248,7 @@ export default function CommandBar(p: {
 
   return (
     <div class="scrim top" onMouseDown={(e) => e.target === e.currentTarget && p.onClose()}>
-      <div class="palette" classList={{ answering: !!answer() }}>
+      <div class="palette" classList={{ answering: !!answer(), previewing: !answer() && !!peek() }}>
         <div class="palette-field">
           <span class="spark">{p.notesOnly ? "¶" : "✦"}</span>
           <input
@@ -246,6 +289,7 @@ export default function CommandBar(p: {
         <Show
           when={answer()}
           fallback={
+            <div class="palette-body">
             <div class="palette-list">
               <For each={rows()}>
                 {(r, k) => (
@@ -278,9 +322,33 @@ export default function CommandBar(p: {
                 <p class="muted pad">{q().trim() ? "Nothing found." : p.notesOnly ? "No notes yet." : "Type to search your notes."}</p>
               </Show>
             </div>
+            <Show when={peek()}>
+              {(n) => (
+                <article class="palette-peek" aria-label={`Preview of ${n().title}`}>
+                  <p class="peek-meta">
+                    {folderName(n().folder)} · edited {ago(n().at)}
+                  </p>
+                  <h2 class="peek-title">{n().folder === "inbox" ? "A capture" : n().title}</h2>
+                  <For each={paragraphs()}>
+                    {(para) => (
+                      <p class="peek-text">
+                        <For each={pieces(para)}>{(x) => (x.on ? <mark>{x.t}</mark> : x.t)}</For>
+                      </p>
+                    )}
+                  </For>
+                </article>
+              )}
+            </Show>
+            </div>
           }
         >
-          <div class="answer">
+          <div
+            class="answer"
+            onClick={(e) => {
+              const t = (e.target as HTMLElement).closest<HTMLElement>("[data-title]");
+              if (t?.dataset.title) void openCited(t.dataset.title);
+            }}
+          >
             <Show when={answer() !== "loading"} fallback={<p class="ai-thinking">Claude is reading your notes…</p>}>
               {(() => {
                 const a = answer() as AiAnswer;

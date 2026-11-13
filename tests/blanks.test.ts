@@ -42,7 +42,7 @@ test("titles come from the first line with words", () => {
 test("answers are escaped before any formatting", async () => {
   const { answerHtml } = await import("../src/copy.ts");
   assert.equal(answerHtml("**Garden** <img src=x onerror=alert(1)>"), "<b>Garden</b> &lt;img src=x onerror=alert(1)&gt;");
-  assert.equal(answerHtml("- see [[Garden]]"), '• see <span class="cm-wikilink">Garden</span>');
+  assert.equal(answerHtml("- see [[Garden]]"), '• see <span class="cm-wikilink" data-title="Garden">Garden</span>');
 });
 
 test("blanks that fill themselves, and choices", async () => {

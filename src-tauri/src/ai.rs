@@ -402,11 +402,14 @@ pub async fn ai_ask(
         }
         user += &format!(
             "Question: {question}\n\nAnswer from these notes only, briefly, in Markdown. If they do not say, \
-             say so in one sentence. End with a last line `Sources: ` and the numbers of the notes you used, \
+             say so in one sentence. After a sentence that comes from a note, put the note's number in \
+             brackets, like `[2]`. End with a last line `Sources: ` and the numbers of the notes you used, \
              like `Sources: 2, 5`."
         );
         let reply = complete(&model, "medium", SYSTEM, &user, 8_000)?;
         let (answer, used) = split_sources(&reply, notes.len());
+        let titles: Vec<&str> = notes.iter().map(|n| n.title.as_str()).collect();
+        let answer = cite(&answer, &titles);
         let sources: Vec<Source> = if used.is_empty() {
             notes.iter().take(3).map(Source::from).collect()
         } else {
@@ -416,6 +419,49 @@ pub async fn ai_ask(
         Ok(Answer { answer, sources, read })
     })
     .await
+}
+
+/// `[2]` and `[1, 3]` in an answer become links to those notes, `[[Title]]`, so the answer names where each
+/// sentence came from and a saved answer keeps working links. Numbers that name no note are dropped; other
+/// brackets (a `[[link]]`, a Markdown `[text](url)`, a checkbox) are left alone.
+fn cite(answer: &str, titles: &[&str]) -> String {
+    let mut out = String::with_capacity(answer.len());
+    let mut rest = answer;
+    while let Some(i) = rest.find('[') {
+        out.push_str(&rest[..i]);
+        let after = &rest[i + 1..];
+        let before_bracket = out.ends_with('[');
+        let close = after.find(']');
+        let inner = close.map(|c| &after[..c]).unwrap_or("");
+        let is_cite = !before_bracket
+            && !inner.is_empty()
+            && inner.chars().all(|c| c.is_ascii_digit() || c == ',' || c == ' ')
+            && inner.chars().any(|c| c.is_ascii_digit())
+            && !after[close.unwrap() + 1..].starts_with(['(', ']'])
+            && !after.starts_with('[');
+        if !is_cite {
+            out.push('[');
+            rest = after;
+            continue;
+        }
+        let links: Vec<String> = inner
+            .split(|c: char| !c.is_ascii_digit())
+            .filter_map(|w| w.parse::<usize>().ok())
+            .filter_map(|n| titles.get(n.wrapping_sub(1)))
+            .map(|t| format!("[[{t}]]"))
+            .collect();
+        if !links.is_empty() {
+            if !out.ends_with(' ') && !out.is_empty() {
+                out.push(' ');
+            }
+            out.push_str(&links.join(" "));
+        } else if out.ends_with(' ') {
+            out.pop();
+        }
+        rest = &after[close.unwrap() + 1..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// The answer without its `Sources:` line, and the 0-based notes it named.
@@ -636,6 +682,13 @@ mod tests {
         assert_eq!(strip_fence("plain"), "plain");
         assert_eq!(tail("one\ntwo\nthree", 7), "three");
         assert_eq!(head("čćž", 3), "č");
+    }
+
+    #[test]
+    fn citations_become_links() {
+        let t = ["Trip to Mostar", "Summer 2026"];
+        assert_eq!(cite("Park above the old town [1]. Photos are in June [2, 1].", &t), "Park above the old town [[Trip to Mostar]]. Photos are in June [[Summer 2026]] [[Trip to Mostar]].");
+        assert_eq!(cite("See [[Trip to Mostar]] and [a](b) and [ ] done [9].", &t), "See [[Trip to Mostar]] and [a](b) and [ ] done.");
     }
 
     #[test]

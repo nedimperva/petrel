@@ -43,7 +43,7 @@ export function answerHtml(md: string): string {
     .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
     .replace(/(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])/g, "<i>$1</i>")
     .replace(/`([^`]+)`/g, "<code>$1</code>")
-    .replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_m, t: string, l?: string) => `<span class="cm-wikilink">${l ?? t}</span>`)
+    .replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_m, t: string, l?: string) => `<span class="cm-wikilink" data-title="${t}">${l ?? t}</span>`)
     .replace(/^\s*[-*] /gm, "• ")
     .replace(/^#{1,6}\s+(.*)$/gm, "<b>$1</b>");
 }
