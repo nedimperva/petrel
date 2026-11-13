@@ -4280,10 +4280,12 @@ kbd {
 .coll-head .chip {
   padding: 0 12px;
 }
-.coll-filter {
+/* Under .lib-split, whose filter is 34 px: as specific as that rule, and after it. */
+.coll-head .coll-filter {
   flex: none;
   width: 220px;
   height: 30px;
+  margin: 0;
   gap: 8px;
   border-radius: var(--r-md);
   background: var(--raised);
