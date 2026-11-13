@@ -19,5 +19,7 @@ const search = new URLSearchParams(location.search);
 const capture = "__PETREL_CAPTURE__" in window || search.has("capture");
 const picker = "__PETREL_PICKER__" in window || search.has("picker");
 document.documentElement.dataset.window = capture ? "capture" : picker ? "picker" : "main";
+// The window title is what Hyprland matches the capture window and the picker by (src-tauri/src/hypr.rs).
+document.title = capture ? "Petrel capture" : picker ? "Petrel picker" : "Petrel";
 
 render(() => (capture ? <Capture /> : picker ? <Picker /> : <App />), document.getElementById("root")!);

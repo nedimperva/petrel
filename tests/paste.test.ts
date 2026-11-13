@@ -73,7 +73,7 @@ test("day words", () => {
   );
   assert.deepEqual(dayOptions("nov2", wed), [{ word: "nov2", day: "2026-11-02" }]);
   const days = (w: string) => dayWord(w, wed);
-  assert.deepEqual(pickRoute("call the dentist #fri", ["Recipes"], [], days)?.route, { kind: "day", date: "2026-11-13" });
-  assert.deepEqual(pickRoute("ideas #sat", ["Sat"], [], days)?.route, { kind: "folder", folder: "Sat" });
-  assert.deepEqual(pickRoute("ideas #today", ["Today"], [], days)?.route, { kind: "day", date: "2026-11-11" });
+  assert.deepEqual(pickRoute("call the dentist @fri", ["Recipes"], [], days)?.route, { kind: "day", date: "2026-11-13" });
+  assert.deepEqual(pickRoute("ideas @sat", ["Sat"], [], days)?.route, { kind: "folder", folder: "Sat" });
+  assert.deepEqual(pickRoute("ideas @today", ["Today"], [], days)?.route, { kind: "day", date: "2026-11-11" });
 });

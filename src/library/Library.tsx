@@ -1,22 +1,25 @@
-// The library (Ctrl L): everything you keep, as cards. "All" is the shelf, one row per collection with the most
-// used first; a collection's tab shows all its cards at their natural height. The arrow keys move between cards,
-// Enter opens one as a sheet, c copies, e edits, p pins, t picks the collection's colour and mark, / filters, and in
-// the inbox m files the card you are on and r reviews the inbox one card at a time. A note changed in two places
-// shows a card at the top until it is settled (Settle.tsx).
+// The library (Ctrl L): what you copy, as cards. Only collections of things to copy (Prompts, Snippets: `t` sets
+// it) are rows of cards; collections of pages are tiles at the end, and their notes are found with Ctrl K. "All" is
+// the shelf, the most used first; a collection's tab shows all its cards. The arrow keys move between cards, Enter
+// opens one as a sheet, c copies, e edits, p pins, t sets the collection's look and kind, / filters, and in the inbox
+// m files the card you are on and r reviews the inbox one card at a time. A note changed in two places is a card
+// in the inbox until it is settled (Settle.tsx).
 
-import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, lazy, on, onCleanup, onMount, Show } from "solid-js";
 import { api, errText, type AiSuggestion, type Conflict, type Note, type NoteSummary } from "../api";
 import { hasVersions, versionsOf } from "../collection/versions";
-import { copyFilled, itemText } from "../collection/copyItem";
 import Destination, { type Target } from "../inbox/Destination";
 import { fileCapture } from "../inbox/file";
-import { folderName, say, typing, undoLast } from "../ui";
-import type { Tab } from "../TitleBar";
-import Card, { topOf } from "./Card";
+import { ago, folderName, KeyHints, say, typing, undoLast } from "../ui";
+import { topOf } from "./Card";
 import FacePicker from "./FacePicker";
-import Mark, { loadFaces } from "./Mark";
+import Mark, { faces, loadFaces } from "./Mark";
+import { toCopy } from "./faces";
 import Settle from "./Settle";
 import Sheet from "./Sheet";
+
+// The review is a mode of the inbox's cards: one at a time, in the library's place.
+const Review = lazy(() => import("../inbox/Review"));
 
 export interface LibraryData {
   notes: NoteSummary[];
@@ -46,34 +49,10 @@ export async function loadLibrary(): Promise<LibraryData> {
   return { notes, copies, versions, conflicts };
 }
 
-/** The title bar's tabs: All, the Inbox, then each collection, the most used first. */
-export function libraryTabs(d: LibraryData | undefined): Tab[] {
-  if (!d) return [{ id: "all", label: "All" }];
-  const inbox = d.notes.filter((n) => n.folder === "inbox").length;
-  return [
-    { id: "all", label: "All" },
-    { id: "inbox", label: "Inbox", count: inbox || undefined },
-    ...collections(d).map((c) => ({ id: `c:${c.top}`, label: folderName(c.top) })),
-  ];
-}
-
-function collections(d: LibraryData): { top: string; notes: NoteSummary[]; use: number }[] {
-  const by = new Map<string, NoteSummary[]>();
-  for (const n of d.notes) {
-    if (n.folder === "inbox") continue;
-    const t = topOf(n.folder);
-    by.set(t, [...(by.get(t) ?? []), n]);
-  }
-  return [...by.entries()]
-    .map(([top, notes]) => ({ top, notes: sortByUse(notes, d.copies), use: notes.reduce((a, n) => a + (d.copies[n.path] ?? 0), 0) }))
-    .sort((a, b) => b.use - a.use || b.notes.length - a.notes.length || a.top.localeCompare(b.top));
-}
-
 function sortByUse(ns: NoteSummary[], copies: Record<string, number>): NoteSummary[] {
   return [...ns].sort((a, b) => Number(b.pinned) - Number(a.pinned) || (copies[b.path] ?? 0) - (copies[a.path] ?? 0) || b.modifiedAt - a.modifiedAt);
 }
 
-const ROW = 4;
 
 export default function Library(p: {
   tab: string;
@@ -85,17 +64,18 @@ export default function Library(p: {
   onChanged(): void;
   onAiSetup(): void;
   onReview(): void;
+  /** The inbox, one card at a time. */
+  reviewing?: boolean;
+  onReviewDone?(): void;
 }) {
   let grid!: HTMLDivElement;
   let filterInput!: HTMLInputElement;
+  let rowsEl: HTMLDivElement | undefined;
   const [q, setQ] = createSignal("");
   const [sel, setSel] = createSignal<number | null>(null);
-  const [open, setOpen] = createSignal<number | null>(null);
   const [moving, setMoving] = createSignal<Note | null>(null);
   const [facing, setFacing] = createSignal<string | null>(null);
   const [settling, setSettling] = createSignal<Conflict | null>(null);
-  // The card just copied lights up once in its collection's colour.
-  const [flash, setFlash] = createSignal<number | null>(null);
   createEffect(on(() => p.tab, () => (setQ(""), setSel(null))));
 
   const copies = (n: NoteSummary) => p.data?.copies[n.path] ?? 0;
@@ -104,46 +84,21 @@ export default function Library(p: {
     const hay = `${n.title} ${n.preview} ${n.tags.join(" ")}`.toLowerCase();
     return words.every((w) => hay.includes(w));
   };
-  const cols = createMemo(() => (p.data ? collections(p.data) : []));
   const inbox = createMemo(() => (p.data?.notes ?? []).filter((n) => n.folder === "inbox").sort((a, b) => b.modifiedAt - a.modifiedAt));
 
-  /** Shelf rows, or the one collection's cards. */
-  const shelf = createMemo(() => {
-    const rows: { id: string; top: string; label: string; sub: string; notes: NoteSummary[]; total: number }[] = [];
-    if (inbox().length) rows.push({ id: "inbox", top: "inbox", label: "Inbox", sub: "captures waiting for a home", notes: inbox().filter(match), total: inbox().length });
-    for (const c of cols()) {
-      const ns = c.notes.filter(match);
-      rows.push({ id: `c:${c.top}`, top: c.top, label: folderName(c.top), sub: c.use ? "most copied first" : "newest first", notes: ns, total: c.notes.length });
-    }
-    return rows.filter((r) => r.notes.length);
-  });
+  const conflicts = () => p.data?.conflicts ?? [];
   const items = createMemo((): NoteSummary[] => {
-    if (p.tab === "all") return shelf().flatMap((r) => r.notes.slice(0, ROW));
+    const all = p.data?.notes ?? [];
+    const use = p.data?.copies ?? {};
     if (p.tab === "inbox") return inbox().filter(match);
-    const top = p.tab.slice(2);
-    return (cols().find((c) => c.top === top)?.notes ?? []).filter(match);
+    if (p.tab === "all") return sortByUse(all.filter((n) => n.folder !== "inbox" && toCopy(n.folder, faces())), use).filter(match);
+    const f = p.tab.slice(2);
+    return sortByUse(all.filter((n) => n.folder === f || n.folder.startsWith(`${f}/`)), use).filter(match);
   });
   const current = () => items().find((n) => n.id === sel()) ?? items()[0];
   const heading = () => (p.tab === "inbox" ? "Inbox" : p.tab.startsWith("c:") ? folderName(p.tab.slice(2)) : "");
-  const tags = createMemo(() => {
-    const seen = new Map<string, number>();
-    for (const n of items()) for (const t of n.tags) seen.set(t, (seen.get(t) ?? 0) + 1);
-    return [...seen.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([t]) => t);
-  });
-
-  async function copy(n: NoteSummary) {
-    const it = await itemText(n.id);
-    if (it.hasBlanks) return setOpen(n.id);
-    if (await copyFilled(n, it.text)) {
-      setFlash(n.id);
-      setTimeout(() => flash() === n.id && setFlash(null), 700);
-      p.onChanged();
-    }
-  }
-
   async function file(note: Note, t: Target) {
     setMoving(null);
-    setOpen(null);
     try {
       const { change, text } = await fileCapture(note, t);
       const s = await api();
@@ -157,7 +112,6 @@ export default function Library(p: {
     file(note, s.kind === "merge" && s.noteId != null ? { kind: "note", id: s.noteId, title: s.title } : { kind: "folder", folder: s.folder });
 
   async function remove(note: Note) {
-    setOpen(null);
     try {
       const s = await api();
       const t = await s.trashNote(note.id);
@@ -167,7 +121,6 @@ export default function Library(p: {
       say(errText(e), { error: true });
     }
   }
-  const moveSummary = async (n: NoteSummary) => setMoving(await (await api()).peekNote(n.id));
 
   async function pin(n: NoteSummary) {
     try {
@@ -181,38 +134,23 @@ export default function Library(p: {
   /** Only a collection has a look of its own: not the inbox, not the top of the folder. */
   const canFace = (top: string) => !!top && top !== "inbox";
 
-  /** The nearest card in a direction, by where the cards are drawn, so the shelf and the columns move alike. */
-  function step(dx: number, dy: number) {
-    const cards = [...grid.querySelectorAll<HTMLElement>("[data-card]")];
-    const at = cards.find((c) => Number(c.dataset.card) === current()?.id);
-    if (!at) return cards[0] && setSel(Number(cards[0].dataset.card));
-    const a = at.getBoundingClientRect();
-    let best: HTMLElement | undefined;
-    let score = Infinity;
-    for (const c of cards) {
-      if (c === at) continue;
-      const b = c.getBoundingClientRect();
-      const ddx = b.left + b.width / 2 - (a.left + a.width / 2);
-      const ddy = b.top + b.height / 2 - (a.top + a.height / 2);
-      const along = dx ? ddx * dx : ddy * dy;
-      if (along <= 4) continue;
-      const across = dx ? Math.abs(ddy) : Math.abs(ddx);
-      const s = along + across * 3;
-      if (s < score) (score = s), (best = c);
-    }
-    if (best) {
-      setSel(Number(best.dataset.card));
-      best.scrollIntoView({ block: "nearest" });
-    }
+  /** The row above or below, kept in view. */
+  function step(by: number) {
+    const list = items();
+    if (!list.length) return;
+    const i = list.findIndex((n) => n.id === current()?.id);
+    const next = list[Math.min(list.length - 1, Math.max(0, (i < 0 ? 0 : i) + by))];
+    setSel(next.id);
+    queueMicrotask(() => rowsEl?.querySelector(`[data-card="${next.id}"]`)?.scrollIntoView({ block: "nearest" }));
   }
 
   const key = (e: KeyboardEvent) => {
-    if (open() !== null || moving() || facing() !== null || settling() || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (p.reviewing || moving() || facing() !== null || settling() || e.ctrlKey || e.metaKey || e.altKey) return;
     if (typing(e)) {
       if (e.target === filterInput && (e.key === "ArrowDown" || e.key === "Enter")) {
         e.preventDefault();
         filterInput.blur();
-        if (e.key === "Enter" && current()) setOpen(current()!.id);
+        if (e.key === "Enter" && current()) rowsEl?.querySelector<HTMLElement>(`[data-card="${current()!.id}"]`)?.focus();
       } else if (e.target === filterInput && e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
@@ -223,34 +161,13 @@ export default function Library(p: {
     }
     const n = current();
     switch (e.key) {
-      case "ArrowRight":
-      case "l":
-        step(1, 0);
-        break;
-      case "ArrowLeft":
-      case "h":
-        step(-1, 0);
-        break;
       case "ArrowDown":
       case "j":
-        step(0, 1);
+        step(1);
         break;
       case "ArrowUp":
       case "k":
-        step(0, -1);
-        break;
-      case "Enter":
-        if (n) setOpen(n.id);
-        break;
-      case "c":
-        if (n) void copy(n);
-        break;
-      case "e":
-        if (n) p.onEdit(n.id);
-        break;
-      case "m":
-        if (n?.folder === "inbox") void moveSummary(n);
-        else return;
+        step(-1);
         break;
       case "p":
         if (n && n.folder !== "inbox") void pin(n);
@@ -272,7 +189,7 @@ export default function Library(p: {
         break;
       default:
         // Typing a letter starts the filter, so finding needs no key first.
-        if (e.key.length === 1 && /\S/.test(e.key) && !/[cejkhlmprtz]/.test(e.key)) {
+        if (e.key.length === 1 && /\S/.test(e.key) && !/[cdejkhlmprtz]/.test(e.key)) {
           filterInput.focus();
           return;
         }
@@ -287,203 +204,136 @@ export default function Library(p: {
   });
   onCleanup(() => document.removeEventListener("keydown", key));
 
-  const card = (n: NoteSummary, where = false) => (
-    <Card
-      n={n}
-      copies={copies(n)}
-      versions={p.data?.versions[n.id] ?? 0}
-      on={current()?.id === n.id}
-      flash={flash() === n.id}
-      showWhere={where}
-      onSelect={() => setSel(n.id)}
-      onOpen={() => setOpen(n.id)}
-      onCopy={() => void copy(n)}
-      onEdit={() => p.onEdit(n.id)}
-      onMove={n.folder === "inbox" ? () => void moveSummary(n) : undefined}
-    />
-  );
+  const meta = (n: NoteSummary) => {
+    const out: string[] = [];
+    const k = copies(n);
+    if (p.tab === "all") out.push(folderName(topOf(n.folder)));
+    if (n.pinned) out.push("pinned");
+    if (p.data?.versions[n.id]) out.push(`${p.data.versions[n.id]} versions`);
+    if (k) out.push(`${k}×`);
+    if (n.folder === "inbox") out.push(ago(n.modifiedAt));
+    return out.join(" · ");
+  };
 
   return (
-    <div class="library" ref={grid}>
-      <div class="lib-head">
-        <Show when={heading()}>
-          <div class="lib-title">
-            <Show when={p.tab.startsWith("c:") && canFace(p.tab.slice(2))}>
-              <button type="button" class="mark-btn" title="Colour and mark (t)" aria-label="Colour and mark" onClick={() => setFacing(p.tab.slice(2))}>
+    <div class="library lib-split" ref={grid}>
+      <Show when={p.reviewing}>
+        <div class="lib-review">
+          <Review aiReady={p.aiReady} onDone={() => p.onReviewDone?.()} onEdit={p.onEdit} onAiSetup={p.onAiSetup} onChanged={p.onChanged} />
+        </div>
+      </Show>
+      <Show when={!p.reviewing}>
+        <section class="lib-list" aria-label={heading() || "Everything to copy"}>
+          <div class="lib-list-head">
+            <Show when={p.tab.startsWith("c:") && canFace(topOf(p.tab.slice(2)))} fallback={<Mark folder={p.tab === "inbox" ? "inbox" : p.tab.slice(2)} class="tile" />}>
+              <button type="button" class="mark-btn" title="Colour and mark (t)" aria-label="Colour and mark" onClick={() => setFacing(topOf(p.tab.slice(2)))}>
                 <Mark folder={p.tab.slice(2)} class="tile" />
               </button>
             </Show>
-            <h1>{heading()}</h1>
+            <h1>{heading() || "Everything to copy"}</h1>
+            <span class="muted small">{items().length}</span>
+            <span class="grow" />
             <Show when={p.tab === "inbox" && inbox().length}>
               <button type="button" class="btn small" onClick={p.onReview}>
-                Review <kbd>r</kbd>
+                One at a time <kbd>r</kbd>
               </button>
             </Show>
-            <span class="muted">
-              {p.tab === "inbox"
-                ? `${inbox().length} ${inbox().length === 1 ? "capture" : "captures"} to file`
-                : `${items().length} ${items().length === 1 ? "note" : "notes"}, most copied first`}
-            </span>
           </div>
-        </Show>
-        <label class="lib-filter">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
-            <circle cx="11" cy="11" r="7" />
-            <path d="m20 20-3.5-3.5" />
-          </svg>
-          <input
-            ref={filterInput}
-            placeholder={heading() ? `Filter ${heading()}` : "Filter everything"}
-            aria-label="Filter"
-            value={q()}
-            onInput={(e) => setQ(e.currentTarget.value)}
-          />
-          <kbd>/</kbd>
-        </label>
-        <Show when={heading() && tags().length}>
-          <div class="lib-tags">
-            <For each={tags()}>
-              {(t) => (
-                <button type="button" class="chip" classList={{ on: q() === `${t}` }} onClick={() => setQ(q() === t ? "" : t)}>
-                  {t}
+          <label class="lib-filter">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" />
+              <path d="m20 20-3.5-3.5" />
+            </svg>
+            <input ref={filterInput} placeholder={heading() ? `Filter ${heading()}` : "Filter"} aria-label="Filter" value={q()} onInput={(e) => setQ(e.currentTarget.value)} />
+            <kbd>/</kbd>
+          </label>
+          <div class="lib-rows" ref={rowsEl}>
+            <Show when={p.tab === "inbox" && !q()}>
+              <For each={conflicts()}>
+                {(c) => (
+                  <button type="button" class="lib-row conflict" onClick={() => setSettling(c)}>
+                    <span class="lib-row-top">
+                      <span class="lib-row-title">{c.title}</span>
+                      <span class="lib-row-meta">to settle</span>
+                    </span>
+                    <span class="lib-row-text">Changed in two places. Open it to keep one text, or both.</span>
+                  </button>
+                )}
+              </For>
+            </Show>
+            <For each={items()}>
+              {(n) => (
+                <button
+                  type="button"
+                  class="lib-row"
+                  classList={{ on: current()?.id === n.id }}
+                  data-card={n.id}
+                  onClick={() => setSel(n.id)}
+                  onDblClick={() => p.onEdit(n.id)}
+                >
+                  <span class="lib-row-top">
+                    <span class="lib-row-title">{n.folder === "inbox" ? n.preview.split("\n")[0] || n.title : n.title}</span>
+                    <span class="lib-row-meta">{meta(n)}</span>
+                  </span>
+                  <span class="lib-row-text">{(n.folder === "inbox" ? n.preview.split("\n").slice(1).join(" ") : n.preview.replace(/\n/g, " ")) || ago(n.modifiedAt)}</span>
                 </button>
               )}
             </For>
-          </div>
-        </Show>
-      </div>
-
-      <Show when={p.tab === "all" && p.data?.conflicts.length}>
-        <section class="shelf-row">
-          <div class="shelf-head">
-            <h2>To settle</h2>
-            <span class="muted small">changed in two places · pick the text to keep</span>
-          </div>
-          <div class="shelf-cards">
-            <For each={p.data!.conflicts}>
-              {(c) => (
-                <button type="button" class="lcard conflict" onClick={() => setSettling(c)}>
-                  <div class="lcard-top">
-                    <span class="lcard-where">{folderName(c.folder)}</span>
-                  </div>
-                  <h3 class="lcard-title">{c.title}</h3>
-                  <div class="lcard-body">Two texts of this note: the one in it now and one kept beside it. Open to compare.</div>
-                  <footer class="lcard-meta">Settle</footer>
-                </button>
-              )}
-            </For>
+            <Show when={p.data && !items().length && !(p.tab === "inbox" && conflicts().length)}>
+              <p class="muted pad">
+                {q()
+                  ? "Nothing matches."
+                  : p.tab === "inbox"
+                    ? "Inbox zero. Captures from Ctrl Alt Space land here until you file them."
+                    : p.tab === "all"
+                      ? "Nothing to copy yet. Make a collection like Prompts or Snippets in the sidebar."
+                      : "Nothing here yet."}
+              </p>
+            </Show>
+            <Show when={p.tab.startsWith("c:")}>
+              <button type="button" class="lib-new" onClick={() => p.onNew(p.tab.slice(2))}>
+                New in {heading()} <kbd>Ctrl N</kbd>
+              </button>
+            </Show>
           </div>
         </section>
-      </Show>
-      <Show
-        when={p.tab === "all"}
-        fallback={
-          <div class="lib-grid">
-            <For each={items()}>{(n) => card(n)}</For>
-            <Show when={p.tab !== "inbox"}>
-              <button type="button" class="lcard add" onClick={() => p.onNew(p.tab.slice(2))}>
-                New in {heading()}
-              </button>
-            </Show>
-          </div>
-        }
-      >
-        <For each={shelf()}>
-          {(r) => (
-            <section class="shelf-row">
-              <div class="shelf-head">
-                <Show when={canFace(r.top)} fallback={<Mark folder={r.top} class="tile" />}>
-                  <button type="button" class="mark-btn" title="Colour and mark" aria-label={`Colour and mark of ${r.label}`} onClick={() => setFacing(r.top)}>
-                    <Mark folder={r.top} class="tile" />
-                  </button>
-                </Show>
-                <h2>{r.label}</h2>
-                <span class="muted small">
-                  {r.total} · {r.sub}
-                </span>
-                <span class="grow" />
-                <Show when={r.id === "inbox"}>
-                  <button type="button" class="link small" onClick={p.onReview}>
-                    Review one by one
-                  </button>
-                </Show>
-                <Show when={r.total > ROW}>
-                  <button type="button" class="link small" onClick={() => p.onTab(r.id)}>
-                    All {r.total}
-                  </button>
-                </Show>
-              </div>
-              <div class="shelf-cards">
-                <For each={r.notes.slice(0, ROW)}>{(n) => card(n)}</For>
-              </div>
-            </section>
-          )}
-        </For>
-      </Show>
-
-      <Show when={p.data && !items().length}>
-        <div class="empty">
-          <p class="empty-title">{q() ? "Nothing matches." : p.tab === "inbox" ? "Inbox zero" : "Nothing here yet"}</p>
-          <p class="muted">
-            {q()
-              ? "Try fewer words."
-              : p.tab === "inbox"
-                ? "Captures from Ctrl Alt Space land here until you file them."
-                : "A collection is a folder of Markdown files. Make one like Prompts or Snippets, or move a note there."}
-          </p>
-        </div>
-      </Show>
-
-      <footer class="lib-foot">
-        <span>
-          <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd> move
-        </span>
-        <span>
-          <kbd>Enter</kbd> open
-        </span>
-        <span>
-          <kbd>c</kbd> copy
-        </span>
-        <span>
-          <kbd>e</kbd> edit
-        </span>
-        <Show when={p.tab === "inbox"}>
-          <span>
-            <kbd>m</kbd> move
-          </span>
-          <span>
-            <kbd>r</kbd> review
-          </span>
-        </Show>
-        <Show when={p.tab !== "inbox"}>
-          <span>
-            <kbd>p</kbd> pin
-          </span>
-          <span>
-            <kbd>t</kbd> colour and mark
-          </span>
-        </Show>
-        <span class="grow" />
-        <span>
-          <kbd>Esc</kbd> back to writing
-        </span>
-      </footer>
-
-      <Show when={open()} keyed>
-        {(id) => (
-          <Sheet
-            id={id}
-            copies={items().find((n) => n.id === id) ? copies(items().find((n) => n.id === id)!) : 0}
-            aiReady={p.aiReady}
-            onClose={() => setOpen(null)}
-            onEdit={(i) => (setOpen(null), p.onEdit(i))}
-            onMove={(n) => setMoving(n)}
-            onFile={fileSuggested}
-            onDelete={remove}
-            onAiSetup={p.onAiSetup}
+        <section class="lib-preview">
+          <Show when={current()} keyed fallback={<div class="empty"><p class="muted">Pick something on the left.</p></div>}>
+            {(n) => (
+              <Sheet
+                inline
+                id={n.id}
+                copies={copies(n)}
+                aiReady={p.aiReady}
+                onClose={() => {}}
+                onEdit={(i) => p.onEdit(i)}
+                onMove={(x) => setMoving(x)}
+                onFile={fileSuggested}
+                onDelete={remove}
+                onAiSetup={p.onAiSetup}
+              />
+            )}
+          </Show>
+        </section>
+        <footer class="lib-foot">
+          <KeyHints
+            hints={[
+              ["↑ ↓", "move"],
+              ["Enter", p.tab === "inbox" ? "file" : "copy"],
+              ["e", "edit"],
+              p.tab === "inbox" && ["m", "move"],
+              ["d", "delete"],
+              p.tab === "inbox" && ["r", "one at a time"],
+              p.tab !== "inbox" && ["p", "pin"],
+              p.tab !== "inbox" && ["t", "look and kind"],
+              ["/", "filter"],
+            ]}
           />
-        )}
+          <span class="grow" />
+          <KeyHints hints={[["Esc", "back to writing"]]} />
+        </footer>
       </Show>
+
       <Show when={moving()}>
         {(n) => <Destination exclude={n().id} onPick={(t) => void file(n(), t)} onClose={() => setMoving(null)} />}
       </Show>
@@ -503,4 +353,3 @@ export default function Library(p: {
     </div>
   );
 }
-

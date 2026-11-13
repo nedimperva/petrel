@@ -5,7 +5,27 @@ Markdown files in one folder; a Rust engine (`crates/petrel-core`) indexes them 
 (`src-tauri`) adds windows, tray, hotkeys and AI, and a SolidJS UI (`src`) draws it. The README covers setup and
 keys; `docs/design/petrel.md` is the design; this file covers state and decisions that aren't visible from the code.
 
-## Where things stand (2026-11-11, evening)
+## Where things stand (2026-11-11, night)
+
+- **Coherence pass (owner asked 2026-11-11), branch `claude/project-thread-4an9hg`, PR to `main`:** the model and
+  the key grammar are at the top of `docs/design/petrel.md` (write, find, copy; three kinds of screen; one meaning
+  per key). Collections are pages or things to copy (`copy: yes|no` in `.petrel`, `toCopy` in
+  `src/library/faces.ts`); the library's cards and the picker show only things to copy. `@` is the only capture
+  routing sign. Ctrl J and `/` open one AI menu. Review is a mode of the library (`reviewing`), the week and history
+  are panels like Ctrl K, Esc from a panel goes back to Ctrl K, conflicts are inbox cards. `KeyHints` in `ui.tsx`
+  is the key line on every screen. On Hyprland `src-tauri/src/hypr.rs` floats, sizes, centres and pins the capture
+  window and the picker through `hyprctl` (not tried on Linux).
+- **Settings and keys (owner asked 2026-11-12), same branch:** Settings is a screen of its own with categories
+  (`src/settings/Settings.tsx`); every shortcut is in `src/keys.ts` with Windows and Linux defaults, changeable in
+  Settings › Keys for this computer only (`ui.keys`; on Wayland the global ones show a Hyprland `bind` line to copy);
+  `Ctrl /` or `?` shows them all (`src/Shortcuts.tsx`). The margin always shows its sections, with empty states, and
+  the links going out of the note. hypr.rs also matches a window by `initialTitle`.
+- **The next look (owner approved 2026-11-11, canvas https://claude.ai/artifact/6YTYsvgRztVuzNvHvFP2GS, margin
+  wider than drawn), same branch:** the sidebar (`src/Sidebar.tsx`: collections made, renamed, trashed through
+  `Store::create_folder`/`rename_folder`/`trash_folder` in `crates/petrel-core/src/notes/folders.rs`), the right
+  margin (`.note-margin`, a container query on `.page`), Ctrl L as a list and an inline `Sheet`, a quieter AI menu
+  that scrolls, today's page opening on a timed new line. The picker's hotkey is `Ctrl Shift Space` (Ctrl Alt V
+  was AltGr V, `@` on the owner's Bosnian keyboard); the note beside is `Ctrl Shift Enter`.
 
 - **Redesign implemented (owner decisions 2026-11-09/10, canvas https://claude.ai/artifact/2iMBXDeW8F2UVV1tLguc7g),
   on a PR based on the notes PR (#9).** No actions, no drafts UI, no `petrel://` links, no `petrel run`: those
@@ -45,7 +65,7 @@ keys; `docs/design/petrel.md` is the design; this file covers state and decision
   window on Windows (title bar dragging, window buttons, frameless capture), AI with a real key.
 - The drafts tables (schema up to v4) stay in the database so old data can be exported; nothing new writes them.
 - Open owner questions: light or dark by default (both exist, system default), whether the warm look is right,
-  whether `Ctrl Alt V` suits him, a local model.
+  a local model.
 
 ## Design decisions to keep
 

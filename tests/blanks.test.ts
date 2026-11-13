@@ -94,3 +94,11 @@ test("versions on one card", async () => {
   );
   assert.ok(hasVersions("Prompts") && hasVersions("snippets/shell") && !hasVersions("Travel"));
 });
+
+test("collections are pages or things to copy", async () => {
+  const { toCopy } = await import("../src/library/faces.ts");
+  assert.ok(toCopy("Prompts") && toCopy("Snippets/shell") && toCopy("Email templates"));
+  assert.ok(!toCopy("Travel") && !toCopy("") && !toCopy("inbox") && !toCopy("journal"));
+  assert.ok(toCopy("Songs", { Songs: { color: "", mark: "", copy: "yes" } }));
+  assert.ok(!toCopy("Prompts", { Prompts: { color: "", mark: "", copy: "no" } }));
+});

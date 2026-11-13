@@ -1,7 +1,7 @@
 // The capture window (`petrel --capture`, Ctrl Alt Space): text, and one quiet line under it. The file is made in
 // inbox/ on the first keystroke and saved as you type. Text selected in the app you were in comes in as a quote
-// with where it came from. `#recipes`, `#today` or a day (`#fri`, `#tomorrow`, `#nov20`) in the text, or
-// `>Groceries`, says where it goes (the list offers places as you type, and the word is taken out); Tab picks a
+// with where it came from. `@recipes`, `@today`, a day (`@fri`, `@nov20`) or a note (`@Groceries`) in the text
+// says where it goes (the list offers places as you type, and the word is taken out); Ctrl K picks a
 // place from a list. Esc saves and closes. An empty capture leaves nothing behind. A pasted picture is saved next
 // to it; pasted HTML comes in as Markdown.
 //
@@ -26,7 +26,7 @@ import Mark, { loadFaces } from "./library/Mark";
 import { completionTheme } from "./notes/links";
 import { createNoteSaver, type SaveState } from "./notes/saver";
 import { applyPrefs, parsePrefs } from "./settings/prefs";
-import { folderName, say, ToastView } from "./ui";
+import { folderName, KeyHints, say, ToastView } from "./ui";
 
 /** Opening the window again within this long adds to the last capture. */
 const KEEP_GOING_MS = 2 * 60 * 1000;
@@ -99,31 +99,29 @@ export default function Capture() {
       setTarget(to);
       setTargetHome(home);
     };
-    let options: Completion[];
-    if (t.sign === "#") {
-      const fs = folders.filter((f) => !w || f.toLowerCase().includes(w));
-      const days = dayOptions(w).map((d) => ({
-        label: `#${d.word}`,
-        detail: d.day === today() ? "Today's page" : `${dayTitle(d.day)}'s page`,
-        apply: pick({ kind: "day", date: d.day }, "journal"),
-      }));
-      options = [...days, ...fs.map((f) => ({ label: `#${f}`, detail: "collection", apply: pick({ kind: "folder", folder: f }, f) }))];
-      if (w && !folders.some((f) => f.toLowerCase() === w) && !days.length) {
-        options.push({ label: `#${t.word}`, detail: `new collection “${t.word}”`, apply: pick({ kind: "folder", folder: t.word }, t.word) });
-      }
-    } else {
-      if (!w) return null;
-      const ns = (await (await api()).findNotes(t.word.replace(/-/g, " "), 8)).filter((n) => n.folder !== "inbox" && n.id !== note()?.id);
-      options = ns.map((n) => ({ label: `>${n.title}`, detail: `add to the end · ${folderName(n.folder)}`, apply: pick({ kind: "note", id: n.id, title: n.title }, n.folder) }));
+    const fs = folders.filter((f) => !w || f.toLowerCase().includes(w));
+    const days = dayOptions(w).map((d) => ({
+      label: `@${d.word}`,
+      detail: d.day === today() ? "Today's page" : `${dayTitle(d.day)}'s page`,
+      apply: pick({ kind: "day", date: d.day }, "journal"),
+    }));
+    const ns = w ? (await (await api()).findNotes(t.word.replace(/-/g, " "), 6)).filter((n) => n.folder !== "inbox" && n.id !== note()?.id) : [];
+    const options: Completion[] = [
+      ...days,
+      ...fs.map((f) => ({ label: `@${f}`, detail: "collection", apply: pick({ kind: "folder", folder: f }, f) })),
+      ...ns.map((n) => ({ label: `@${n.title}`, detail: `add to the end · ${folderName(n.folder)}`, apply: pick({ kind: "note", id: n.id, title: n.title }, n.folder) })),
+    ];
+    if (w && !folders.some((f) => f.toLowerCase() === w) && !days.length && !ns.length) {
+      options.push({ label: `@${t.word}`, detail: `new collection “${t.word}”`, apply: pick({ kind: "folder", folder: t.word }, t.word) });
     }
     return options.length ? { from, options, filter: false } : null;
   }
 
-  /** A `#word` or `>word` left in the new text when Esc is pressed still routes it, and is taken out. */
+  /** An `@word` left in the new text when Esc is pressed still routes it, and is taken out. */
   async function routeFromText(): Promise<void> {
     if (target() || !editor || earlier() !== null) return;
     const text = editor.text();
-    const words = tokens(text).filter((t) => t.sign === ">").map((t) => t.word);
+    const words = tokens(text).map((t) => t.word);
     const s = await api();
     const titles = (await Promise.all(words.map((w) => s.findNotes(w.replace(/-/g, " "), 5)))).flat().filter((n) => n.folder !== "inbox");
     const r = pickRoute(text, folders, titles.map((n) => n.title), (w) => dayWord(w));
@@ -223,7 +221,8 @@ export default function Capture() {
       e.preventDefault();
       e.stopPropagation();
       void done();
-    } else if (e.key === "Tab" && !e.shiftKey && !e.ctrlKey) {
+    } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+      // Ctrl K finds, here too: a place for the capture.
       e.preventDefault();
       e.stopPropagation();
       setChoosing(true);
@@ -239,7 +238,7 @@ export default function Capture() {
   }
 
   onMount(async () => {
-    editor = createEditor(host, () => saver.changed(), { placeholder: "Write it down. #topic, #today or #fri files it." });
+    editor = createEditor(host, () => saver.changed(), { placeholder: "Write it down. @topic, @today or @fri files it." });
     const extra: Extension = [
       earlierEnd,
       earlierDeco,
@@ -306,7 +305,7 @@ export default function Capture() {
         </button>
         <Show when={earlier() !== null}>
           <span class="muted" data-tauri-drag-region>
-            adding to the last capture · <kbd>Ctrl Enter</kbd> a new one
+            adding to the last capture
           </span>
         </Show>
         <Show when={quoted()}>
@@ -314,9 +313,7 @@ export default function Capture() {
             with the quote
           </span>
         </Show>
-        <span class="muted" data-tauri-drag-region>
-          <kbd>Tab</kbd> somewhere else
-        </span>
+        <KeyHints hints={[["@", "where"], ["Ctrl K", "choose"], earlier() !== null && ["Ctrl Enter", "a new one"]]} />
         <span class="grow" data-tauri-drag-region />
         <Show when={msg()} fallback={<span class="muted">{saveLabel()}</span>}>
           <span class="bad">{msg()}</span>

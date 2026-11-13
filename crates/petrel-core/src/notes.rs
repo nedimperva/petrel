@@ -28,6 +28,7 @@ use crate::store::{Folder, Store, UndoToken, VERSION_INTERVAL_MS};
 use crate::title;
 
 mod conflicts;
+mod folders;
 mod paths;
 mod tasks;
 
@@ -900,6 +901,24 @@ impl Store {
             }
             *all.entry(folder).or_insert(0) += n;
         }
+        // A collection just made from the sidebar has no notes yet: the folders on disk count too, two levels down.
+        if let Ok(root) = self.root() {
+            let mut stack = vec![(root, String::new(), 0)];
+            while let Some((dir, rel, depth)) = stack.pop() {
+                let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+                for e in entries.flatten() {
+                    let name = e.file_name().to_string_lossy().to_string();
+                    if name.starts_with('.') || name == attachments::DIR || !e.path().is_dir() {
+                        continue;
+                    }
+                    let path = if rel.is_empty() { name } else { format!("{rel}/{name}") };
+                    all.entry(path.clone()).or_insert(0);
+                    if depth < 1 {
+                        stack.push((e.path(), path, depth + 1));
+                    }
+                }
+            }
+        }
         let mut out: Vec<NoteFolder> = all
             .into_iter()
             .map(|(path, count)| {
@@ -1406,10 +1425,14 @@ impl Store {
             }
             if let Ok(text) = std::fs::read_to_string(e.path().join(FACE_FILE)) {
                 let f = parse_face(&text);
-                if f.color.is_some() || f.mark.is_some() {
+                if f.color.is_some() || f.mark.is_some() || f.copy.is_some() {
                     out.insert(
                         name,
-                        TopicFace { color: f.color.unwrap_or_default(), mark: f.mark.unwrap_or_default() },
+                        TopicFace {
+                            color: f.color.unwrap_or_default(),
+                            mark: f.mark.unwrap_or_default(),
+                            copy: f.copy.unwrap_or_default(),
+                        },
                     );
                 }
             }
@@ -1417,14 +1440,18 @@ impl Store {
         Ok(out)
     }
 
-    /// Sets a top folder's colour and mark (empty: the default). Lines in `.petrel` Petrel does not know are kept.
-    pub fn set_topic_face(&mut self, top: &str, color: &str, mark: &str) -> Result<TopicFace> {
+    /// Sets a top folder's colour, mark and kind (`copy`: `yes`, `no`, or empty for the default). Lines in
+    /// `.petrel` Petrel does not know are kept.
+    pub fn set_topic_face(&mut self, top: &str, color: &str, mark: &str, copy: &str) -> Result<TopicFace> {
         let root = self.root()?;
         let top = clean_folder(top);
         if top.is_empty() || top.contains('/') || top == INBOX_DIR {
             bail!("only a collection (a top folder) has a look of its own");
         }
-        let (color, mark) = (face_word(color)?, face_word(mark)?);
+        let (color, mark, copy) = (face_word(color)?, face_word(mark)?, face_word(copy)?);
+        if !matches!(copy.as_str(), "" | "yes" | "no") {
+            bail!("a collection is to copy (yes) or pages (no), not {copy}");
+        }
         let dir = abs(&root, &top);
         if !dir.is_dir() {
             bail!("there is no folder called {top}");
@@ -1433,7 +1460,7 @@ impl Store {
         let old = std::fs::read_to_string(&path).unwrap_or_default();
         let mut lines: Vec<String> = old
             .lines()
-            .filter(|l| !matches!(l.split_once(':').map(|(k, _)| k.trim()), Some("color" | "mark")))
+            .filter(|l| !matches!(l.split_once(':').map(|(k, _)| k.trim()), Some("color" | "mark" | "copy")))
             .map(str::to_string)
             .collect();
         if lines.is_empty() {
@@ -1445,8 +1472,11 @@ impl Store {
         if !mark.is_empty() {
             lines.push(format!("mark: {mark}"));
         }
+        if !copy.is_empty() {
+            lines.push(format!("copy: {copy}"));
+        }
         write_atomic(&path, &(lines.join("\n") + "\n"))?;
-        Ok(TopicFace { color, mark })
+        Ok(TopicFace { color, mark, copy })
     }
 
     /// A note's saved versions, newest first (the history panel).
@@ -2095,12 +2125,16 @@ fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
 pub struct TopicFace {
     pub color: String,
     pub mark: String,
+    /// `yes`: a collection of things to copy (cards in the library and the picker); `no`: pages, found with
+    /// Ctrl K; empty: decided by its name (Prompts, Snippets… are to copy).
+    pub copy: String,
 }
 
 #[derive(Default)]
 struct FaceLines {
     color: Option<String>,
     mark: Option<String>,
+    copy: Option<String>,
 }
 
 /// A colour or mark name: lower-case letters and `-`, short. Anything else is not one Petrel drew.
@@ -2123,6 +2157,7 @@ fn parse_face(text: &str) -> FaceLines {
         match k.trim() {
             "color" => f.color = Some(v),
             "mark" => f.mark = Some(v),
+            "copy" if v == "yes" || v == "no" => f.copy = Some(v),
             _ => {}
         }
     }
@@ -2562,15 +2597,19 @@ mod tests {
         s.create_note("Travel", "Mostar", "", &[]).unwrap();
         assert!(s.topic_faces().unwrap().is_empty());
         std::fs::write(dir.join("Travel").join(FACE_FILE), "keep: me\ncolor: rose\n").unwrap();
-        let f = s.set_topic_face("Travel", "teal", "plane").unwrap();
+        let f = s.set_topic_face("Travel", "teal", "plane", "").unwrap();
         assert_eq!((f.color.as_str(), f.mark.as_str()), ("teal", "plane"));
         let text = std::fs::read_to_string(dir.join("Travel").join(FACE_FILE)).unwrap();
         assert!(text.contains("keep: me") && !text.contains("rose"), "{text}");
         assert_eq!(s.topic_faces().unwrap()["Travel"], f);
-        assert!(s.set_topic_face("inbox", "teal", "").is_err());
-        assert!(s.set_topic_face("Travel/Sub", "teal", "").is_err());
-        assert!(s.set_topic_face("Travel", "Teal; rm", "").is_err());
-        assert!(s.set_topic_face("Nowhere", "teal", "").is_err());
+        let f = s.set_topic_face("Travel", "teal", "plane", "yes").unwrap();
+        assert_eq!(s.topic_faces().unwrap()["Travel"].copy, "yes");
+        assert_eq!(f.copy, "yes");
+        assert!(s.set_topic_face("Travel", "teal", "", "maybe").is_err());
+        assert!(s.set_topic_face("inbox", "teal", "", "").is_err());
+        assert!(s.set_topic_face("Travel/Sub", "teal", "", "").is_err());
+        assert!(s.set_topic_face("Travel", "Teal; rm", "", "").is_err());
+        assert!(s.set_topic_face("Nowhere", "teal", "", "").is_err());
         // The face file is not a note.
         assert_eq!(s.scan_notes().unwrap().added, 0);
         std::fs::remove_dir_all(dir).ok();

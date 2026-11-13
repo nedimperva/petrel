@@ -1,18 +1,13 @@
-// Petrel's own title bar, as in Tern: the system draws none on Windows. Library and new note on the left, what
-// you are on (or the library's collections) in the middle, search and the window buttons on the right. The empty
+// Petrel's own title bar, as in Tern: the system draws none on Windows. The sidebar's button and new note on the
+// left, what you are on in the middle, search and the window buttons on the right. The empty
 // parts drag the window and a double click maximizes. On Linux the window manager draws the frame, so the window
 // buttons are left out and the bar only carries Petrel's own controls.
 
-import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createSignal, onCleanup, onMount, Show } from "solid-js";
 import { inTauri } from "./api";
 
 export const ownFrame = inTauri && !navigator.userAgent.includes("Linux");
 
-export interface Tab {
-  id: string;
-  label: string;
-  count?: number;
-}
 
 async function win() {
   const { getCurrentWindow } = await import("@tauri-apps/api/window");
@@ -20,17 +15,10 @@ async function win() {
 }
 
 const Icon = {
-  library: (
-    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <rect x="3" y="3" width="7" height="9" rx="1.5" />
-      <rect x="14" y="3" width="7" height="5" rx="1.5" />
-      <rect x="14" y="12" width="7" height="9" rx="1.5" />
-      <rect x="3" y="16" width="7" height="5" rx="1.5" />
-    </svg>
-  ),
-  back: (
-    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <path d="M19 12H5M11 6l-6 6 6 6" />
+  sidebar: (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M9 4v16" />
     </svg>
   ),
   plus: (
@@ -47,13 +35,11 @@ const Icon = {
 };
 
 export default function TitleBar(p: {
-  library: boolean;
-  /** The note's title while writing. */
+  /** The note's title while writing, or where you are in the library. */
   title: string;
-  tabs: Tab[];
-  tab: string;
-  onTab(id: string): void;
-  onLibrary(): void;
+  sidebar: boolean;
+  onSidebar(): void;
+  onSettings(): void;
   onNew(): void;
   onSearch(): void;
 }) {
@@ -75,35 +61,33 @@ export default function TitleBar(p: {
         <button
           type="button"
           class="icon-btn"
-          onClick={p.onLibrary}
-          title={p.library ? "Back to writing (Esc)" : "Library (Ctrl L)"}
-          aria-label={p.library ? "Back to writing" : "Library"}
+          classList={{ on: p.sidebar }}
+          onClick={p.onSidebar}
+          title={p.sidebar ? "Hide the sidebar (Ctrl 0)" : "Show the sidebar (Ctrl 0)"}
+          aria-label={p.sidebar ? "Hide the sidebar" : "Show the sidebar"}
+          aria-pressed={p.sidebar}
         >
-          {p.library ? Icon.back : Icon.library}
+          {Icon.sidebar}
         </button>
         <button type="button" class="icon-btn" onClick={p.onNew} title="New note (Ctrl N)" aria-label="New note">
           {Icon.plus}
         </button>
       </div>
       <div class="titlebar-mid" data-tauri-drag-region>
-        <Show when={p.library} fallback={<span class="titlebar-title" data-tauri-drag-region>{p.title}</span>}>
-          <nav class="tabs" aria-label="Collections">
-            <For each={p.tabs}>
-              {(t) => (
-                <button type="button" class="tab" classList={{ on: t.id === p.tab }} onClick={() => p.onTab(t.id)}>
-                  {t.label}
-                  <Show when={t.count}>
-                    <span class="tab-count">{t.count}</span>
-                  </Show>
-                </button>
-              )}
-            </For>
-          </nav>
-        </Show>
+        <span class="titlebar-title" data-tauri-drag-region>
+          {p.title}
+        </span>
       </div>
       <div class="titlebar-end">
         <button type="button" class="icon-btn" onClick={p.onSearch} title="Find or ask (Ctrl K)" aria-label="Find or ask">
           {Icon.search}
+        </button>
+        <button type="button" class="icon-btn" onClick={p.onSettings} title="Settings (Ctrl ,)" aria-label="Settings">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 7h10M18 7h2M4 17h2M10 17h10" />
+            <circle cx="16" cy="7" r="2" />
+            <circle cx="8" cy="17" r="2" />
+          </svg>
         </button>
         <Show when={ownFrame}>
           <div class="window-buttons">

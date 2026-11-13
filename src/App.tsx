@@ -1,20 +1,24 @@
 // The main window is the page you write on. It opens on an empty page (or the note you left less than ten minutes
 // ago); Ctrl L swaps the page for the library of cards and Esc brings it back. Ctrl K finds, runs or asks, Ctrl N
 // is a new page, Ctrl D today's page (Alt ← and Alt → the days around it), Ctrl H history, Ctrl , settings. The
-// inbox review takes the page's place while it runs. The title bar is Petrel's own (TitleBar.tsx).
-// Ctrl Tab goes back to the note before (held, it lists the last few); Ctrl \ opens a second note beside.
+// inbox review is a mode of the inbox's cards in the library. Panels opened from Ctrl K (tasks, the week, history)
+// go back to Ctrl K on Esc. The title bar is Petrel's own (TitleBar.tsx).
+// Ctrl Tab goes back to the note before (held, it lists the last few); Ctrl Shift Enter opens a second note beside.
 
 import { createResource, createSignal, For, lazy, onCleanup, onMount, Show, Suspense } from "solid-js";
 import { api, errText, inTauri, type AiStatus, type Note, type NoteSummary, type ScanReport } from "./api";
 import { plainText } from "./copy";
 import TitleBar from "./TitleBar";
-import { libraryTabs, loadLibrary } from "./library/Library";
+import Sidebar, { type Place } from "./Sidebar";
+import { loadLibrary } from "./library/Library";
 import NotePage, { type NotePageHandle } from "./note/NotePage";
 import CommandBar, { type Command } from "./palette/CommandBar";
 import { applyPrefs, changePref, parsePrefs, prefs, setPrefs } from "./settings/prefs";
 import { folderName, say, ToastView, typing, undoLast } from "./ui";
 import { pushRecent } from "./palette/match";
 import Beside, { type BesideHandle } from "./note/Beside";
+import { matches, parseKeyMap, setCustomKeys } from "./keys";
+import Shortcuts from "./Shortcuts";
 import Destination, { type Target } from "./inbox/Destination";
 import { addDays, JOURNAL, today } from "./journal/days";
 import { typingSound } from "./joy/sound";
@@ -22,20 +26,22 @@ import { loadFaces } from "./library/Mark";
 
 const Library = lazy(() => import("./library/Library"));
 const Settings = lazy(() => import("./settings/Settings"));
+import type { Section } from "./settings/Settings";
 const Versions = lazy(() => import("./versions/Versions"));
-const Review = lazy(() => import("./inbox/Review"));
+
 const Week = lazy(() => import("./journal/Week"));
 const Tasks = lazy(() => import("./palette/Tasks"));
 
 type View =
-  | { kind: "library"; tab: string }
-  | { kind: "note"; id: number | null; folder: string; day?: string }
-  | { kind: "review" };
+  | { kind: "library"; tab: string; review?: boolean }
+  | { kind: "note"; id: number | null; folder: string; day?: string };
 
 /** What the empty page files into: like the capture window, it goes to the inbox until you move it. */
 const NEW_FOLDER = "inbox";
 /** Coming back within this long opens the note you left instead of an empty page. */
 const RESUME_MS = 10 * 60 * 1000;
+/** From this width the sidebar sits beside the page; below it, it slides over and closes after a pick. */
+const SIDEBAR_DOCK_PX = 1000;
 /** Notes remembered for Back and for Ctrl K's empty list. */
 const RECENT_MAX = 12;
 /** Ctrl held this long on Ctrl Tab shows the list; a quick press just swaps. */
@@ -65,14 +71,31 @@ export default function App() {
   const [tab, setTab] = createSignal("all");
   const [bar, setBar] = createSignal<"all" | "notes" | "beside" | null>(null);
   const [beside, setBeside] = createSignal<number | null>(null);
+  // The sidebar: shown unless hidden with Ctrl 0 (ui.sidebar); docked on a wide window, over the page on a narrow one.
+  const [sideOn, setSideOn] = createSignal(true);
+  const [wide, setWide] = createSignal(innerWidth >= SIDEBAR_DOCK_PX);
+  const docked = () => sideOn() && wide();
+  // What the owner chose for a wide window; a narrow one starts with the sidebar out of the way.
+  let sidePref = true;
+  const toggleSide = () => {
+    const on = !sideOn();
+    setSideOn(on);
+    if (wide()) {
+      sidePref = on;
+      void api().then((s) => s.setUiSetting("ui.sidebar", on ? "1" : "0")).catch(() => {});
+    }
+  };
   let besideH: BesideHandle | undefined;
   const [recent, setRecent] = createSignal<number[]>([]);
+  // The open note's folder, as a signal for the sidebar (the page handle is not reactive).
+  const [noteFolder, setNoteFolder] = createSignal<string | null>(null);
   const [switcher, setSwitcher] = createSignal<{ ids: number[]; i: number; shown: boolean; notes: NoteSummary[] } | null>(null);
-  const [settings, setSettings] = createSignal<false | "all" | "ai">(false);
+  const [settings, setSettings] = createSignal<false | Section | "all">(false);
   const [history, setHistory] = createSignal(false);
   const [moving, setMoving] = createSignal(false);
   const [week, setWeek] = createSignal(false);
   const [tasks, setTasks] = createSignal(false);
+  const [keysOpen, setKeysOpen] = createSignal(false);
   // A line in the page's footer for a moment ("Updated from Drive").
   const [notice, setNotice] = createSignal<string | null>(null);
   let noticeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -89,6 +112,7 @@ export default function App() {
   const back: View[] = [];
 
   const go = async (v: View, remember = true) => {
+    lastGo = Date.now();
     if (view().kind === "note") await page?.flush();
     // The note beside is never also the main one.
     if (v.kind === "note" && v.id !== null && v.id === beside()) await closeBeside(false);
@@ -108,7 +132,29 @@ export default function App() {
     const n = await (await api()).dayNote(day).catch(() => null);
     return go({ kind: "note", id: n?.id ?? null, folder: JOURNAL, day });
   };
-  const review = () => go({ kind: "review" });
+  const review = () => (setTab("inbox"), go({ kind: "library", tab: "inbox", review: true }));
+  const reviewing = () => {
+    const v = view();
+    return v.kind === "library" && !!v.review;
+  };
+
+  // A panel opened from Ctrl K goes back to it on Esc; one closed because a note was opened from it does not.
+  let barClosedAt = 0;
+  let lastGo = 0;
+  const panels = { tasks: false, week: false, history: false };
+  const openPanel = (which: keyof typeof panels, set: (on: boolean) => void) => {
+    panels[which] = Date.now() - barClosedAt < 400;
+    set(true);
+  };
+  const closePanel = (which: keyof typeof panels, set: (on: boolean) => void) => {
+    set(false);
+    const back = panels[which];
+    const at = Date.now();
+    setTimeout(() => {
+      if (back && lastGo < at) setBar("all");
+      else page?.focus();
+    });
+  };
   /** The day of the page being written on, if it is a day's page. */
   const onDay = () => {
     const v = view();
@@ -126,6 +172,32 @@ export default function App() {
     const n = current();
     await (await api()).setUiSetting("last.note", n ? `${n.id}:${Date.now()}` : "").catch(() => {});
   };
+  /** What the sidebar marks: today, the inbox, open tasks, or the collection you are in. */
+  const here = (): Place => {
+    const v = view();
+    if (tasks()) return "tasks";
+    if (v.kind === "library") return v.tab === "inbox" ? "inbox" : v.tab.startsWith("c:") ? (v.tab as Place) : null;
+    if (v.day === today() || onDay() === today()) return "today";
+    const f = noteFolder();
+    if (f === "inbox") return "inbox";
+    return f ? `c:${f}` : null;
+  };
+  const libraryTitle = () => {
+    const t = tab();
+    return t === "inbox" ? "Inbox" : t.startsWith("c:") ? folderName(t.slice(2)) : "All";
+  };
+  /** A collection was renamed or trashed in the sidebar: what was open in it follows, or goes back to writing. */
+  async function folderMoved(from: string, to: string | null) {
+    const v = view();
+    const inside = (f: string) => f === from || f.startsWith(`${from}/`);
+    if (v.kind === "library" && v.tab.startsWith("c:") && inside(v.tab.slice(2))) {
+      await (to ? library(`c:${to}${v.tab.slice(2 + from.length)}`) : library("all"));
+    } else if (v.kind === "note" && inside(noteFolder() ?? "")) {
+      if (to) await page?.reload();
+      else await newNote();
+    }
+    setRev(rev() + 1);
+  }
   const current = () => (view().kind === "note" ? (page?.note() ?? null) : null);
   const onNote = () => view().kind === "note" && !!current();
 
@@ -243,13 +315,20 @@ export default function App() {
   const commands: Command[] = [
     { id: "new", label: "New note", keys: "Ctrl N", run: () => void newNote() },
     { id: "capture", label: "Quick capture window", keys: "Ctrl Alt Space", run: () => void api().then((s) => s.openCapture()) },
-    { id: "picker", label: "Quick picker: copy a prompt or snippet", keys: "Ctrl Alt V", run: () => void api().then((s) => s.openPicker()) },
+    { id: "picker", label: "Quick picker: copy a prompt or snippet", keys: "Ctrl Shift Space", run: () => void api().then((s) => s.openPicker()) },
     { id: "library", label: "Library", keys: "Ctrl L", run: () => void library("all") },
     { id: "today", label: "Today's page", keys: "Ctrl D", run: () => void openDay(today()) },
     { id: "inbox", label: "Inbox", run: () => void library("inbox") },
     { id: "review", label: "Review the Inbox, one card at a time", run: () => void review() },
-    { id: "week", label: "AI: Look back on the week", run: () => setWeek(true) },
-    { id: "tasks", label: "Open tasks in every note", run: () => void (page ? page.flush() : Promise.resolve(true)).then(() => setTasks(true)) },
+    { id: "week", label: "The week: what you wrote, what is open, and a few words from Claude", run: () => openPanel("week", setWeek) },
+    {
+      id: "tasks",
+      label: "Open tasks in every note",
+      run: () => {
+        panels.tasks = true;
+        void (page ? page.flush() : Promise.resolve(true)).then(() => setTasks(true));
+      },
+    },
     { id: "copy", label: "Copy", when: onNote, run: () => void copy("plain") },
     { id: "copy-md", label: "Copy as Markdown", keys: "Ctrl Shift C", when: onNote, run: () => void copy("markdown") },
     { id: "copy-html", label: "Copy formatted (for mail and docs)", when: onNote, run: () => void copy("html") },
@@ -260,7 +339,7 @@ export default function App() {
     { id: "related", label: "AI: Find related notes", when: onNote, run: () => page?.findRelated() },
     { id: "move", label: "Move to a note or collection…", when: onNote, run: () => setMoving(true) },
     { id: "task", label: "Add a task, or tick one", keys: "Ctrl Shift X", when: () => view().kind === "note", run: () => page?.task() },
-    { id: "beside", label: "Open a note beside this one", keys: "Ctrl \\", run: () => setTimeout(() => setBar("beside")) },
+    { id: "beside", label: "Open a note beside this one", keys: "Ctrl Shift Enter", run: () => setTimeout(() => setBar("beside")) },
     { id: "beside-close", label: "Close the note beside", when: () => beside() !== null, run: () => void closeBeside() },
     { id: "back", label: "Back to the note before", keys: "Ctrl Tab", when: () => others().length > 0, run: () => void openNote(others()[0]) },
     {
@@ -273,10 +352,11 @@ export default function App() {
       },
     },
     { id: "pin", label: "Pin or unpin this note", when: onNote, run: () => void pin() },
-    { id: "history", label: "History", keys: "Ctrl H", when: onNote, run: () => setHistory(true) },
+    { id: "history", label: "History", keys: "Ctrl H", when: onNote, run: () => openPanel("history", setHistory) },
     { id: "delete", label: "Delete this note", when: onNote, run: () => void trash() },
     { id: "rescan", label: "Look for changes in the folder", run: () => void rescan(true) },
     { id: "settings", label: "Settings", keys: "Ctrl ,", run: () => setSettings("all") },
+    { id: "shortcuts", label: "All shortcuts", keys: "Ctrl /", run: () => setKeysOpen(true) },
   ];
 
   /** Notes changed on disk (the watcher, or a rescan): the lists redraw, and the open note reloads where you
@@ -308,7 +388,7 @@ export default function App() {
     }
   }
 
-  const overlay = () => !!(bar() || settings() || history() || moving() || week() || tasks());
+  const overlay = () => !!(bar() || settings() || history() || moving() || week() || tasks() || keysOpen());
 
   // Ctrl Tab and Ctrl \ come before the editor, which would indent or type them.
   const earlyKey = (e: KeyboardEvent) => {
@@ -321,7 +401,8 @@ export default function App() {
       e.preventDefault();
       e.stopPropagation();
       switchDone(false);
-    } else if (mod && !e.altKey && (e.key === "\\" || e.code === "Backslash") && !overlay()) {
+    } else if ((matches(e, "beside") || (mod && !e.altKey && !e.shiftKey && (e.key === "\\" || e.code === "Backslash"))) && !overlay()) {
+      // Ctrl \ stays as well, on keyboards that have the key without AltGr.
       e.preventDefault();
       e.stopPropagation();
       if (beside() !== null) void closeBeside();
@@ -334,22 +415,23 @@ export default function App() {
 
   const key = (e: KeyboardEvent) => {
     const mod = e.ctrlKey || e.metaKey;
-    const k = e.key.toLowerCase();
-    if (mod && k === "k") setBar(bar() ? null : "all");
-    else if (mod && k === "p") setBar(bar() ? null : "notes");
+    if (matches(e, "find")) setBar(bar() ? null : "all");
+    else if (matches(e, "notes")) setBar(bar() ? null : "notes");
+    else if (matches(e, "shortcuts") || (e.key === "?" && !typing(e) && !overlay())) setKeysOpen(!keysOpen());
     else if (overlay()) return;
-    else if (mod && k === "n") void newNote();
-    else if (mod && k === "l") void (view().kind === "library" ? writing() : library());
-    else if (mod && e.key === ",") setSettings("all");
-    else if (mod && k === "h" && onNote()) setHistory(true);
+    else if (matches(e, "sidebar")) toggleSide();
+    else if (matches(e, "new")) void newNote();
+    else if (matches(e, "library")) void (view().kind === "library" ? writing() : library());
+    else if (matches(e, "settings")) setSettings("all");
+    else if (matches(e, "history") && onNote()) setHistory(true);
     else if (e.altKey && !mod && (e.key === "ArrowLeft" || e.key === "ArrowRight") && onDay()) {
       void openDay(addDays(onDay()!, e.key === "ArrowLeft" ? -1 : 1));
     }
-    else if (mod && e.shiftKey && k === "c" && onNote()) void copy("markdown");
-    else if (e.key === "Escape" && view().kind === "library") {
+    else if (matches(e, "copyMd") && onNote()) void copy("markdown");
+    else if (e.key === "Escape" && view().kind === "library" && !reviewing()) {
       if (document.querySelector(".scrim")) return;
       void writing();
-    } else if (e.key === "Escape" && beside() !== null && view().kind === "note" && !e.defaultPrevented && !document.querySelector(".scrim, .menu, .ai-bar, .explain")) {
+    } else if (e.key === "Escape" && beside() !== null && view().kind === "note" && !e.defaultPrevented && !document.querySelector(".scrim, .menu, .explain")) {
       void closeBeside();
     } else if (!mod && !typing(e) && e.key === "z" && view().kind === "note") {
       if (!undoLast()) return;
@@ -359,7 +441,7 @@ export default function App() {
 
   // Ctrl D is the editor's "select next match"; today's page comes first.
   const dayKey = (e: KeyboardEvent) => {
-    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "d" && !overlay()) {
+    if (matches(e, "today") && !overlay()) {
       e.preventDefault();
       e.stopPropagation();
       if (onDay() !== today()) void openDay(today());
@@ -373,6 +455,11 @@ export default function App() {
     document.addEventListener("keydown", dayKey, true);
     document.addEventListener("keydown", earlyKey, true);
     document.addEventListener("keyup", keyUp, true);
+    window.addEventListener("resize", () => {
+      const w = innerWidth >= SIDEBAR_DOCK_PX;
+      if (w !== wide()) setSideOn(w && sidePref);
+      setWide(w);
+    });
     window.addEventListener("blur", () => switcher() && switchDone(false));
     void loadFaces();
     const s = await api();
@@ -385,6 +472,9 @@ export default function App() {
     }
     setRoot((await s.notesInfo().catch(() => ({ root: "" }))).root);
     const stored = await s.uiSettings().catch(() => ({}) as Record<string, string>);
+    sidePref = stored["ui.sidebar"] !== "0";
+    setSideOn(sidePref && innerWidth >= SIDEBAR_DOCK_PX);
+    setCustomKeys(parseKeyMap(stored["ui.keys"] ?? "{}"));
     try {
       const r = JSON.parse(stored["ui.recent"] ?? "[]");
       if (Array.isArray(r)) setRecent(r.filter((x) => typeof x === "number").slice(0, RECENT_MAX));
@@ -438,16 +528,34 @@ export default function App() {
   return (
     <div class="app" classList={{ "in-library": view().kind === "library" }}>
       <TitleBar
-        library={view().kind === "library"}
-        title={view().kind === "review" ? "Inbox review" : title() || (noteView()?.id === null ? "New note" : "")}
-        tabs={libraryTabs(lib())}
-        tab={tab()}
-        onTab={(t) => void library(t)}
-        onLibrary={() => void (view().kind === "library" ? writing() : library())}
+        title={view().kind === "library" ? `Library · ${libraryTitle()}` : title() || (noteView()?.id === null ? "New note" : "")}
+        sidebar={sideOn()}
+        onSidebar={toggleSide}
+        onSettings={() => setSettings("all")}
         onNew={() => void newNote()}
         onSearch={() => setBar("all")}
       />
 
+      <div class="app-body">
+      <Show when={sideOn()}>
+        <Show when={!docked()}>
+          <div class="side-scrim" onMouseDown={() => setSideOn(false)} />
+        </Show>
+        <Sidebar
+          rev={rev()}
+          here={here()}
+          docked={docked()}
+          root={root()}
+          onNew={() => void newNote()}
+          onToday={() => void openDay(today())}
+          onInbox={() => void library("inbox")}
+          onTasks={() => void (page ? page.flush() : Promise.resolve(true)).then(() => ((panels.tasks = false), setTasks(true)))}
+          onCollection={(f) => void library(`c:${f}`)}
+          onFolderChanged={(from, to) => void folderMoved(from, to)}
+          onSettings={() => setSettings("all")}
+          onClose={() => setSideOn(false)}
+        />
+      </Show>
       <main class="view" classList={{ split: beside() !== null && view().kind === "note" }}>
         <Suspense>
           <Show when={view().kind === "library"}>
@@ -461,15 +569,8 @@ export default function App() {
               onChanged={() => setRev(rev() + 1)}
               onAiSetup={() => setSettings("ai")}
               onReview={() => void review()}
-            />
-          </Show>
-          <Show when={view().kind === "review"}>
-            <Review
-              aiReady={ai().ready}
-              onDone={() => void writing()}
-              onEdit={(id) => void openNote(id)}
-              onAiSetup={() => setSettings("ai")}
-              onChanged={() => setRev(rev() + 1)}
+              reviewing={reviewing()}
+              onReviewDone={() => void library("inbox")}
             />
           </Show>
           <Show when={noteView()}>
@@ -487,8 +588,7 @@ export default function App() {
                 onTitle={setTitle}
                 day={v().day ?? null}
                 onDay={(d) => void openDay(d)}
-                onWeek={() => setWeek(true)}
-                onNoteId={seen}
+                onNoteId={(id) => (seen(id), setNoteFolder(page?.note()?.folder ?? null))}
                 onBeside={(id) => void openBeside(id)}
                 besideOpen={beside() !== null}
                 notice={notice()}
@@ -509,6 +609,7 @@ export default function App() {
           </Show>
         </Suspense>
       </main>
+      </div>
       <Show when={switcher()?.shown && switcher()}>
         {(s) => (
           <div class="switcher" role="listbox" aria-label="Recent notes">
@@ -538,6 +639,7 @@ export default function App() {
           onOpen={bar() === "beside" ? (id) => void openBeside(id) : openNote}
           onAiSetup={() => setSettings("ai")}
           onClose={() => {
+            barClosedAt = Date.now();
             setBar(null);
             page?.focus();
           }}
@@ -549,7 +651,7 @@ export default function App() {
       <Suspense>
         <Show when={settings()}>
           <Settings
-            section={settings() === "ai" ? "ai" : undefined}
+            section={settings() || undefined}
             onClose={() => setSettings(false)}
             onRoot={(r) => (setRoot(r), setRev(rev() + 1))}
             onAi={setAi}
@@ -557,7 +659,7 @@ export default function App() {
         </Show>
         <Show when={tasks()}>
           <Tasks
-            onClose={() => (setTasks(false), page?.focus())}
+            onClose={() => closePanel("tasks", setTasks)}
             onOpen={(id) => void openNote(id)}
             onTicked={(id) => {
               if (current()?.id === id) void page?.refresh();
@@ -567,7 +669,7 @@ export default function App() {
         <Show when={week()}>
           <Week
             aiReady={ai().ready}
-            onClose={() => (setWeek(false), page?.focus())}
+            onClose={() => closePanel("week", setWeek)}
             onOpen={openNote}
             onAiSetup={() => (setWeek(false), setSettings("ai"))}
             onReview={() => void review()}
@@ -579,7 +681,7 @@ export default function App() {
               noteId={n().id}
               title={n().title}
               current={page?.text() ?? ""}
-              onClose={() => (setHistory(false), page?.focus())}
+              onClose={() => closePanel("history", setHistory)}
               onRestored={() => {
                 setHistory(false);
                 void page?.reload();
@@ -588,6 +690,9 @@ export default function App() {
           )}
         </Show>
       </Suspense>
+      <Show when={keysOpen()}>
+        <Shortcuts onClose={() => (setKeysOpen(false), page?.focus())} onSettings={() => (setKeysOpen(false), setSettings("keys"))} />
+      </Show>
       <ToastView />
     </div>
   );

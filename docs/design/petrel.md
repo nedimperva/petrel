@@ -3,6 +3,53 @@
 Decided by the owner on 2026-11-09 and 2026-11-10. Canvas: https://claude.ai/artifact/2iMBXDeW8F2UVV1tLguc7g.
 This replaces the Drafts-shaped plan (`docs/PLAN.md`, `docs/design/actions.md`, `docs/design/ui.md`).
 
+## The model (2026-11-11, the coherence pass)
+
+Everything is a page. You do three things: **write**, **find**, **copy**. Every feature sits under one of them;
+anything that does not stays hidden until asked for.
+
+- **Write**: the page (which can split in two: a note beside), capture, today's page, paragraph focus, headings in
+  the margin, clean paste, and AI on the text (`Ctrl J`, the one AI door; `/` on an empty line opens the same menu).
+- **Find**: `Ctrl K`, the one door. Notes, commands, a question for your notes, the recent notes (Back), open tasks,
+  the week. `Ctrl P` is `Ctrl K` on notes only. Panels it opens (tasks, the week, history, an answer) look and move
+  the same, and `Esc` goes back to `Ctrl K`.
+- **Where you are**: the sidebar (as in Tern): New note, Today, Inbox, Open tasks, then the collections to copy
+  and the pages. Collections are made, renamed (`F2`), given a look, set to pages or to copy, and trashed there.
+  Docked from 1000 px, over the page below; `Ctrl 0` hides it. The right margin (320 px) holds what is about the
+  note: its headings, what links to it, related notes, the month on a day's page.
+- **Copy**: the library and the quick picker are the same thing: what you copy. The library is a list beside the
+  item, always open (canvas https://claude.ai/artifact/6YTYsvgRztVuzNvHvFP2GS). A collection is either
+  **pages** (Travel, Journal: found with `Ctrl K`) or **to copy** (Prompts, Snippets: cards in the library and the
+  picker). Set once per collection (`t`), kept in its `.petrel` file (`copy: yes`). The inbox is cards too, until filed.
+
+Three kinds of screen, no more: the **page** (one or two notes), **one overlay** that grows into a panel (`Ctrl K`
+and what it opens), and **the card sheet** (shared with the picker). No dialog opens on top of another; when
+something closes, the focus goes back where it was; every overlay comes and goes with the same motion.
+
+### The key grammar
+
+| Key | Means, everywhere |
+|---|---|
+| `Enter` | do it (open, copy, keep, run, file) |
+| `Esc` | back one step (close the panel, then the overlay, then the note beside) |
+| `Tab` | the next field, and only that (`Shift Tab` the one before) |
+| `Alt ←` `Alt →` | the sibling before or after: another day, another version |
+| `↑` `↓` | move through a list |
+| `1`–`9` | pick from a short numbered list (a place, a choice, a side to keep) |
+| `Ctrl K` | find; `Ctrl P` notes only; `Ctrl J` AI; `Ctrl L` the library; `Ctrl 0` the sidebar; `Ctrl Tab` back |
+
+No global hotkey is Ctrl Alt with a key: that is AltGr on many keyboards (AltGr V is `@` in Bosnian), so it would
+take a character from every app. The picker is `Ctrl Shift Space`, the note beside `Ctrl Shift Enter`.
+
+Every screen ends with the same one-line footer of its keys (`src/ui.tsx`, `KeyHints`). Every shortcut is listed in
+`src/keys.ts`; Settings › Keys changes the app's own for this computer, `Ctrl /` (or `?` outside text) shows them all.
+
+In the capture window `@` says where a capture goes: `@recipes` (a collection), `@today`, `@fri`, `@nov20` (a day),
+`@Groceries` (a note). `#` is only ever a heading and `>` only a quote. Old `#word` and `>Note` routing is gone.
+
+On Hyprland (Omarchy) Petrel makes the capture window and the picker float, centred and pinned to every
+workspace itself, through `hyprctl`, when they open.
+
 ## What Petrel is
 
 A personal tool for quick notes and for keeping the things you copy often. Minimal, quick and good to look at.
@@ -22,7 +69,7 @@ It is not for sale; it may be open source later.
   The most copied come first.
 - **Copy is the action.** There are no actions. Copy, Copy as Markdown and Copy formatted (HTML for mail and
   docs) are `Ctrl K` commands. `{{name}}` and `{{name|default}}` in a note are blanks filled in as you copy;
-  `\{{` is a literal. The quick picker (`Ctrl Alt V`) does the same from any app and closes, so the paste goes
+  `\{{` is a literal. The quick picker (`Ctrl Shift Space`) does the same from any app and closes, so the paste goes
   where you were.
 - **AI only when asked.** Nothing is sent until you press a key for it. On a note, `Ctrl J` (or `/` on an empty
   line): tidy, shorten, make a list, a checklist, continue, or a custom ask. Select text and pick Explain for a
@@ -33,7 +80,7 @@ It is not for sale; it may be open source later.
 
 Canvas: https://claude.ai/artifact/Sw6CPjnpGXY6Vz9LnVCQ5d. Out for now: one line from a terminal, the greeting page.
 
-- **Capture with a word.** `#recipes` (a top folder), `#today` or `>Groceries` (a note) in the capture window says
+- **Capture with a word** (now `@`, see the model). `@recipes` (a top folder), `@today` or `@Groceries` (a note) in the capture window says
   where it goes; the list offers places as you type, the word is taken out, and a word left in the text still
   routes it when you press Esc (`src/inbox/route.ts`).
 - **The quote comes along.** Text selected in the app in front when the capture key is pressed starts the capture
@@ -62,10 +109,10 @@ Canvas: https://claude.ai/artifact/Sw6CPjnpGXY6Vz9LnVCQ5d. Out for now: one line
 
 Page: https://claude.ai/artifact/Kan675aYKsn9pvSgDMGRqq. Built: 1, 2, 4–12, 14, 16–19. Not now: 3, 13, 15, 20.
 
-- **Capture for a day.** `#fri`, `#tomorrow`, `#nov20` (also `20nov`, `2026-11-20`, weekday names) file the
+- **Capture for a day.** `@fri`, `@tomorrow`, `@nov20` (also `20nov`, `2026-11-20`, weekday names) file the
   capture on that day's page, under the time; offered as you type beside the folders. A weekday is the next one,
   not today; a date more than a month gone is next year's. A collection named like a day wins, except over
-  `#today` (`dayWord` in `src/journal/days.ts`).
+  `@today` (`dayWord` in `src/journal/days.ts`).
 - **Keep going.** The capture window opened again within two minutes of the last capture shows it faded and adds
   the new text under it, in the same file (`ui.capture.last`). `Ctrl Enter` makes the new text its own capture.
 - **Paste that stays clean.** Pasted HTML becomes Markdown: headings, lists, links (http, https, mailto), bold,
@@ -136,7 +183,7 @@ are in `src/styles/tokens.css`.
 |---|---|
 | Main | The writing page, or the library (`Ctrl L`) over it. No home, no sidebar. |
 | Capture | `Ctrl Alt Space`, `petrel --capture`. No frame. One line of footer: where it goes, `Tab` to choose, `Esc` done. |
-| Quick picker | `Ctrl Alt V`, `petrel --picker`. No frame. Search, a peek pane, blanks filled inline, `Enter` copies and closes. |
+| Quick picker | `Ctrl Shift Space`, `petrel --picker`. No frame. Search, a peek pane, blanks filled inline, `Enter` copies and closes. |
 
 On Wayland the compositor binds the keys: `bind = SUPER, N, exec, petrel --capture` and
 `bind = SUPER, V, exec, petrel --picker`.

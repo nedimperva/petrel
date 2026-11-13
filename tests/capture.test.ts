@@ -7,33 +7,34 @@ import { addDays, dayWord, isDayNote, isoWeek, monthGrid, parseDay } from "../sr
 import { bump, parseCounts, score } from "../src/inbox/learn.ts";
 import { quoteBlock, titleLine } from "../src/inbox/quote.ts";
 
-test("words are found outside code and Markdown", () => {
-  const t = tokens("Rest the dough #recipes\n# Heading\n> quote\n`#code` and >Groceries\n```\n#fenced\n```\nend #today");
+test("@words are found outside code; # and > stay Markdown", () => {
+  const t = tokens("Rest the dough @recipes\n# Heading\n#tag\n> quote\n`@code` and @Groceries\n```\n@fenced\n```\nend @today ana@example.com");
   assert.deepEqual(
-    t.map((x) => x.sign + x.word),
-    ["#recipes", ">Groceries", "#today"],
+    t.map((x) => x.word),
+    ["recipes", "Groceries", "today"],
   );
-  assert.deepEqual(tokens("a#b c"), []);
+  assert.deepEqual(tokens("a@b c #recipes >Groceries"), []);
 });
 
 test("a route takes the last word that names a place", () => {
   const folders = ["Recipes", "Travel", "Travel/Mostar"];
-  const r = pickRoute("Grandma's trick #recipes", folders, [], dayWord);
+  const r = pickRoute("Grandma's trick @recipes", folders, [], dayWord);
   assert.deepEqual(r?.route, { kind: "folder", folder: "Recipes" });
-  assert.equal(strip("Grandma's trick #recipes", r!.token), "Grandma's trick");
-  assert.deepEqual(pickRoute("#travel then #nothing", folders, [], dayWord)?.route, { kind: "folder", folder: "Travel" });
-  assert.deepEqual(pickRoute("milk >groceries", folders, ["Groceries"], dayWord)?.route, { kind: "note", title: "Groceries" });
-  assert.deepEqual(pickRoute("x >trip-to-mostar", folders, ["Trip to Mostar"], dayWord)?.route, { kind: "note", title: "Trip to Mostar" });
-  assert.equal(pickRoute("call back #Today", folders, [], dayWord)?.route.kind, "day");
-  assert.equal(pickRoute("#mostar is a sub-folder", folders, [], dayWord), null);
-  assert.equal(strip("#recipes first", { from: 0, to: 8 }), "first");
+  assert.equal(strip("Grandma's trick @recipes", r!.token), "Grandma's trick");
+  assert.deepEqual(pickRoute("@travel then @nothing", folders, [], dayWord)?.route, { kind: "folder", folder: "Travel" });
+  assert.deepEqual(pickRoute("milk @groceries", folders, ["Groceries"], dayWord)?.route, { kind: "note", title: "Groceries" });
+  assert.deepEqual(pickRoute("x @trip-to-mostar", folders, ["Trip to Mostar"], dayWord)?.route, { kind: "note", title: "Trip to Mostar" });
+  assert.equal(pickRoute("call back @Today", folders, [], dayWord)?.route.kind, "day");
+  assert.equal(pickRoute("@mostar is a sub-folder", folders, [], dayWord), null);
+  assert.equal(pickRoute("old style #recipes >Groceries", folders, ["Groceries"], dayWord), null);
+  assert.equal(strip("@recipes first", { from: 0, to: 8 }), "first");
 });
 
 test("the word being typed", () => {
-  assert.deepEqual(typingToken("dough #rec"), { sign: "#", word: "rec", back: 4 });
-  assert.deepEqual(typingToken(">"), { sign: ">", word: "", back: 1 });
-  assert.equal(typingToken("a#rec"), null);
-  assert.equal(typingToken("# heading"), null);
+  assert.deepEqual(typingToken("dough @rec"), { word: "rec", back: 4 });
+  assert.deepEqual(typingToken("@"), { word: "", back: 1 });
+  assert.equal(typingToken("ana@rec"), null);
+  assert.equal(typingToken("#rec"), null);
 });
 
 test("days", () => {

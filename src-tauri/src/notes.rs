@@ -192,6 +192,34 @@ pub fn tick_task(state: State<AppState>, id: i64, line: usize, text: String) -> 
     with(&state, |s| s.tick_task(id, line, &text))
 }
 
+/// A new collection from the sidebar (`Recipes`, or `Travel/Mostar` inside one).
+#[tauri::command]
+pub fn create_folder(state: State<AppState>, folder: String) -> R<String> {
+    with(&state, |s| s.create_folder(&folder))
+}
+
+/// Renames a collection in place; returns its new path.
+#[tauri::command]
+pub fn rename_folder(state: State<AppState>, folder: String, name: String) -> R<String> {
+    with(&state, |s| s.rename_folder(&folder, &name))
+}
+
+/// Moves a collection and its notes to `.trash/`; returns how many notes went.
+#[tauri::command]
+pub fn trash_folder(state: State<AppState>, folder: String) -> R<usize> {
+    with(&state, |s| s.trash_folder(&folder))
+}
+
+/// "Show in the folder": the file manager, on the collection.
+#[tauri::command]
+pub fn reveal_folder(app: tauri::AppHandle, state: State<AppState>, folder: String) -> R<()> {
+    use tauri_plugin_opener::OpenerExt;
+    let default = default_root(&state.db_path);
+    let root = with(&state, |s| s.notes_root_or(&default))?;
+    let path = root.join(petrel_core::notes::clean_folder(&folder));
+    app.opener().reveal_item_in_dir(path).map_err(|e| e.to_string())
+}
+
 /// Notes with a conflict copy beside them.
 #[tauri::command]
 pub fn conflicts(state: State<AppState>) -> R<Vec<Conflict>> {
@@ -259,8 +287,14 @@ pub fn topic_faces(state: State<AppState>) -> R<std::collections::HashMap<String
 }
 
 #[tauri::command]
-pub fn set_topic_face(state: State<AppState>, top: String, color: String, mark: String) -> R<TopicFace> {
-    with(&state, |s| s.set_topic_face(&top, &color, &mark))
+pub fn set_topic_face(
+    state: State<AppState>,
+    top: String,
+    color: String,
+    mark: String,
+    copy: Option<String>,
+) -> R<TopicFace> {
+    with(&state, |s| s.set_topic_face(&top, &color, &mark, copy.as_deref().unwrap_or("")))
 }
 
 /// A pasted picture, sent as raw bytes (a JSON array would be several times bigger). The folder and the file

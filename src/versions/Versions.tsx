@@ -46,8 +46,8 @@ export default function Versions(p: { noteId: number; title: string; current: st
   onCleanup(() => document.removeEventListener("keydown", key, true));
 
   return (
-    <div class="scrim" onMouseDown={(e) => e.target === e.currentTarget && p.onClose()}>
-      <div class="history">
+    <div class="scrim top" onMouseDown={(e) => e.target === e.currentTarget && p.onClose()}>
+      <div class="history panel" role="dialog" aria-label="History">
         <div class="history-list">
           <h3>History</h3>
           <p class="muted small">{p.title}</p>

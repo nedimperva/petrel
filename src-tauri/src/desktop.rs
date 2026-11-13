@@ -42,8 +42,11 @@ impl Which {
 /// Ctrl+Alt is AltGr on Windows, and AltGr with a letter types a character on many layouts (AltGr+N is `}` on
 /// Croatian and Bosnian ones). AltGr+Space types nothing on common layouts, and few apps use Ctrl+Alt+Space.
 pub const DEFAULT_HOTKEY: &str = "Ctrl+Alt+Space";
-/// V for paste: the picker ends by copying. AltGr+V types nothing on the Bosnian and Croatian layouts.
-pub const DEFAULT_PICKER_HOTKEY: &str = "Ctrl+Alt+V";
+/// Not Ctrl+Alt with a letter: that is AltGr, and AltGr+V is `@` on the Bosnian and Croatian layouts, so the
+/// picker took every `@` typed anywhere. Shift needs no AltGr on any layout.
+pub const DEFAULT_PICKER_HOTKEY: &str = "Ctrl+Shift+Space";
+/// The picker's first default; a stored copy of it is read as the new default.
+const OLD_PICKER_HOTKEY: &str = "Ctrl+Alt+V";
 /// What start at login passes, so Petrel starts in the tray instead of on screen.
 pub const HIDDEN_ARG: &str = "--hidden";
 
@@ -99,6 +102,7 @@ fn stored_hotkey(app: &AppHandle, which: Which) -> Option<String> {
     match stored {
         None => Some(which.default().to_string()),
         Some(s) if s.trim().is_empty() => None,
+        Some(s) if which == Which::Picker && s == OLD_PICKER_HOTKEY => Some(which.default().to_string()),
         Some(s) => Some(s),
     }
 }

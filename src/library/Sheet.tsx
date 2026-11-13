@@ -1,7 +1,7 @@
 // A card, opened: the whole text on a sheet over the library. A prompt's blanks become fields on the right and
-// the text fills in as you type; Enter copies. A prompt or snippet with `## versions` shows one at a time: Tab
-// steps through them (after the last blank), and the one copied last comes first. A capture from the inbox gets
-// its filing buttons instead: Move to (m), Suggest a home (s, Claude, only when pressed) and Delete (d).
+// the text fills in as you type; Enter copies. A prompt or snippet with `## versions` shows one at a time: Alt ←
+// and Alt → step through them, and the one copied last comes first. A capture from the inbox gets
+// its filing buttons instead: Move to (m), Suggest a home (s, Claude, only when pressed). Delete (d) works on any card.
 
 import { createMemo, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { api, errText, type AiSuggestion, type Note } from "../api";
@@ -23,6 +23,8 @@ export default function Sheet(p: {
   onFile(note: Note, s: AiSuggestion): void;
   onDelete(note: Note): void;
   onAiSetup(): void;
+  /** In the library's preview pane, always open: no scrim, Esc is the library's, the fields wait for a click. */
+  inline?: boolean;
 }) {
   const [note] = createResource(
     () => p.id,
@@ -47,16 +49,11 @@ export default function Sheet(p: {
   const inbox = () => note()?.folder === "inbox";
   let side: HTMLElement | undefined;
 
-  /** Tab moves through the blanks, then on to the next version. */
-  function tab(e: KeyboardEvent): boolean {
+  /** Alt ← and Alt →: the version before or after, its first blank in focus. */
+  function step(back: boolean) {
     const n = versions().length;
-    if (n < 2) return false;
-    const stops = side ? [...side.querySelectorAll<HTMLElement>("input, textarea, .choices")] : [];
-    const at = stops.indexOf(document.activeElement as HTMLElement);
-    if (at >= 0 && (e.shiftKey ? at > 0 : at < stops.length - 1)) return false;
-    setVi((vi() + (e.shiftKey ? n - 1 : 1)) % n);
+    setVi((vi() + (back ? n - 1 : 1)) % n);
     setTimeout(() => side?.querySelector<HTMLElement>("input, textarea, .choices")?.focus());
-    return true;
   }
   const [sugg, setSugg] = createSignal<AiSuggestion[] | "loading" | null>(null);
 
@@ -85,10 +82,11 @@ export default function Sheet(p: {
   const key = (e: KeyboardEvent) => {
     const n = note();
     if (!n) return;
-    if (e.key === "Escape") p.onClose();
-    else if (e.key === "Tab" && !inbox() && tab(e)) {
-      // Stepped to another version.
-    } else if (e.key === "Enter" && !(e.target instanceof HTMLTextAreaElement && !e.ctrlKey)) {
+    if (e.key === "Escape") {
+      if (p.inline) return;
+      p.onClose();
+    } else if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight") && versions().length > 1) step(e.key === "ArrowLeft");
+    else if (e.key === "Enter" && !(e.target instanceof HTMLTextAreaElement && !e.ctrlKey)) {
       const s = sugg();
       if (inbox() && Array.isArray(s) && s[0]) p.onFile(n, s[0]);
       else if (inbox()) p.onMove(n);
@@ -98,7 +96,7 @@ export default function Sheet(p: {
     else if (e.key === "c") void copy();
     else if (inbox() && e.key === "m") p.onMove(n);
     else if (inbox() && e.key === "s") void suggest();
-    else if (inbox() && (e.key === "d" || e.key === "Delete")) p.onDelete(n);
+    else if (e.key === "d" || e.key === "Delete") p.onDelete(n);
     else if (inbox() && /^[123]$/.test(e.key) && Array.isArray(sugg()) && (sugg() as AiSuggestion[])[Number(e.key) - 1])
       p.onFile(n, (sugg() as AiSuggestion[])[Number(e.key) - 1]);
     else return;
@@ -111,10 +109,10 @@ export default function Sheet(p: {
   const shown = () => parts(text());
 
   return (
-    <div class="scrim sheet-scrim" onMouseDown={(e) => e.target === e.currentTarget && p.onClose()}>
+    <div class={p.inline ? "sheet-inline" : "scrim sheet-scrim"} onMouseDown={(e) => !p.inline && e.target === e.currentTarget && p.onClose()}>
       <Show when={note()}>
         {(n) => (
-          <div class={`lsheet ${hueClass(n().folder)} kind-${kindOf(n().folder)}`} role="dialog" aria-label={n().title}>
+          <div class={`lsheet ${hueClass(n().folder)} kind-${kindOf(n().folder)}`} role={p.inline ? "region" : "dialog"} aria-label={n().title}>
             <div class="lsheet-main">
               <div class="lsheet-top">
                 <span class="lcard-where">
@@ -138,7 +136,7 @@ export default function Sheet(p: {
                     )}
                   </For>
                   <span class="muted small">
-                    <kbd>Tab</kbd> next version
+                    <kbd>Alt ←</kbd> <kbd>Alt →</kbd> other versions
                   </span>
                 </div>
               </Show>
@@ -199,7 +197,7 @@ export default function Sheet(p: {
               >
                 <Show when={fields().length}>
                   <div class="side-head">Fill in</div>
-                  <BlankFields state={state} side />
+                  <BlankFields state={state} side focusFirst={!p.inline} />
                 </Show>
                 <div class="side-actions">
                   <button type="button" class="btn primary wide big" onClick={() => copy()}>
@@ -210,6 +208,9 @@ export default function Sheet(p: {
                   </button>
                   <button type="button" class="btn wide" onClick={() => p.onEdit(n().id)}>
                     Edit <kbd>e</kbd>
+                  </button>
+                  <button type="button" class="btn wide" onClick={() => p.onDelete(n())}>
+                    Delete <kbd>d</kbd>
                   </button>
                   <span class="muted small center">{fields().length ? "Tab next blank · ↑ earlier answers · Esc back" : "Esc back"}</span>
                 </div>

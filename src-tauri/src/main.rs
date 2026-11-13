@@ -5,6 +5,7 @@ mod cli;
 mod commands;
 mod context;
 mod desktop;
+mod hypr;
 mod notes;
 mod tray;
 mod watch;
@@ -66,6 +67,15 @@ fn wants_picker(args: &[String]) -> bool {
     args.iter().skip(1).any(|a| a == "--picker")
 }
 
+/// The capture window and the picker float, centred and on every workspace, on Hyprland (`hypr.rs`).
+pub fn arrange(w: &tauri::WebviewWindow) {
+    match w.label() {
+        "capture" => hypr::arrange("Petrel capture", 640, 260),
+        "picker" => hypr::arrange("Petrel picker", 620, 440),
+        _ => {}
+    }
+}
+
 /// Shows the main window and brings it to the front.
 pub fn show_main(app: &tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
@@ -119,6 +129,7 @@ pub fn open_capture(app: &tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("capture") {
         let _ = w.show();
         let _ = w.set_focus();
+        arrange(&w);
         return;
     }
     remember_context(app);
@@ -180,8 +191,10 @@ fn remember_picker_context(app: &tauri::AppHandle) {
 /// Opens the quick picker, or focuses it: a small search over the collections that copies and closes.
 pub fn open_picker(app: &tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("picker") {
+        remember_picker_context(app);
         let _ = w.show();
         let _ = w.set_focus();
+        arrange(&w);
         return;
     }
     remember_picker_context(app);
@@ -418,6 +431,10 @@ fn main() {
             notes::open_tasks,
             notes::tick_task,
             notes::conflicts,
+            notes::create_folder,
+            notes::rename_folder,
+            notes::trash_folder,
+            notes::reveal_folder,
             notes::settle_conflict,
             commands::picker_context,
             commands::read_clipboard,
