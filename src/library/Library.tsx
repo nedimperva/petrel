@@ -15,8 +15,11 @@ import { topOf } from "./Card";
 import FacePicker from "./FacePicker";
 import Mark, { faces, loadFaces } from "./Mark";
 import { toCopy } from "./faces";
+import Reader from "./Reader";
 import Settle from "./Settle";
+import Shelves from "./Shelves";
 import Sheet from "./Sheet";
+import { copyFilled, itemText } from "../collection/copyItem";
 
 // The review is a mode of the inbox's cards: one at a time, in the library's place.
 const Review = lazy(() => import("../inbox/Review"));
@@ -77,6 +80,18 @@ export default function Library(p: {
   const [facing, setFacing] = createSignal<string | null>(null);
   const [settling, setSettling] = createSignal<Conflict | null>(null);
   createEffect(on(() => p.tab, () => (setQ(""), setSel(null))));
+  /** "all" is the shelves; a collection of pages is read; the inbox and things to copy are the list. */
+  const mode = () => (p.reviewing ? "review" : p.tab === "all" ? "shelves" : p.tab.startsWith("c:") && !toCopy(p.tab.slice(2), faces()) ? "reader" : "list");
+  /** A card from the shelves with blanks or versions, open as a sheet over them. */
+  const [sheet, setSheet] = createSignal<NoteSummary | null>(null);
+  async function copyCard(n: NoteSummary) {
+    const t = await itemText(n.id).catch(() => null);
+    if (!t) return;
+    if (t.hasBlanks) setSheet(n);
+    else if (await copyFilled(n, t.text)) p.onChanged();
+  }
+  const pageTop = () => p.tab.slice(2);
+  const pages = createMemo(() => (p.data?.notes ?? []).filter((n) => n.folder === pageTop() || n.folder.startsWith(`${pageTop()}/`)));
 
   const copies = (n: NoteSummary) => p.data?.copies[n.path] ?? 0;
   const match = (n: NoteSummary) => {
@@ -145,7 +160,7 @@ export default function Library(p: {
   }
 
   const key = (e: KeyboardEvent) => {
-    if (p.reviewing || moving() || facing() !== null || settling() || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (mode() !== "list" || moving() || facing() !== null || settling() || e.ctrlKey || e.metaKey || e.altKey) return;
     if (typing(e)) {
       if (e.target === filterInput && (e.key === "ArrowDown" || e.key === "Enter")) {
         e.preventDefault();
@@ -222,7 +237,27 @@ export default function Library(p: {
           <Review aiReady={p.aiReady} onDone={() => p.onReviewDone?.()} onEdit={p.onEdit} onAiSetup={p.onAiSetup} onChanged={p.onChanged} />
         </div>
       </Show>
-      <Show when={!p.reviewing}>
+      <Show when={mode() === "shelves"}>
+        <div class="lib-span">
+          <Shelves data={p.data} onTab={p.onTab} onEdit={p.onEdit} onCopy={(n) => void copyCard(n)} onReview={p.onReview} busy={!!sheet() || !!moving()} />
+        </div>
+      </Show>
+      <Show when={mode() === "reader"}>
+        <div class="lib-span">
+          <Reader
+            top={pageTop()}
+            notes={pages()}
+            onEdit={p.onEdit}
+            onNew={p.onNew}
+            onMove={(n) => setMoving(n)}
+            onDelete={(n) => void remove(n)}
+            onPin={(n) => void pin(n)}
+            onChanged={p.onChanged}
+            busy={!!moving() || facing() !== null}
+          />
+        </div>
+      </Show>
+      <Show when={mode() === "list"}>
         <section class="lib-list" aria-label={heading() || "Everything to copy"}>
           <div class="lib-list-head">
             <Show when={p.tab.startsWith("c:") && canFace(topOf(p.tab.slice(2)))} fallback={<Mark folder={p.tab === "inbox" ? "inbox" : p.tab.slice(2)} class="tile" />}>
@@ -336,6 +371,21 @@ export default function Library(p: {
 
       <Show when={moving()}>
         {(n) => <Destination exclude={n().id} what={n().folder === "inbox" ? undefined : n().title} from={n().folder === "inbox" ? undefined : n().folder} onPick={(t) => void file(n(), t)} onClose={() => setMoving(null)} />}
+      </Show>
+      <Show when={sheet()}>
+        {(n) => (
+          <Sheet
+            id={n().id}
+            copies={p.data?.copies[n().path] ?? 0}
+            aiReady={p.aiReady}
+            onClose={() => setSheet(null)}
+            onEdit={(i) => (setSheet(null), p.onEdit(i))}
+            onMove={(x) => (setSheet(null), setMoving(x))}
+            onFile={(x, sg) => (setSheet(null), void fileSuggested(x, sg))}
+            onDelete={(x) => (setSheet(null), void remove(x))}
+            onAiSetup={p.onAiSetup}
+          />
+        )}
       </Show>
       <Show when={facing()}>{(top) => <FacePicker top={top()} onClose={() => setFacing(null)} />}</Show>
       <Show when={settling()}>
