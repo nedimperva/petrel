@@ -688,7 +688,10 @@ mod tests {
     fn citations_become_links() {
         let t = ["Trip to Mostar", "Summer 2026"];
         assert_eq!(cite("Park above the old town [1]. Photos are in June [2, 1].", &t), "Park above the old town [[Trip to Mostar]]. Photos are in June [[Summer 2026]] [[Trip to Mostar]].");
-        assert_eq!(cite("See [[Trip to Mostar]] and [a](b) and [ ] done [9].", &t), "See [[Trip to Mostar]] and [a](b) and [ ] done.");
+        assert_eq!(
+            cite("See [[Trip to Mostar]] and [a](b) and [ ] done [9].", &t),
+            "See [[Trip to Mostar]] and [a](b) and [ ] done."
+        );
     }
 
     #[test]
