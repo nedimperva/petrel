@@ -649,7 +649,7 @@ export default function App() {
         />
       </Show>
       <Show when={moving()}>
-        <Destination exclude={current()?.id} onPick={moveTo} onClose={() => setMoving(false)} />
+        <Destination exclude={current()?.id} what={current()?.title} from={current()?.folder} onPick={moveTo} onClose={() => setMoving(false)} />
       </Show>
       <Suspense>
         <Show when={settings()}>

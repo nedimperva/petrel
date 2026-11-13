@@ -335,7 +335,7 @@ export default function Library(p: {
       </Show>
 
       <Show when={moving()}>
-        {(n) => <Destination exclude={n().id} onPick={(t) => void file(n(), t)} onClose={() => setMoving(null)} />}
+        {(n) => <Destination exclude={n().id} what={n().folder === "inbox" ? undefined : n().title} from={n().folder === "inbox" ? undefined : n().folder} onPick={(t) => void file(n(), t)} onClose={() => setMoving(null)} />}
       </Show>
       <Show when={facing()}>{(top) => <FacePicker top={top()} onClose={() => setFacing(null)} />}</Show>
       <Show when={settling()}>

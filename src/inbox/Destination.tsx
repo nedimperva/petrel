@@ -6,7 +6,7 @@ import { createResource, createSignal, For, onMount, Show } from "solid-js";
 import { api, type NoteSummary } from "../api";
 import { dayTitle, today } from "../journal/days";
 import Mark from "../library/Mark";
-import { folderName } from "../ui";
+import { folderName, KeyHints } from "../ui";
 import { filedCounts } from "./file";
 import { keyOf, score } from "./learn";
 
@@ -52,64 +52,141 @@ export function placeRows(text: string, folders: string[], notes: NoteSummary[],
   return out;
 }
 
-export default function Destination(p: { exclude?: number; noDay?: boolean; onPick(t: Target): void; onClose(): void }) {
+/** The heading a row sits under. */
+const groupOf = (r: Row) => (r.t.kind === "day" ? "Days" : r.t.kind === "note" ? "Add to the end of a note" : r.folder ? "Collections" : "New");
+const ORDER = ["Days", "Collections", "Add to the end of a note", "New"];
+
+export default function Destination(p: {
+  exclude?: number;
+  noDay?: boolean;
+  /** What is being moved, for the heading: a note's title. */
+  what?: string;
+  /** The folder it is in now: shown, and not offered. */
+  from?: string;
+  onPick(t: Target): void;
+  onClose(): void;
+}) {
   let input!: HTMLInputElement;
   onMount(() => input.focus());
   const [q, setQ] = createSignal("");
   const [i, setI] = createSignal(0);
-  const [folders] = createResource(async () =>
-    (await (await api()).noteFolders()).map((f) => f.path).filter((f) => f !== "inbox" && !f.startsWith(".")),
-  );
+  const [folders] = createResource(async () => (await (await api()).noteFolders()).filter((f) => f.path !== "inbox" && !f.path.startsWith(".")));
   const [used] = createResource(filedCounts);
   const [notes] = createResource(q, async (text): Promise<NoteSummary[]> => {
     const s = await api();
     const found = text.trim() ? await s.findNotes(text, 12) : await s.listNotes({ limit: 12 });
     return found.filter((n) => n.folder !== "inbox" && n.id !== p.exclude);
   });
+  const count = (folder: string) => folders()?.find((f) => f.path === folder)?.count;
 
-  const rows = () => placeRows(q(), folders() ?? [], notes() ?? [], used() ?? {}, q()).filter((r) => !(p.noDay && r.t.kind === "day"));
+  // Grouped (days, collections, notes, a new one), keeping the learned order inside each group.
+  const rows = () => {
+    const all = placeRows(
+      q(),
+      (folders() ?? []).map((f) => f.path),
+      notes() ?? [],
+      used() ?? {},
+      q(),
+    ).filter((r) => !(p.noDay && r.t.kind === "day") && !(r.t.kind === "folder" && p.from && r.t.folder === p.from));
+    return ORDER.flatMap((g) => all.filter((r) => groupOf(r) === g));
+  };
 
+  const pick = (r: Row | undefined) => r && p.onPick(r.t);
   const key = (e: KeyboardEvent) => {
     const n = rows().length;
+    const digit = Number(e.key);
     if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n") || (e.key === "Tab" && !e.shiftKey)) setI((i() + 1) % Math.max(1, n));
     else if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p") || (e.key === "Tab" && e.shiftKey)) setI((i() + n - 1) % Math.max(1, n));
-    else if (e.key === "Enter") {
-      const r = rows()[i()];
-      if (r) p.onPick(r.t);
-    } else if (e.key === "Escape") p.onClose();
+    else if (e.key === "Enter") pick(rows()[i()]);
+    else if (e.key === "Escape") p.onClose();
+    // With nothing typed, a number picks; once typing, digits are part of the name.
+    else if (!q() && !e.ctrlKey && !e.altKey && digit >= 1 && digit <= Math.min(9, n)) pick(rows()[digit - 1]);
     else return;
     e.preventDefault();
     e.stopPropagation();
   };
+  const show = () => queueMicrotask(() => document.querySelector(".dest .palette-row.on")?.scrollIntoView({ block: "nearest" }));
 
   return (
-    <div class="scrim" onMouseDown={(e) => e.target === e.currentTarget && p.onClose()}>
-      <div class="palette dest">
-        <input
-          class="palette-input"
-          ref={input}
-          placeholder="Move to a note, a collection or today's page…"
-          value={q()}
-          onInput={(e) => {
-            setQ(e.currentTarget.value);
-            setI(0);
-          }}
-          onKeyDown={key}
-        />
+    <div class="scrim top" onMouseDown={(e) => e.target === e.currentTarget && p.onClose()}>
+      <div class="palette dest" role="dialog" aria-label={p.what ? `Move ${p.what}` : "Where it goes"}>
+        <div class="dest-field">
+          <span class="dest-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+              <path d="M10 13h6M13 10l3 3-3 3" />
+            </svg>
+          </span>
+          <label class="dest-label">
+            <span class="dest-what">{p.what ? `Move “${p.what}” to` : "Where it goes"}</span>
+            <input
+              ref={input}
+              placeholder="A collection, a note or a day…"
+              value={q()}
+              onInput={(e) => {
+                setQ(e.currentTarget.value);
+                setI(0);
+              }}
+              onKeyDown={(e) => (key(e), show())}
+            />
+          </label>
+          <Show when={p.from}>
+            <span class="dest-from">now in {folderName(p.from!)}</span>
+          </Show>
+        </div>
         <div class="palette-list">
           <For each={rows()}>
             {(r, k) => (
-              <button class="palette-row" classList={{ on: k() === i() }} onMouseMove={() => setI(k())} onClick={() => p.onPick(r.t)}>
-                <span class="row-icon">{r.t.kind === "note" ? "¶" : <Mark folder={r.folder} size={13} />}</span>
-                <span class="row-label">{r.label}</span>
-                <span class="row-sub">{r.sub}</span>
-              </button>
+              <>
+                <Show when={k() === 0 || groupOf(rows()[k() - 1]) !== groupOf(r)}>
+                  <Show when={groupOf(r) !== "New"}>
+                    <div class="dest-group">{groupOf(r)}</div>
+                  </Show>
+                </Show>
+                <button class="palette-row" classList={{ on: k() === i(), "dest-new": groupOf(r) === "New" }} onMouseMove={() => setI(k())} onClick={() => p.onPick(r.t)}>
+                  <span class="row-icon">
+                    <Show
+                      when={groupOf(r) !== "New"}
+                      fallback={
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                          <path d="M12 5v14M5 12h14" />
+                        </svg>
+                      }
+                    >
+                      <Show
+                        when={r.t.kind !== "note"}
+                        fallback={
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                            <path d="M6 3h9l4 4v14H6z" />
+                          </svg>
+                        }
+                      >
+                        <Mark folder={r.folder} size={13} />
+                      </Show>
+                    </Show>
+                  </span>
+                  <span class="row-label">{r.label}</span>
+                  <span class="row-sub">
+                    {r.t.kind === "folder" && count(r.folder) !== undefined ? `${count(r.folder)} ${count(r.folder) === 1 ? "note" : "notes"}` : r.t.kind === "note" ? folderName(r.folder) : r.sub}
+                  </span>
+                  <Show when={k() === i()} fallback={<Show when={!q() && k() < 9}><kbd class="dest-num">{k() + 1}</kbd></Show>}>
+                    <kbd>↵</kbd>
+                  </Show>
+                </button>
+              </>
             )}
           </For>
           <Show when={!rows().length}>
             <p class="muted pad">No notes or folders yet.</p>
           </Show>
         </div>
+        <footer class="dest-foot">
+          <KeyHints hints={[["↑ ↓", "choose"], !q() && ["1–9", "pick"], ["Enter", p.what ? "move" : "choose"], ["Esc", "back"]]} />
+          <span class="grow" />
+          <Show when={p.what}>
+            <span class="muted small">Undo is on the toast</span>
+          </Show>
+        </footer>
       </div>
     </div>
   );

@@ -1109,10 +1109,6 @@ kbd {
   padding: 0 !important;
   font-size: var(--t-lg) !important;
 }
-.palette.dest .palette-input {
-  padding: 0 var(--s-4) !important;
-  border-bottom: 1px solid var(--line) !important;
-}
 .palette-list {
   overflow: auto;
   padding: 6px;
@@ -3642,4 +3638,101 @@ kbd {
     position: static;
     font-size: 0.72em;
   }
+}
+
+/* ---- where it goes: Ctrl M, the library's m, the review and the capture window ------------------------------- */
+
+.palette.dest {
+  width: min(520px, calc(100vw - 32px));
+  max-height: min(560px, 70vh);
+}
+.dest-field {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  border-bottom: 1px solid var(--line);
+}
+.dest-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r-md);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+.dest-label {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.dest-what {
+  font-size: var(--t-xs);
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dest-label input {
+  width: 100%;
+  border: 0 !important;
+  outline: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  font-size: var(--t-lg) !important;
+  line-height: 1.4;
+  color: var(--ink);
+}
+.dest-from {
+  flex: none;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--accent-wash);
+  font-size: var(--t-xs);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.dest-group {
+  padding: 10px 10px 4px;
+  font-size: var(--t-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.dest .palette-row {
+  min-height: 38px;
+}
+.dest .palette-row .row-icon {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+.dest .palette-row .row-sub {
+  color: var(--muted);
+}
+.dest .palette-row.dest-new {
+  margin-top: 4px;
+  color: var(--accent-ink);
+}
+.dest .palette-row.dest-new .row-icon {
+  color: var(--accent);
+}
+.dest-num {
+  opacity: 0.55;
+}
+.dest-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 8px var(--s-4);
+  border-top: 1px solid var(--line);
+  background: var(--paper);
+  font-size: var(--t-xs);
 }
