@@ -3532,3 +3532,58 @@ kbd {
   background: var(--raised);
   overflow: auto;
 }
+
+/* ---- today's page as a timeline: the times in the gutter, what is still open in the margin -------------------- */
+
+.day-page .cm-line {
+  position: relative;
+}
+.day-page .cm-stamp {
+  position: absolute;
+  left: -64px;
+  width: 48px;
+  text-align: right;
+  top: 0.35em;
+  font-size: 12px;
+  color: var(--muted);
+}
+.day-carried {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.carried-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: var(--t-md);
+  line-height: 1.45;
+  color: var(--ink);
+}
+.carried-row input {
+  margin-top: 3px;
+  accent-color: var(--accent);
+}
+.carried-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.carried-day {
+  flex: none;
+  font-size: var(--t-xs);
+  color: var(--muted);
+  padding: 1px 6px;
+  border-radius: 999px;
+}
+.carried-day:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+/* No room for a gutter on a narrow window: the time stays at the start of the line. */
+@media (max-width: 760px) {
+  .day-page .cm-stamp {
+    position: static;
+    font-size: 0.72em;
+  }
+}

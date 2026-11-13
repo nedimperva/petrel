@@ -6,7 +6,7 @@
 // Pasted pictures are saved next to the note and shown under their line.
 
 import { createEffect, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
-import { api, errText, type AiRelated, type AiTask, type Backlinks, type Note, type NoteSummary } from "../api";
+import { api, errText, type AiRelated, type AiTask, type Backlinks, type Note, type NoteSummary, type OpenTask } from "../api";
 import { blanks, fill, todayText } from "../blanks";
 import FillBlanks from "../collection/FillBlanks";
 import { lastVersions } from "../collection/BlankFields";
@@ -138,6 +138,40 @@ export default function NotePage(p: Props) {
       },
     ),
   );
+
+  // On today's page: tasks still open on earlier days' pages, and how many captures came in today.
+  const [carried, setCarried] = createSignal<OpenTask[]>([]);
+  const [capturedToday, setCapturedToday] = createSignal(0);
+  createEffect(
+    on(
+      () => (dayPage() === today() ? `${note()?.id ?? ""}` : null),
+      (k) => {
+        if (k === null) return setCarried([]);
+        void api().then(async (s) => {
+          const [tasks, inbox] = await Promise.all([s.openTasks().catch(() => []), s.listNotes({ folder: "inbox", limit: 1000 }).catch(() => [])]);
+          setCarried(
+            tasks
+              .filter((t) => t.folder === JOURNAL && t.title < today())
+              .sort((a, b) => b.title.localeCompare(a.title) || a.line - b.line)
+              .slice(0, 8),
+          );
+          const start = new Date();
+          start.setHours(0, 0, 0, 0);
+          setCapturedToday(inbox.filter((n) => n.modifiedAt >= start.getTime()).length);
+        });
+      },
+    ),
+  );
+  async function tickCarried(t: OpenTask) {
+    try {
+      const s = await api();
+      const tok = await s.tickTask(t.noteId, t.line, t.text);
+      setCarried(carried().filter((x) => x !== t));
+      say(`Ticked on ${dayTitle(t.title)}`, { undo: () => s.undo(tok.token).then(() => setCarried([t, ...carried()])) });
+    } catch (e) {
+      say(errText(e), { error: true });
+    }
+  }
 
   const loadLinks = async (id: number) => setLinks(await (await api()).backlinks(id).catch(() => ({ linked: [], mentioned: [] })));
 
@@ -648,7 +682,7 @@ export default function NotePage(p: Props) {
   const synced = () => /google drive|googledrive|my drive|onedrive|dropbox|syncthing/i.test(p.root);
 
   return (
-    <div class="page">
+    <div class="page" classList={{ "day-page": !!dayPage() }}>
       <div class="page-main">
         <div class="sheet">
           <Show when={dayPage()}>
@@ -763,6 +797,32 @@ export default function NotePage(p: Props) {
               </For>
             </div>
             <p class="muted small">A dot is a day with a page. A day you skip makes no file.</p>
+              </section>
+            )}
+          </Show>
+          <Show when={dayPage() === today() && carried().length}>
+            <section class="day-carried" aria-label="Still open from earlier days">
+              <h4>Still open</h4>
+              <For each={carried()}>
+                {(t) => (
+                  <label class="carried-row">
+                    <input type="checkbox" onChange={() => void tickCarried(t)} />
+                    <span class="carried-text">{t.text.replace(/^\s*[-*]\s+\[ \]\s*/, "")}</span>
+                    <button type="button" class="carried-day" onClick={() => p.onDay?.(t.title)} title={`Open ${dayTitle(t.title)}`}>
+                      {new Date(`${t.title}T12:00`).toLocaleDateString(undefined, { weekday: "short" })}
+                    </button>
+                  </label>
+                )}
+              </For>
+            </section>
+          </Show>
+          <Show when={dayPage() === today() && capturedToday()}>
+            {(k) => (
+              <section aria-label="Captured today">
+                <h4>Captured today</h4>
+                <p class="muted small">
+                  {k()} in the inbox. <kbd>Ctrl L</kbd> to file them.
+                </p>
               </section>
             )}
           </Show>
