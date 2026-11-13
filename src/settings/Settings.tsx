@@ -52,6 +52,15 @@ function Toggle(p: { on: boolean; label: string; hint?: string; onChange(on: boo
   );
 }
 
+/** One line under each paper in Settings › Look. */
+const PAPER_SAY: Record<string, string> = {
+  light: "Cool white, for the day",
+  linen: "Warm, for long writing",
+  dark: "Dark, for the evening",
+  system: "Light or dark, as the system is",
+  clock: "Paper, Linen, then Night",
+};
+
 export default function Settings(p: { section?: Section | "all"; onClose(): void; onRoot(root: string): void; onAi(s: AiStatus): void }) {
   const [at, setAt] = createSignal<Section>(p.section && p.section !== "all" ? p.section : "general");
   const [info, { refetch: refetchInfo }] = createResource(async () => (await api()).notesInfo());
@@ -265,9 +274,17 @@ export default function Settings(p: { section?: Section | "all"; onClose(): void
               <div class="papers">
                 <For each={THEMES}>
                   {(t) => (
-                    <button class="paper" classList={{ on: prefs().theme === t.id }} data-paper={t.id} onClick={() => pref("theme", t.id)}>
-                      <span class="paper-swatch" aria-hidden="true" />
-                      {t.label}
+                    <button class="paper" classList={{ on: prefs().theme === t.id }} data-paper={t.id} onClick={() => pref("theme", t.id)} aria-pressed={prefs().theme === t.id}>
+                      {/* A small page in that paper: a title, lines of text, a link in the accent. */}
+                      <span class="paper-mini" aria-hidden="true">
+                        <span class="pm-title" />
+                        <span class="pm-line" />
+                        <span class="pm-line" />
+                        <span class="pm-line short" />
+                        <span class="pm-link" />
+                      </span>
+                      <span class="paper-name">{t.label}</span>
+                      <span class="paper-say">{PAPER_SAY[t.id]}</span>
                     </button>
                   )}
                 </For>

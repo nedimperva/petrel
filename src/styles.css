@@ -3151,40 +3151,96 @@ kbd {
 .paper {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  width: 84px;
-  padding: 8px 6px;
+  align-items: flex-start;
+  gap: 4px;
+  width: 168px;
+  padding: 8px 8px 10px;
   border: 1px solid var(--line);
-  border-radius: var(--r-md);
-  background: var(--paper);
+  border-radius: var(--r-lg);
+  background: var(--raised);
   color: var(--ink-2);
   font: inherit;
-  font-size: var(--t-xs);
+  text-align: left;
   cursor: pointer;
 }
 .paper.on {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-soft);
 }
-.paper-swatch {
-  width: 56px;
-  height: 36px;
-  border-radius: 6px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  background: #fcfbf9;
+.paper-name {
+  margin-top: 4px;
+  font-size: var(--t-md);
+  font-weight: 600;
+  color: var(--ink);
 }
-.paper[data-paper="linen"] .paper-swatch {
-  background: #f3ece0;
+.paper-say {
+  font-size: var(--t-xs);
+  color: var(--muted);
 }
-.paper[data-paper="dark"] .paper-swatch {
-  background: #1d1c1a;
+/* Each paper's own colours, fixed, so the previews show all of them whatever the app is in now. */
+.paper {
+  --pp-paper: #fcfbf9;
+  --pp-ink: #1f1e1b;
+  --pp-ink2: #8a857b;
+  --pp-accent: #2f4f9a;
+  --pp-line: #e9e5dd;
 }
-.paper[data-paper="system"] .paper-swatch {
-  background: linear-gradient(135deg, #fcfbf9 50%, #1d1c1a 50%);
+.paper[data-paper="linen"] {
+  --pp-paper: #f4eee3;
+  --pp-ink: #2b261f;
+  --pp-ink2: #9a8f7f;
+  --pp-line: #e1d7c5;
 }
-.paper[data-paper="clock"] .paper-swatch {
-  background: linear-gradient(90deg, #fcfbf9 33%, #f3ece0 33% 66%, #1d1c1a 66%);
+.paper[data-paper="dark"] {
+  --pp-paper: #201f1d;
+  --pp-ink: #ece8e1;
+  --pp-ink2: #6f6a62;
+  --pp-accent: #7b97de;
+  --pp-line: #302e2a;
+}
+.paper-mini {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  height: 92px;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--pp-line);
+  background: var(--pp-paper);
+}
+.paper[data-paper="system"] .paper-mini {
+  background: linear-gradient(135deg, #fcfbf9 50%, #201f1d 50%);
+  --pp-ink: #8a857b;
+  --pp-ink2: #8a857b;
+}
+.paper[data-paper="clock"] .paper-mini {
+  background: linear-gradient(90deg, #fcfbf9 33%, #f4eee3 33% 66%, #201f1d 66%);
+  --pp-ink: #8a857b;
+  --pp-ink2: #8a857b;
+}
+.pm-title {
+  width: 55%;
+  height: 8px;
+  border-radius: 3px;
+  background: var(--pp-ink);
+}
+.pm-line {
+  width: 100%;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--pp-ink2);
+  opacity: 0.7;
+}
+.pm-line.short {
+  width: 70%;
+}
+.pm-link {
+  width: 35%;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--pp-accent);
 }
 .key-btn {
   min-width: 120px;
