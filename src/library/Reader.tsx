@@ -7,10 +7,11 @@ import { api, errText, type BackRef, type Note, type NoteSummary } from "../api"
 import { folderName, KeyHints, say, typing, undoLast } from "../ui";
 import Mark, { hueClass } from "./Mark";
 import ReadNote from "./ReadNote";
+import { loadTaskCounts, tasksOf } from "./taskCounts";
 
 type Order = "new" | "az" | "pinned" | "tasks";
 
-const hasOpenTask = (n: NoteSummary) => /^\s*[-*] \[ \]/m.test(n.preview);
+const hasOpenTask = (n: NoteSummary) => tasksOf(n.id) > 0;
 
 const firstLine = (n: NoteSummary) =>
   n.preview
@@ -85,6 +86,7 @@ export default function Reader(p: {
       const saved = await s.saveNote(n.id, lines.join("\n"), n.hash);
       setNote({ ...n, body: lines.join("\n"), hash: saved.hash, modifiedAt: saved.modifiedAt });
       if (saved.conflict) say(`It was also changed elsewhere; that copy is kept as ${saved.conflict}.`, { error: true });
+      void loadTaskCounts();
       p.onChanged();
     } catch (e) {
       say(errText(e), { error: true });
@@ -171,6 +173,7 @@ export default function Reader(p: {
     p.onBack();
   };
   onMount(() => {
+    void loadTaskCounts();
     document.addEventListener("keydown", key);
     document.addEventListener("keydown", esc, true);
     queueMicrotask(() => listEl?.querySelector(".reader-row.on")?.scrollIntoView({ block: "center" }));

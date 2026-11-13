@@ -11,10 +11,11 @@ import { ago, folderName, KeyHints, typing, undoLast } from "../ui";
 import { kindOf } from "./Card";
 import { toCopy } from "./faces";
 import Mark, { faces, hueClass } from "./Mark";
+import { loadTaskCounts, tasksOf } from "./taskCounts";
 
 type Order = "use" | "new" | "az" | "tasks";
 
-const openTasks = (n: NoteSummary) => (n.preview.match(/^\s*[-*] \[ \]/gm) ?? []).length;
+const openTasks = (n: NoteSummary) => tasksOf(n.id);
 const words = (n: NoteSummary) => (n.preview.match(/[\p{L}\p{N}]+/gu) ?? []).length;
 
 /** A preview without Markdown marks, for a card. */
@@ -59,6 +60,8 @@ export default function Collection(p: {
   const [sel, setSel] = createSignal(0);
   const [used, setUsed] = createSignal<Used>({});
   onMount(() => void loadUsed().then(setUsed, () => {}));
+  // Again whenever the notes change (a tick, a move, an edit elsewhere).
+  createEffect(on(() => p.notes, () => void loadTaskCounts()));
   createEffect(on(() => p.top, () => (setQ(""), setSel(0), setOrder(copy() ? "use" : "new")), { defer: true }));
 
   const uses = (n: NoteSummary) => p.copies[n.path] ?? 0;

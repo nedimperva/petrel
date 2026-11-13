@@ -3,7 +3,7 @@
 // one, Enter copies a card (its sheet, if it has blanks) or opens a page, "All n" opens the collection. Typing
 // filters every shelf at once.
 
-import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 import type { NoteSummary } from "../api";
 import { blanks } from "../blanks";
 import { loadUsed, type Used } from "../collection/lastUsed";
@@ -12,6 +12,7 @@ import { kindOf } from "./Card";
 import { toCopy, topOf } from "./faces";
 import Mark, { faces, hueClass } from "./Mark";
 import type { LibraryData } from "./Library";
+import { loadTaskCounts, tasksOf } from "./taskCounts";
 
 const PER_SHELF = 5;
 
@@ -30,7 +31,7 @@ function shortDay(ms: number): string {
 }
 
 /** The open tasks a preview shows, as a hint of what is still to do in a page. */
-const openTasks = (n: NoteSummary) => (n.preview.match(/^\s*[-*] \[ \]/gm) ?? []).length;
+const openTasks = (n: NoteSummary) => tasksOf(n.id);
 
 /** A preview without Markdown marks, for a card. */
 const plain = (s: string) =>
@@ -60,6 +61,7 @@ export default function Shelves(p: {
   const [at, setAt] = createSignal({ row: 0, col: 0 });
   const [used, setUsed] = createSignal<Used>({});
   onMount(() => void loadUsed().then(setUsed, () => {}));
+  createEffect(on(() => p.data, () => void loadTaskCounts()));
 
   const copies = (n: NoteSummary) => p.data?.copies[n.path] ?? 0;
   const words = () => q().toLowerCase().split(/\s+/).filter(Boolean);
