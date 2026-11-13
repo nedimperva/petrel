@@ -177,7 +177,7 @@ export default function App() {
   const here = (): Place => {
     const v = view();
     if (tasks()) return "tasks";
-    if (v.kind === "library") return v.tab === "inbox" ? "inbox" : v.tab.startsWith("c:") ? (v.tab as Place) : null;
+    if (v.kind === "library") return v.tab === "inbox" ? "inbox" : v.tab === "all" ? "all" : v.tab.startsWith("c:") ? (v.tab as Place) : null;
     if (v.day === today() || onDay() === today()) return "today";
     const f = noteFolder();
     if (f === "inbox") return "inbox";
@@ -185,7 +185,7 @@ export default function App() {
   };
   const libraryTitle = () => {
     const t = tab();
-    return t === "inbox" ? "Inbox" : t.startsWith("c:") ? folderName(t.slice(2)) : "All";
+    return t === "inbox" ? "Inbox" : t.startsWith("c:") ? folderName(t.slice(2)) : "Everything";
   };
   /** A collection was renamed or trashed in the sidebar: what was open in it follows, or goes back to writing. */
   async function folderMoved(from: string, to: string | null) {
@@ -553,6 +553,7 @@ export default function App() {
           onToday={() => void openDay(today())}
           onInbox={() => void library("inbox")}
           onTasks={() => void (page ? page.flush() : Promise.resolve(true)).then(() => ((panels.tasks = false), setTasks(true)))}
+          onEverything={() => void library("all")}
           onCollection={(f) => void library(`c:${f}`)}
           onFolderChanged={(from, to) => void folderMoved(from, to)}
           onSettings={() => setSettings("all")}

@@ -29,13 +29,17 @@ export default function Reader(p: {
   onChanged(): void;
   /** Something else (a list over this one) has the keys. */
   busy?: boolean;
+  /** The page to show first: the card it was opened from. */
+  start?: number;
+  /** Esc: back to the collection's cards. */
+  onBack?(): void;
 }) {
   let filterInput!: HTMLInputElement;
   let listEl: HTMLDivElement | undefined;
   const [q, setQ] = createSignal("");
   const [order, setOrder] = createSignal<Order>("new");
-  const [sel, setSel] = createSignal<number | null>(null);
-  createEffect(on(() => p.top, () => (setQ(""), setSel(null))));
+  const [sel, setSel] = createSignal<number | null>(p.start ?? null);
+  createEffect(on(() => p.top, () => (setQ(""), setSel(null)), { defer: true }));
 
   const shown = createMemo(() => {
     const words = q().toLowerCase().split(/\s+/).filter(Boolean);
@@ -159,8 +163,22 @@ export default function Reader(p: {
     e.preventDefault();
     e.stopPropagation();
   };
-  onMount(() => document.addEventListener("keydown", key));
-  onCleanup(() => document.removeEventListener("keydown", key));
+  // Esc goes back to the cards, before the app takes it as "back to writing".
+  const esc = (e: KeyboardEvent) => {
+    if (e.key !== "Escape" || !p.onBack || p.busy || typing(e) || document.querySelector(".scrim")) return;
+    e.preventDefault();
+    e.stopPropagation();
+    p.onBack();
+  };
+  onMount(() => {
+    document.addEventListener("keydown", key);
+    document.addEventListener("keydown", esc, true);
+    queueMicrotask(() => listEl?.querySelector(".reader-row.on")?.scrollIntoView({ block: "center" }));
+  });
+  onCleanup(() => {
+    document.removeEventListener("keydown", key);
+    document.removeEventListener("keydown", esc, true);
+  });
 
   const words = () => (note()?.body.match(/[\p{L}\p{N}]+/gu) ?? []).length;
   const open = () => (note()?.body.match(/^\s*[-*] \[ \]/gm) ?? []).length;
@@ -265,7 +283,7 @@ export default function Reader(p: {
       <footer class="lib-foot">
         <KeyHints hints={[["↑ ↓", "pages"], ["Enter", "write in it"], ["m", "move"], ["p", "pin"], ["d", "delete"], ["n", "new"], ["/", "filter"]]} />
         <span class="grow" />
-        <KeyHints hints={[["Esc", "back to writing"]]} />
+        <KeyHints hints={[["Esc", p.onBack ? "back to the cards" : "back to writing"]]} />
       </footer>
     </div>
   );

@@ -15,6 +15,7 @@ import { topOf } from "./Card";
 import FacePicker from "./FacePicker";
 import Mark, { faces, loadFaces } from "./Mark";
 import { toCopy } from "./faces";
+import Collection from "./Collection";
 import Reader from "./Reader";
 import Settle from "./Settle";
 import Shelves from "./Shelves";
@@ -80,8 +81,13 @@ export default function Library(p: {
   const [facing, setFacing] = createSignal<string | null>(null);
   const [settling, setSettling] = createSignal<Conflict | null>(null);
   createEffect(on(() => p.tab, () => (setQ(""), setSel(null))));
-  /** "all" is the shelves; a collection of pages is read; the inbox and things to copy are the list. */
-  const mode = () => (p.reviewing ? "review" : p.tab === "all" ? "shelves" : p.tab.startsWith("c:") && !toCopy(p.tab.slice(2), faces()) ? "reader" : "list");
+  /** A page opened from a collection's cards, read beside the others until Esc. */
+  const [reading, setReading] = createSignal<number | null>(null);
+  createEffect(on(() => p.tab, () => setReading(null)));
+  /** "all" is the shelves (Everything); a collection is its cards, and a page from them is read; the inbox is the list. */
+  const mode = () => (p.reviewing ? "review" : p.tab === "all" ? "shelves" : p.tab.startsWith("c:") ? (reading() !== null ? "reader" : "collection") : "list");
+  /** The full note, for the move list. */
+  const moveCard = (n: NoteSummary) => void api().then((s) => s.peekNote(n.id)).then(setMoving, (e) => say(errText(e), { error: true }));
   /** A card from the shelves with blanks or versions, open as a sheet over them. */
   const [sheet, setSheet] = createSignal<NoteSummary | null>(null);
   async function copyCard(n: NoteSummary) {
@@ -126,7 +132,7 @@ export default function Library(p: {
   const fileSuggested = (note: Note, s: AiSuggestion) =>
     file(note, s.kind === "merge" && s.noteId != null ? { kind: "note", id: s.noteId, title: s.title } : { kind: "folder", folder: s.folder });
 
-  async function remove(note: Note) {
+  async function remove(note: Pick<Note, "id">) {
     try {
       const s = await api();
       const t = await s.trashNote(note.id);
@@ -242,9 +248,29 @@ export default function Library(p: {
           <Shelves data={p.data} onTab={p.onTab} onEdit={p.onEdit} onCopy={(n) => void copyCard(n)} onReview={p.onReview} busy={!!sheet() || !!moving()} />
         </div>
       </Show>
+      <Show when={mode() === "collection"}>
+        <div class="lib-span">
+          <Collection
+            top={pageTop()}
+            notes={pages()}
+            copies={p.data?.copies ?? {}}
+            versions={p.data?.versions ?? {}}
+            onCopy={(n) => void copyCard(n)}
+            onRead={(id) => setReading(id)}
+            onEdit={p.onEdit}
+            onNew={p.onNew}
+            onMove={moveCard}
+            onPin={(n) => void pin(n)}
+            onDelete={(n) => void remove(n)}
+            busy={!!sheet() || !!moving() || facing() !== null}
+          />
+        </div>
+      </Show>
       <Show when={mode() === "reader"}>
         <div class="lib-span">
           <Reader
+            start={reading() ?? undefined}
+            onBack={() => setReading(null)}
             top={pageTop()}
             notes={pages()}
             onEdit={p.onEdit}

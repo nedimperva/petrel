@@ -11,7 +11,7 @@ import Mark, { faces, loadFaces, saveFace } from "./library/Mark";
 import { toCopy } from "./library/faces";
 import { folderName, Kbd, say } from "./ui";
 
-export type Place = "today" | "inbox" | "tasks" | `c:${string}` | null;
+export type Place = "today" | "inbox" | "tasks" | "all" | `c:${string}` | null;
 
 interface Data {
   folders: NoteFolder[];
@@ -42,6 +42,8 @@ export default function Sidebar(p: {
   onToday(): void;
   onInbox(): void;
   onTasks(): void;
+  /** Every collection at once: the library's shelves. */
+  onEverything(): void;
   onCollection(folder: string): void;
   /** A collection was renamed or trashed: what is open may have moved. */
   onFolderChanged(from: string, to: string | null): void;
@@ -223,6 +225,16 @@ export default function Sidebar(p: {
           </svg>
           <span class="side-name">Open tasks</span>
           <span class="side-count">{data()?.tasks || ""}</span>
+        </button>
+        <button type="button" class="side-row" classList={{ on: p.here === "all" }} onClick={pick(p.onEverything)}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="4" y="4" width="7" height="7" rx="1.5" />
+            <rect x="13" y="4" width="7" height="7" rx="1.5" />
+            <rect x="4" y="13" width="7" height="7" rx="1.5" />
+            <rect x="13" y="13" width="7" height="7" rx="1.5" />
+          </svg>
+          <span class="side-name">Everything</span>
+          <span class="side-count">{data()?.folders.reduce((k, f) => k + (f.depth === 0 && f.path !== "inbox" ? f.count : 0), 0) || ""}</span>
         </button>
       </div>
 
