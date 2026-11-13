@@ -27,6 +27,14 @@ keys; `docs/design/petrel.md` is the design; this file covers state and decision
   that scrolls, today's page opening on a timed new line. The picker's hotkey is `Ctrl Shift Space` (Ctrl Alt V
   was AltGr V, `@` on the owner's Bosnian keyboard); the note beside is `Ctrl Shift Enter`.
 
+- **What next (owner asked 2026-11-13, canvas https://claude.ai/artifact/KJds8Ht5hwaME1ikvB9MzN), on `main`, not
+  pushed until he has tried them:** a quiet page (`src/note/quiet.ts`, `ui.quiet`: chrome fades while typing until
+  the mouse moves) and `Ctrl M` to move any note (library `m` too); Ctrl K previews the highlighted note, and answers
+  cite notes inline (`cite` in `ai.rs` turns `[n]` into `[[Title]]`); the capture window shows where an `@word` will
+  file it and the quote is a card; review counts and Claude's three homes on 1–3; the picker fills in beside the
+  text and says where a card was used last (`ui.used`, `src/collection/lastUsed.ts`); today's page has the times in
+  the gutter and tasks still open from earlier days in the margin; Settings › Look shows each paper as a small page.
+
 - **Redesign implemented (owner decisions 2026-11-09/10, canvas https://claude.ai/artifact/2iMBXDeW8F2UVV1tLguc7g),
   on a PR based on the notes PR (#9).** No actions, no drafts UI, no `petrel://` links, no `petrel run`: those
   modules were deleted (`action.rs`, `host.rs`, `template.rs`, `store_actions.rs`, `src/actions/`, `src/list/`,
