@@ -4,6 +4,7 @@
 import { api, errText, type NoteSummary } from "../api";
 import { blanks } from "../blanks";
 import { say } from "../ui";
+import { noteUse } from "./lastUsed";
 import { hasVersions, versionsOf } from "./versions";
 
 /** The item's text, and whether it needs the sheet before copying: blanks to fill, or versions to choose. */
@@ -14,11 +15,12 @@ export async function itemText(id: number): Promise<{ text: string; title: strin
   return { text, title: n.title, hasBlanks: versions || blanks(text).length > 0 };
 }
 
-export async function copyFilled(item: Pick<NoteSummary, "id" | "title">, text: string, app: string | null = null): Promise<boolean> {
+export async function copyFilled(item: Pick<NoteSummary, "id" | "title"> & { path?: string }, text: string, app: string | null = null): Promise<boolean> {
   try {
     const s = await api();
     await s.copyText(text, false);
     await s.recordCopy(item.id, app).catch(() => 0);
+    if (item.path) await noteUse(item.path, app);
     say(`Copied “${item.title}”`);
     return true;
   } catch (e) {

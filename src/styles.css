@@ -3468,3 +3468,67 @@ kbd {
 .review-place kbd.off {
   opacity: 0.35;
 }
+
+/* ---- picker: where a card was used last, and filling it in beside its text ------------------------------------ */
+
+.row-two {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.row-two .row-label {
+  flex: none;
+}
+.row-used {
+  font-size: var(--t-xs);
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fill.fill-split {
+  display: flex;
+  gap: 0;
+  padding: 0;
+  height: 100%;
+  min-height: 0;
+}
+.fill-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  padding: var(--s-5);
+  overflow: auto;
+}
+.fill-text {
+  padding: var(--s-4) var(--s-5);
+  border-radius: var(--r-lg);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  font-family: var(--editor-font);
+  font-size: 16px;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+}
+.fill-text .blank-chip:not(.filled) {
+  background: transparent;
+  border: 1px dashed var(--line-strong);
+  color: var(--muted);
+}
+.fill-side {
+  width: 260px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  padding: var(--s-5) var(--s-4);
+  border-left: 1px solid var(--line);
+  background: var(--raised);
+  overflow: auto;
+}

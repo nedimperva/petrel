@@ -1,6 +1,9 @@
 // Fill in the blanks, then copy: one field per `{{name}}`, Tab to the next, Enter copies. The finished text is
-// shown as it will be pasted. The fields are BlankFields: some fill themselves, the last answers come back.
+// shown as it will be pasted. The fields are BlankFields: some fill themselves, the last answers come back. In the
+// picker (`inline`) the text is on the left, its blanks filling in as you type, and the fields on the right.
 
+import { For } from "solid-js";
+import { parts } from "../blanks";
 import BlankFields, { createBlanks } from "./BlankFields";
 
 export default function FillBlanks(p: {
@@ -22,6 +25,62 @@ export default function FillBlanks(p: {
     void state.keep();
     p.onCopy(state.out());
   };
+
+  const value = (name: string) => {
+    const b = state.list().find((x) => x.name === name);
+    return b ? state.value(b) : "";
+  };
+
+  const split = (
+    <form
+      class="fill fill-split"
+      onSubmit={(e) => {
+        e.preventDefault();
+        done();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          e.stopPropagation();
+          p.onClose();
+        } else if (e.key === "Enter" && !(e.target instanceof HTMLTextAreaElement && !e.ctrlKey)) {
+          e.preventDefault();
+          done();
+        }
+      }}
+    >
+      <div class="fill-main">
+        <div class="fill-head">
+          <span>{p.title}</span>
+        </div>
+        <div class="fill-text">
+          <For each={parts(p.text)}>
+            {(x) =>
+              x.blank ? (
+                <span class="blank-chip" classList={{ filled: !!value(x.text) }}>
+                  {value(x.text) || x.text}
+                </span>
+              ) : (
+                x.text
+              )
+            }
+          </For>
+        </div>
+        <span class="muted small">Filled blanks are marked; the rest still say their name.</span>
+      </div>
+      <aside class="fill-side">
+        <div class="side-head">Fill in</div>
+        <BlankFields state={state} side />
+        <span class="grow" />
+        <button type="submit" class="btn primary wide big">
+          {p.action ?? "Copy"} <kbd>Enter</kbd>
+        </button>
+        <span class="muted small center">
+          <kbd>Tab</kbd> next · <kbd>↑</kbd> earlier · <kbd>Esc</kbd> back
+        </span>
+      </aside>
+    </form>
+  );
 
   const form = (
     <form
@@ -61,7 +120,7 @@ export default function FillBlanks(p: {
       </div>
     </form>
   );
-  if (p.inline) return form;
+  if (p.inline) return split;
   return (
     <div class="scrim" onMouseDown={(e) => e.target === e.currentTarget && p.onClose()}>
       <div class="dialog">{form}</div>

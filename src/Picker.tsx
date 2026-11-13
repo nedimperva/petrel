@@ -11,7 +11,8 @@ import FillBlanks from "./collection/FillBlanks";
 import { copyFilled } from "./collection/copyItem";
 import { hasVersions, lastFirst, versionsOf, type Version } from "./collection/versions";
 import { applyPrefs, parsePrefs } from "./settings/prefs";
-import { folderName, KeyHints } from "./ui";
+import { ago, folderName, KeyHints } from "./ui";
+import { loadUsed, type Used } from "./collection/lastUsed";
 import { faces, loadFaces } from "./library/Mark";
 import { toCopy } from "./library/faces";
 
@@ -22,6 +23,7 @@ export default function Picker() {
   const [filling, setFilling] = createSignal<{ item: NoteSummary; text: string } | null>(null);
   const [ctx, setCtx] = createSignal<CaptureContext | null>(null);
   const [here, setHere] = createSignal<Record<string, number>>({});
+  const [used, setUsed] = createSignal<Used>({});
   const [data] = createResource(async () => {
     const s = await api();
     const [all, counts] = await Promise.all([s.listNotes({ limit: 2000 }), s.copyCounts()]);
@@ -104,6 +106,7 @@ export default function Picker() {
     void loadFaces();
     const s = await api();
     s.uiSettings().then((m) => applyPrefs(parsePrefs(m)), () => {});
+    loadUsed().then(setUsed, () => {});
     await s.showWindow();
     // Losing focus means the person went back to what they were doing: get out of the way.
     window.addEventListener("blur", () => !filling() && setTimeout(() => !document.hasFocus() && void close(), 150));
@@ -149,7 +152,16 @@ export default function Picker() {
                   <div class="picker-section">Notes</div>
                 </Show>
                 <button class="palette-row" classList={{ on: k() === i() }} onMouseMove={() => k() !== i() && (setI(k()), setVi(0))} onClick={() => pick(n)}>
-                  <span class="row-label">{n.folder === "inbox" ? n.preview.split("\n")[0] : n.title}</span>
+                  <span class="row-two">
+                    <span class="row-label">{n.folder === "inbox" ? n.preview.split("\n")[0] : n.title}</span>
+                    <Show when={used()[n.path]}>
+                      {(u) => (
+                        <span class="row-used">
+                          Used in {u()[0]} · {ago(u()[1])}
+                        </span>
+                      )}
+                    </Show>
+                  </span>
                   <Show when={here()[n.path]}>
                     <span class="row-here" title={`Copied ${here()[n.path]} times with ${ctx()?.app} in front`}>
                       {here()[n.path]}× here
