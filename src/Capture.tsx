@@ -9,7 +9,7 @@
 // the new text under it, in the same file. Ctrl Enter makes the new text a capture of its own instead.
 
 import { autocompletion, type Completion, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
-import { StateEffect, StateField, type Extension } from "@codemirror/state";
+import { RangeSetBuilder, StateEffect, StateField, type Extension } from "@codemirror/state";
 import { Decoration, EditorView } from "@codemirror/view";
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
 import { api, inTauri, type Note } from "./api";
@@ -47,6 +47,18 @@ const earlierEnd = StateField.define<number>({
     return v ? tr.changes.mapPos(v, -1) : v;
   },
 });
+/** The quote at the top, from the app you were in, drawn as a card above your own words. */
+const quoteLine = Decoration.line({ class: "cap-quote-line" });
+const quoteCard = EditorView.decorations.compute(["doc"], (s) => {
+  const b = new RangeSetBuilder<Decoration>();
+  for (let n = 1; n <= s.doc.lines; n++) {
+    const line = s.doc.line(n);
+    if (!line.text.startsWith(">")) break;
+    b.add(line.from, line.from, quoteLine);
+  }
+  return b.finish();
+});
+
 const faded = Decoration.mark({ class: "cm-earlier" });
 const earlierDeco = EditorView.decorations.compute([earlierEnd], (s) => {
   const end = s.field(earlierEnd);
@@ -62,6 +74,10 @@ export default function Capture() {
   const [targetHome, setTargetHome] = createSignal("");
   const [choosing, setChoosing] = createSignal(false);
   const [quoted, setQuoted] = createSignal(false);
+  /** Where an `@word` already typed will file the capture, shown before Esc. Chosen places (`target`) win. */
+  const [implied, setImplied] = createSignal<Target | null>(null);
+  let quoteText = "";
+  let impliedTimer: ReturnType<typeof setTimeout> | undefined;
   const [msg, setMsg] = createSignal<string | null>(null);
   /** The last capture's text when this window is adding to it. */
   const [earlier, setEarlier] = createSignal<string | null>(null);
@@ -115,6 +131,26 @@ export default function Capture() {
       options.push({ label: `@${t.word}`, detail: `new collection “${t.word}”`, apply: pick({ kind: "folder", folder: t.word }, t.word) });
     }
     return options.length ? { from, options, filter: false } : null;
+  }
+
+  /** Reads the `@word`s as they are typed (collections and days; notes are looked up on Esc), a moment after typing. */
+  function readImplied() {
+    clearTimeout(impliedTimer);
+    impliedTimer = setTimeout(() => {
+      if (!editor || earlier() !== null) return setImplied(null);
+      const r = pickRoute(editor.text(), folders, [], (w) => dayWord(w));
+      setImplied(!r ? null : r.route.kind === "day" ? { kind: "day", date: r.route.date } : r.route.kind === "folder" ? { kind: "folder", folder: r.route.folder } : null);
+    }, 150);
+  }
+
+  /** Takes out the quote brought from the app you were in, if it is still at the top unchanged. */
+  function dropQuote() {
+    if (!editor || !quoteText) return;
+    const v = editor.view;
+    if (v.state.doc.sliceString(0, quoteText.length) === quoteText) v.dispatch({ changes: { from: 0, to: quoteText.length, insert: "" } });
+    quoteText = "";
+    setQuoted(false);
+    v.focus();
   }
 
   /** An `@word` left in the new text when Esc is pressed still routes it, and is taken out. */
@@ -238,10 +274,11 @@ export default function Capture() {
   }
 
   onMount(async () => {
-    editor = createEditor(host, () => saver.changed(), { placeholder: "Write it down. @topic, @today or @fri files it." });
+    editor = createEditor(host, () => (saver.changed(), readImplied()), { placeholder: "Write it down. @topic, @today or @fri files it." });
     const extra: Extension = [
       earlierEnd,
       earlierDeco,
+      quoteCard,
       pictureExtensions(() => "inbox"),
       cleanPaste(() => say("Pasted as Markdown. Ctrl Z for plain text.")),
       autocompletion({ override: [suggest], activateOnTyping: true, icons: false, closeOnBlur: true }),
@@ -274,6 +311,7 @@ export default function Capture() {
         editor.insert(quote, true);
         editor.select(quote.length, quote.length);
       }
+      if (earlier() === null) quoteText = quote;
       setQuoted(true);
     }
     await s.listen({ quit: () => void done(), openNote: () => {}, focus: () => {}, changed: () => {} });
@@ -298,22 +336,47 @@ export default function Capture() {
     <div class="capture" data-tauri-drag-region>
       <div class="capture-text-host" ref={host} />
       <footer class="capture-foot" data-tauri-drag-region>
-        <button class="chip" classList={{ on: !!target() }} onClick={() => setChoosing(true)}>
-          <Mark folder={targetFolder(target(), targetHome())} size={12} />
-          {target()?.kind === "note" ? "Add to " : ""}
-          {targetLabel(target())}
-        </button>
+        <span class="cap-place" classList={{ on: !!(target() ?? implied()), implied: !target() && !!implied() }}>
+          <button class="chip" classList={{ on: !!(target() ?? implied()) }} onClick={() => setChoosing(true)} title="Choose a place (Ctrl K)">
+            <Mark folder={targetFolder(target() ?? implied(), targetHome())} size={12} />
+            {target()?.kind === "note" ? "Add to " : ""}
+            {targetLabel(target() ?? implied())}
+          </button>
+          <Show when={target()}>
+            <button
+              class="chip-x"
+              aria-label="Leave it in the inbox"
+              title="Leave it in the inbox"
+              onClick={() => {
+                setTarget(null);
+                setTargetHome("");
+                editor?.view.focus();
+              }}
+            >
+              ×
+            </button>
+          </Show>
+        </span>
+        <Show when={target() ?? implied()} fallback={<KeyHints hints={[["@", "where"], ["Ctrl K", "choose"], earlier() !== null && ["Ctrl Enter", "a new one"]]} />}>
+          <span class="muted" data-tauri-drag-region>
+            <kbd>Esc</kbd> files it here
+          </span>
+        </Show>
         <Show when={earlier() !== null}>
           <span class="muted" data-tauri-drag-region>
             adding to the last capture
           </span>
         </Show>
         <Show when={quoted()}>
-          <span class="muted" data-tauri-drag-region>
+          <span class="cap-quote-chip">
             with the quote
+            <Show when={quoteText}>
+              <button class="chip-x" aria-label="Drop the quote" title="Drop the quote" onClick={dropQuote}>
+                ×
+              </button>
+            </Show>
           </span>
         </Show>
-        <KeyHints hints={[["@", "where"], ["Ctrl K", "choose"], earlier() !== null && ["Ctrl Enter", "a new one"]]} />
         <span class="grow" data-tauri-drag-region />
         <Show when={msg()} fallback={<span class="muted">{saveLabel()}</span>}>
           <span class="bad">{msg()}</span>
