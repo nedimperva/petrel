@@ -3773,8 +3773,9 @@ kbd {
   font: 600 20px / 1.3 var(--font-ui);
 }
 .shelves-filter {
+  flex: none;
   width: min(300px, 40vw);
-  height: 36px;
+  height: 34px;
   background: var(--raised);
 }
 .shelves {
@@ -4271,9 +4272,20 @@ kbd {
   border-color: transparent;
   color: var(--accent-ink);
 }
+/* The chips, the filter and the button in a collection's header are one height. */
+.coll-head .chip,
+.coll-head .btn.small {
+  height: 30px;
+}
+.coll-head .chip {
+  padding: 0 12px;
+}
 .coll-filter {
+  flex: none;
   width: 220px;
-  height: 34px;
+  height: 30px;
+  gap: 8px;
+  border-radius: var(--r-md);
   background: var(--raised);
 }
 .coll-grid {
