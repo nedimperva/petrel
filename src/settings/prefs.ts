@@ -15,6 +15,8 @@ export interface Prefs {
   typewriter: boolean;
   /** Paragraph focus: the other paragraphs fade while you type. */
   focus: boolean;
+  /** The title bar, sidebar, margin and footer fade while you type, until the mouse moves. */
+  quiet: boolean;
   writeFont: WriteFont;
   /** The petrel crosses the page once when the inbox is clear. */
   petrel: boolean;
@@ -29,6 +31,7 @@ export const DEFAULTS: Prefs = {
   editorSize: 18,
   typewriter: false,
   focus: false,
+  quiet: true,
   writeFont: "literata",
   petrel: true,
   sound: false,
@@ -56,6 +59,7 @@ const KEYS: Record<keyof Prefs, string> = {
   editorSize: "ui.editor_size",
   typewriter: "ui.typewriter",
   focus: "ui.focus",
+  quiet: "ui.quiet",
   writeFont: "ui.write_font",
   petrel: "ui.petrel",
   sound: "ui.sound",
@@ -75,6 +79,7 @@ export function parsePrefs(m: Record<string, string>): Prefs {
     editorSize: size,
     typewriter: m[KEYS.typewriter] === "1",
     focus: m[KEYS.focus] === "1",
+    quiet: flag(m[KEYS.quiet], DEFAULTS.quiet),
     writeFont: FONTS.some((x) => x.id === f) ? (f as WriteFont) : DEFAULTS.writeFont,
     petrel: flag(m[KEYS.petrel], DEFAULTS.petrel),
     sound: flag(m[KEYS.sound], DEFAULTS.sound),

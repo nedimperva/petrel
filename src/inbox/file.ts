@@ -22,8 +22,10 @@ export async function fileCapture(n: Note, t: Target): Promise<{ change: NoteCha
     const change = await s.fileIntoDay(n.id, date);
     return { change, text: date === today() ? "Added to today's page" : `Added to ${dayTitle(date)}` };
   }
-  const change = await s.moveNote(n.id, t.folder, titleFrom(titleLine(n.body)));
-  return { change, text: `Filed in ${folderName(t.folder)} as “${change.note.title}”` };
+  // A capture is named by its first line when it is filed; a note that already has a home keeps its name.
+  const capture = n.folder === "inbox";
+  const change = await s.moveNote(n.id, t.folder, capture ? titleFrom(titleLine(n.body)) : n.title);
+  return { change, text: capture ? `Filed in ${folderName(t.folder)} as “${change.note.title}”` : `Moved to ${folderName(t.folder)}` };
 }
 
 export async function filedCounts(): Promise<Counts> {

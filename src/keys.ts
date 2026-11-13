@@ -39,6 +39,7 @@ export const SHORTCUTS: Shortcut[] = [
   { id: "shortcuts", label: "All shortcuts", group: "Anywhere", keys: both("Ctrl+/"), editable: true },
   { id: "ai", label: "Ask Claude about the text", group: "Writing", keys: both("Ctrl+J"), editable: true },
   { id: "history", label: "History of the note", group: "Writing", keys: both("Ctrl+H"), editable: true },
+  { id: "move", label: "Move the note to a collection, a note or a day", group: "Writing", keys: both("Ctrl+M"), editable: true },
   { id: "copyMd", label: "Copy as Markdown", group: "Writing", keys: both("Ctrl+Shift+C"), editable: true },
   { id: "task", label: "Make a task, or tick one", group: "Writing", keys: both("Ctrl+Shift+X") },
   { id: "slash", label: "The AI menu, on an empty line", group: "Writing", keys: both("/") },

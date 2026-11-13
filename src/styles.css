@@ -3267,3 +3267,18 @@ kbd {
 .note-margin .link-row .link-title {
   font-size: var(--t-sm);
 }
+
+/* ---- a quiet page: the chrome steps back while you type, until the mouse moves (src/note/quiet.ts) -------- */
+
+.titlebar,
+.sidebar,
+.page-foot,
+.note-margin {
+  transition: opacity var(--d-slow) var(--ease);
+}
+:root.writing-quiet .titlebar:not(:hover),
+:root.writing-quiet .sidebar:not(:hover):not(:focus-within),
+:root.writing-quiet .page-foot:not(:hover),
+:root.writing-quiet .note-margin:not(:hover) {
+  opacity: 0.08;
+}

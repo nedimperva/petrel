@@ -321,7 +321,7 @@ export default function Library(p: {
               ["↑ ↓", "move"],
               ["Enter", p.tab === "inbox" ? "file" : "copy"],
               ["e", "edit"],
-              p.tab === "inbox" && ["m", "move"],
+              ["m", "move"],
               ["d", "delete"],
               p.tab === "inbox" && ["r", "one at a time"],
               p.tab !== "inbox" && ["p", "pin"],

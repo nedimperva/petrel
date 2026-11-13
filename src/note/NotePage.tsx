@@ -30,6 +30,7 @@ const chips = (id: string) => keyOf(id).replace(/\+/g, " ");
 import { aiPreview, keepPreview, previewOf, setPreview, type Preview } from "./aiPreview";
 import { currentHeading, outline, type Heading } from "./outline";
 import { EditorView } from "@codemirror/view";
+import { hush } from "./quiet";
 
 export interface NotePageHandle {
   note(): Note | null;
@@ -530,6 +531,9 @@ export default function NotePage(p: Props) {
       }),
     ]);
     editor.view.contentDOM.addEventListener("keydown", (e) => {
+      // Typing, not shortcuts, quiets the chrome. AltGr letters arrive as Ctrl Alt on Windows and are typing too.
+      const writes = (e.key.length === 1 && (!(e.ctrlKey || e.metaKey) || e.altKey)) || (!e.ctrlKey && /^(Enter|Backspace|Delete)$/.test(e.key));
+      if (writes) hush();
       if (e.key === "/" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         const s = view().state;
         const line = s.doc.lineAt(s.selection.main.head);

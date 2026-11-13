@@ -243,6 +243,7 @@ export default function Settings(p: { section?: Section | "all"; onClose(): void
             </p>
           </section>
           <section class="set-card">
+            <Toggle label="A quiet page" hint="The title bar, sidebar, margin and footer fade while you type. Move the mouse and they come back." on={prefs().quiet} onChange={(on) => void pref("quiet", on)} />
             <Toggle label="Paragraph focus" hint="The other paragraphs fade while you type." on={prefs().focus} onChange={(on) => void pref("focus", on)} />
             <Toggle label="Typewriter scrolling" hint="The line you type stays in the middle of the window." on={prefs().typewriter} onChange={(on) => void pref("typewriter", on)} />
             <Toggle

@@ -14,6 +14,7 @@ import { loadLibrary } from "./library/Library";
 import NotePage, { type NotePageHandle } from "./note/NotePage";
 import CommandBar, { type Command } from "./palette/CommandBar";
 import { applyPrefs, changePref, parsePrefs, prefs, setPrefs } from "./settings/prefs";
+import { watchQuiet } from "./note/quiet";
 import { folderName, say, ToastView, typing, undoLast } from "./ui";
 import { pushRecent } from "./palette/match";
 import Beside, { type BesideHandle } from "./note/Beside";
@@ -337,7 +338,7 @@ export default function App() {
     { id: "summarize", label: "AI: Summarize this note", when: onNote, run: () => page?.ai("summarize") },
     { id: "title", label: "AI: Suggest a title", when: onNote, run: () => page?.ai("title") },
     { id: "related", label: "AI: Find related notes", when: onNote, run: () => page?.findRelated() },
-    { id: "move", label: "Move to a note or collection…", when: onNote, run: () => setMoving(true) },
+    { id: "move", label: "Move to a note or collection…", keys: "Ctrl M", when: onNote, run: () => setMoving(true) },
     { id: "task", label: "Add a task, or tick one", keys: "Ctrl Shift X", when: () => view().kind === "note", run: () => page?.task() },
     { id: "beside", label: "Open a note beside this one", keys: "Ctrl Shift Enter", run: () => setTimeout(() => setBar("beside")) },
     { id: "beside-close", label: "Close the note beside", when: () => beside() !== null, run: () => void closeBeside() },
@@ -424,6 +425,7 @@ export default function App() {
     else if (matches(e, "library")) void (view().kind === "library" ? writing() : library());
     else if (matches(e, "settings")) setSettings("all");
     else if (matches(e, "history") && onNote()) setHistory(true);
+    else if (matches(e, "move") && onNote()) setMoving(true);
     else if (e.altKey && !mod && (e.key === "ArrowLeft" || e.key === "ArrowRight") && onDay()) {
       void openDay(addDays(onDay()!, e.key === "ArrowLeft" ? -1 : 1));
     }
@@ -449,6 +451,7 @@ export default function App() {
   };
   const stopSound = typingSound(() => prefs().sound);
   onCleanup(stopSound);
+  onCleanup(watchQuiet());
 
   onMount(async () => {
     document.addEventListener("keydown", key);
