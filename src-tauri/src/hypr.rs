@@ -20,21 +20,25 @@ pub fn arrange(title: &'static str, width: u32, height: u32) {
     let _ = (title, width, height);
 }
 
-/// The dispatches for one window, given what Hyprland says about it. `pin` toggles, so it is sent only when the
-/// window is not pinned yet.
+/// The Lua dispatches for one window, given what Hyprland says about it. Omarchy runs Hyprland 0.56, which takes
+/// `hl.dsp.*` expressions and rejects the old `setfloating`/`resizewindowpixel` syntax. Floating comes first:
+/// Hyprland refuses to pin a tiled window. `pin` is sent only when the window is not pinned yet.
 #[cfg_attr(not(any(target_os = "linux", test)), allow(dead_code))]
-fn batch(address: &str, floating: bool, pinned: bool, width: u32, height: u32) -> String {
+fn commands(address: &str, floating: bool, pinned: bool, width: u32, height: u32) -> Vec<String> {
+    let window = format!("address:{address}");
     let mut out = Vec::new();
     if !floating {
-        out.push(format!("dispatch setfloating address:{address}"));
+        out.push(format!(r#"hl.dsp.window.float({{ action = "on", window = "{window}" }})"#));
     }
-    out.push(format!("dispatch resizewindowpixel exact {width} {height},address:{address}"));
-    out.push(format!("dispatch focuswindow address:{address}"));
-    out.push("dispatch centerwindow".to_string());
+    out.push(format!(
+        r#"hl.dsp.window.resize({{ x = {width}, y = {height}, relative = false, window = "{window}" }})"#
+    ));
+    out.push(format!(r#"hl.dsp.window.center({{ window = "{window}" }})"#));
+    out.push(format!(r#"hl.dsp.focus({{ window = "{window}" }})"#));
     if !pinned {
-        out.push(format!("dispatch pin address:{address}"));
+        out.push(format!(r#"hl.dsp.window.pin({{ action = "on", window = "{window}" }})"#));
     }
-    out.join(" ; ")
+    out
 }
 
 #[cfg(target_os = "linux")]
@@ -61,18 +65,21 @@ mod linux {
                 .or_else(|| list.iter().find(named));
             if let Some(c) = found {
                 let address = c["address"].as_str().context("a client without an address")?;
-                let cmd = super::batch(
+                let cmds = super::commands(
                     address,
                     c["floating"].as_bool().unwrap_or(false),
                     c["pinned"].as_bool().unwrap_or(false),
                     width,
                     height,
                 );
-                let out = Command::new("hyprctl").args(["--batch", &cmd]).output()?;
-                let said = String::from_utf8_lossy(&out.stdout).trim().replace('\n', " ");
-                log::info!("hyprctl {cmd} -> {said}");
-                if !out.status.success() {
-                    bail!("hyprctl said {}: {said}", out.status);
+                for cmd in &cmds {
+                    // Hyprland's Lua answers a failed dispatch with "error: ..." on stdout, and hyprctl still exits 0.
+                    let out = Command::new("hyprctl").args(["dispatch", cmd]).output()?;
+                    let said = String::from_utf8_lossy(&out.stdout).trim().replace('\n', " ");
+                    log::info!("hyprctl dispatch {cmd} -> {said}");
+                    if !out.status.success() || said.contains("error") {
+                        bail!("hyprctl dispatch {cmd} said {}: {said}", out.status);
+                    }
                 }
                 return Ok(());
             }
@@ -85,12 +92,15 @@ mod linux {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn pins_only_once() {
-        let b = super::batch("0xabc", false, false, 620, 440);
-        assert!(b.starts_with("dispatch setfloating address:0xabc ; "));
-        assert!(b.contains("resizewindowpixel exact 620 440,address:0xabc"));
-        assert!(b.ends_with("dispatch pin address:0xabc"));
-        let again = super::batch("0xabc", true, true, 620, 440);
-        assert!(!again.contains("setfloating") && !again.contains("pin "));
+    fn floats_then_pins_only_once() {
+        let c = super::commands("0xabc", false, false, 620, 440);
+        assert!(c[0].starts_with(r#"hl.dsp.window.float({ action = "on", window = "address:0xabc" })"#));
+        assert!(c.contains(
+            &r#"hl.dsp.window.resize({ x = 620, y = 440, relative = false, window = "address:0xabc" })"#
+                .to_string()
+        ));
+        assert!(c.last().unwrap().starts_with(r#"hl.dsp.window.pin({ action = "on""#));
+        let again = super::commands("0xabc", true, true, 620, 440);
+        assert!(!again.iter().any(|c| c.contains("float(") || c.contains("pin(")));
     }
 }
