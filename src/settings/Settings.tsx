@@ -8,6 +8,7 @@ import { comboOf, conflicts, customKeys, hyprBind, keyOf, platform, setCustomKey
 import { keyChips } from "../Shortcuts";
 import { Kbd, say } from "../ui";
 import { tick } from "../joy/sound";
+import { canUpdate, checkForUpdate } from "../updates";
 import { applyPrefs, FONTS, prefs, setPrefs, SIZES, storedValue, THEMES, type Prefs } from "./prefs";
 
 export { typesCharacter };
@@ -68,6 +69,24 @@ export default function Settings(p: { section?: Section | "all"; onClose(): void
   const [desk, { mutate: setDesk }] = createResource<DesktopSettings>(async () => (await api()).desktopSettings());
   const [ai, { mutate: setAi }] = createResource<AiStatus>(async () => (await api()).aiStatus());
   const [key, setKey] = createSignal("");
+  const version = () => app()?.version ?? "";
+  const [checking, setChecking] = createSignal(false);
+  const [checked, setChecked] = createSignal<"new" | "none" | "error" | null>(null);
+  async function checkNow() {
+    setChecking(true);
+    setChecked(await checkForUpdate(false));
+    setChecking(false);
+  }
+  const updateNote = () =>
+    !canUpdate()
+      ? "This build does not update itself (a debug build, or the browser)."
+      : checked() === "none"
+        ? "This is the newest."
+        : checked() === "new"
+          ? "A new version is ready: see the corner."
+          : checked() === "error"
+            ? "GitHub could not be reached. Try again later."
+            : undefined;
   // The shortcut waiting for its new key.
   const [listening, setListening] = createSignal<string | null>(null);
 
@@ -219,6 +238,19 @@ export default function Settings(p: { section?: Section | "all"; onClose(): void
               }}
             />
             <Toggle label="The petrel" hint="It crosses the page once when the inbox is clear." on={prefs().petrel} onChange={(on) => void pref("petrel", on)} />
+          </section>
+          <section class="set-card">
+            <Toggle
+              label="Look for updates"
+              hint="At start and every six hours, from GitHub. A new version is installed only when you press Install."
+              on={prefs().updates}
+              onChange={(on) => void pref("updates", on)}
+            />
+            <Row label={`Petrel ${version()}`} hint={updateNote()}>
+              <button type="button" class="btn small" disabled={!canUpdate() || checking()} onClick={() => void checkNow()}>
+                {checking() ? "Looking…" : "Check now"}
+              </button>
+            </Row>
           </section>
         </Show>
 

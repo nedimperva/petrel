@@ -15,6 +15,8 @@ import NotePage, { type NotePageHandle } from "./note/NotePage";
 import CommandBar, { type Command } from "./palette/CommandBar";
 import { applyPrefs, changePref, parsePrefs, prefs, setPrefs } from "./settings/prefs";
 import { watchQuiet } from "./note/quiet";
+import UpdateNotice from "./UpdateNotice";
+import { setBeforeInstall, watchUpdates } from "./updates";
 import { folderName, say, ToastView, typing, undoLast } from "./ui";
 import { pushRecent } from "./palette/match";
 import Beside, { type BesideHandle } from "./note/Beside";
@@ -452,6 +454,7 @@ export default function App() {
   const stopSound = typingSound(() => prefs().sound);
   onCleanup(stopSound);
   onCleanup(watchQuiet());
+  setBeforeInstall(async () => (await page?.flush(), await remember()));
 
   onMount(async () => {
     document.addEventListener("keydown", key);
@@ -474,6 +477,7 @@ export default function App() {
       applyPrefs(prefs());
     }
     setRoot((await s.notesInfo().catch(() => ({ root: "" }))).root);
+    watchUpdates(() => prefs().updates);
     const stored = await s.uiSettings().catch(() => ({}) as Record<string, string>);
     sidePref = stored["ui.sidebar"] !== "0";
     setSideOn(sidePref && innerWidth >= SIDEBAR_DOCK_PX);
@@ -698,6 +702,7 @@ export default function App() {
         <Shortcuts onClose={() => (setKeysOpen(false), page?.focus())} onSettings={() => (setKeysOpen(false), setSettings("keys"))} />
       </Show>
       <ToastView />
+      <UpdateNotice />
     </div>
   );
 }

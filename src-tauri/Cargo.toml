@@ -30,6 +30,8 @@ keyring = { version = "3", features = ["apple-native", "windows-native", "sync-s
 # "Copy formatted": Markdown to HTML for the clipboard.
 pulldown-cmark = { version = "0.13.5", default-features = false, features = ["html"] }
 notify-debouncer-mini = "0.7.0"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 
 # The capture's quote: the selected text and the window it was in, read through UI Automation.
 [target.'cfg(windows)'.dependencies]

@@ -4454,3 +4454,34 @@ kbd {
 .ccard-tasks {
   color: var(--ok);
 }
+
+/* ---- a new Petrel is ready (src/UpdateNotice.tsx) ------------------------------------------------------------- */
+
+.update-notice {
+  position: fixed;
+  right: var(--s-4);
+  bottom: calc(var(--s-4) + 40px);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  max-width: min(520px, calc(100vw - 32px));
+  padding: 12px 14px;
+  border-radius: var(--r-lg);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-lg);
+  animation: rise var(--d-base) var(--ease);
+}
+.update-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--t-md);
+}
+.update-text b {
+  font-weight: 600;
+  color: var(--ink);
+}

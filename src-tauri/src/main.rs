@@ -310,6 +310,10 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         // The notes folder picker in Settings.
         .plugin(tauri_plugin_dialog::init())
+        // Updates come from the GitHub releases (latest.json), signed with the key in tauri.conf.json; the UI
+        // asks before installing (src/updates.ts).
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             init_logging(app);
             let path = db_path(app)?;

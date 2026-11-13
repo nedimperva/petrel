@@ -145,6 +145,26 @@ petrel --new "call the bank" --tag errand
 git log -1 | petrel --stdin --tag git
 ```
 
+## Releases and updates
+
+Installers are on the [releases page](https://github.com/nedimperva/petrel/releases): the `-setup.exe` for
+Windows, the `.AppImage` or `.deb` for Linux. Petrel looks for a new version at start and every six hours and shows
+a notice; it installs only when you press Install and restart (Settings › General turns the looking off). The
+AppImage and the Windows install update themselves; a `.deb` is updated by installing the new one.
+
+To make a release:
+
+```sh
+node scripts/version.mjs 0.2.0          # tauri.conf.json, package.json, Cargo.toml
+git commit -am "Petrel 0.2.0"
+git tag v0.2.0 && git push && git push origin v0.2.0
+```
+
+`.github/workflows/release.yml` builds both, signs the update files with the key in the repo secrets
+(`TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`; the public half is in `tauri.conf.json`) and
+publishes the release with `latest.json`. Keep the private key safe: without it no installed Petrel will accept an
+update.
+
 ## Project layout
 
 ```

@@ -22,6 +22,8 @@ export interface Prefs {
   petrel: boolean;
   /** A soft pencil sound as you type. */
   sound: boolean;
+  /** Look for a new Petrel at start and every six hours (it installs only when asked). */
+  updates: boolean;
   /** Bring the text selected in the app you were in into a capture (the Rust side reads this key too). */
   captureSelection: boolean;
 }
@@ -36,6 +38,7 @@ export const DEFAULTS: Prefs = {
   petrel: true,
   sound: false,
   captureSelection: true,
+  updates: true,
 };
 
 export const SIZES = [15, 16, 17, 18, 19, 20, 22];
@@ -64,6 +67,7 @@ const KEYS: Record<keyof Prefs, string> = {
   petrel: "ui.petrel",
   sound: "ui.sound",
   captureSelection: "ui.capture_selection",
+  updates: "ui.updates",
 };
 
 const flag = (v: string | undefined, d: boolean) => (v === "1" ? true : v === "0" ? false : d);
@@ -84,6 +88,7 @@ export function parsePrefs(m: Record<string, string>): Prefs {
     petrel: flag(m[KEYS.petrel], DEFAULTS.petrel),
     sound: flag(m[KEYS.sound], DEFAULTS.sound),
     captureSelection: flag(m[KEYS.captureSelection], DEFAULTS.captureSelection),
+    updates: flag(m[KEYS.updates], DEFAULTS.updates),
   };
 }
 
