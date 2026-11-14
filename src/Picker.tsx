@@ -146,11 +146,16 @@ export default function Picker() {
         }
       >
         <div class="palette-field">
-          <span class="spark">⌕</span>
+          <span class="spark picker-glass">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" />
+              <path d="m20 20-3.5-3.5" />
+            </svg>
+          </span>
           <input
             class="palette-input"
             ref={input}
-            placeholder={ctx()?.app ? `Find a prompt, snippet or note to copy into ${ctx()!.app}…` : "Find a prompt, snippet or note to copy…"}
+            placeholder={ctx()?.app ? `Copy into ${ctx()!.app}: find a prompt or snippet…` : "Find a prompt, snippet or note to copy…"}
             value={q()}
             onInput={(e) => (setQ(e.currentTarget.value), setI(0), setVi(0))}
             onKeyDown={key}
