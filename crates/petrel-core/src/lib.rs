@@ -13,6 +13,7 @@ pub mod notes;
 pub mod query;
 pub mod retention;
 pub mod store;
+pub mod sync;
 pub mod title;
 
 pub use retention::Retention;
