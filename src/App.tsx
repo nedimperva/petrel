@@ -20,6 +20,7 @@ import { setBeforeInstall, watchUpdates } from "./updates";
 import { folderName, say, ToastView, typing, undoLast } from "./ui";
 import { pushRecent } from "./palette/match";
 import Beside, { type BesideHandle } from "./note/Beside";
+import { syncStatus, watchSync } from "./sync";
 import { keyLabel, matches, parseKeyMap, setCustomKeys, setSystemKeys } from "./keys";
 import Shortcuts from "./Shortcuts";
 import Destination, { type Target } from "./inbox/Destination";
@@ -457,6 +458,7 @@ export default function App() {
   setBeforeInstall(async () => (await page?.flush(), await remember()));
 
   onMount(async () => {
+    void watchSync();
     void api()
       .then((s) => s.desktopSettings())
       .then((d) => d.hotkeySupported !== false && setSystemKeys({ capture: d.hotkey, picker: d.pickerHotkey }), () => {});
@@ -504,7 +506,11 @@ export default function App() {
         await s.closeWindow();
       },
       openNote: (id) => void openNote(id),
-      focus: () => void rescan(),
+      focus: () => {
+        void rescan();
+        // Back at the window: see what changed on the other computer.
+        if (syncStatus()?.on) void api().then((s) => s.syncNow());
+      },
       folder: (r) => void folderChanged(r),
       // Hidden to the tray counts as leaving: coming back soon opens the same note.
       changed: () => view().kind !== "note" && setRev(rev() + 1),
@@ -564,6 +570,7 @@ export default function App() {
           onCollection={(f) => void library(`c:${f}`)}
           onFolderChanged={(from, to) => void folderMoved(from, to)}
           onSettings={() => setSettings("all")}
+          onSync={() => setSettings("sync")}
           onClose={() => setSideOn(false)}
         />
       </Show>

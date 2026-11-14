@@ -97,6 +97,20 @@ export interface Backlinks {
   mentioned: BackRef[];
 }
 
+/** Google Drive sync (src-tauri/src/sync.rs). */
+export interface SyncStatus {
+  configured: boolean;
+  clientId: string;
+  signedIn: boolean;
+  account: string;
+  on: boolean;
+  /** `off`, `idle`, `syncing`, `offline`, `signin`, `error`, `blocked`. */
+  state: string;
+  message: string | null;
+  lastAt: number | null;
+  last: string | null;
+}
+
 export interface NoteQuery {
   folder?: string | null;
   pinned?: boolean | null;
@@ -319,6 +333,15 @@ export interface Api {
 
   aiStatus(): Promise<AiStatus>;
   setAiKey(key: string | null): Promise<AiStatus>;
+
+  syncStatus(): Promise<SyncStatus>;
+  syncSetup(clientId: string, clientSecret: string): Promise<SyncStatus>;
+  /** Opens Google's sign-in in the browser and waits for it. */
+  syncSignIn(): Promise<SyncStatus>;
+  syncSignOut(): Promise<SyncStatus>;
+  syncSetOn(on: boolean): Promise<SyncStatus>;
+  syncNow(): Promise<void>;
+  onSync(run: (s: SyncStatus) => void): Promise<void>;
   aiWrite(o: {
     task: AiTask;
     text: string;
@@ -428,6 +451,16 @@ async function tauriApi(): Promise<Api> {
 
     aiStatus: () => invoke("ai_status"),
     setAiKey: (key) => invoke("set_ai_key", { key }),
+    syncStatus: () => invoke("sync_status"),
+    syncSetup: (clientId, clientSecret) => invoke("sync_setup", { clientId, clientSecret }),
+    syncSignIn: () => invoke("sync_sign_in"),
+    syncSignOut: () => invoke("sync_sign_out"),
+    syncSetOn: (on) => invoke("sync_set_on", { on }),
+    syncNow: () => invoke("sync_now"),
+    onSync: async (run) => {
+      const { listen } = await import("@tauri-apps/api/event");
+      await listen<SyncStatus>("petrel-sync", (e) => run(e.payload));
+    },
     aiWrite: (o) => invoke("ai_write", { ...o }),
     aiAsk: (question, earlier, notes) => invoke("ai_ask", { question, earlier: earlier ?? null, notes: notes ?? null }),
     aiSuggestHome: (noteId) => invoke("ai_suggest_home", { noteId }),

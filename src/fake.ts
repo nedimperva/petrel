@@ -2,7 +2,7 @@
 // and collections, and an AI that answers from a script. The real rules (files, conflicts, front matter, links)
 // are in crates/petrel-core/src/notes.rs and its tests; this is enough to work on the screens.
 
-import type { AiSuggestion, Api, Note, NoteSummary, NoteVersion, OpenTask, TopicFace, UndoToken } from "./api";
+import type { AiSuggestion, Api, Note, NoteSummary, NoteVersion, OpenTask, SyncStatus, TopicFace, UndoToken } from "./api";
 import { parseLinks } from "./notes/parse";
 
 const MIN = 60_000;
@@ -39,6 +39,7 @@ export function fakeApi(): Api {
   const lower = (s: string) => s.trim().toLowerCase();
   const pathOf = (folder: string, title: string) => (folder ? `${folder}/${title}.md` : `${title}.md`);
   const wait = <T>(v: T, ms = 0) => new Promise<T>((r) => setTimeout(() => r(v), ms));
+  const sync: SyncStatus = { configured: false, clientId: "", signedIn: false, account: "", on: false, state: "off", message: null, lastAt: null, last: null };
 
   const add = (folder: string, title: string, body: string, tags: string[] = [], age = 0, pinned = false): Note => {
     const t = Date.now() - age;
@@ -166,6 +167,14 @@ export function fakeApi(): Api {
     openCapture: () => wait(undefined).then(() => void window.open("/?capture", "_blank", "width=560,height=320")),
     openPicker: () => wait(undefined).then(() => void window.open("/?picker", "_blank", "width=620,height=440")),
     closePicker: () => wait(undefined).then(() => console.info("picker closed")),
+    // Sync in the browser: a pretend Google account, so Settings › Sync and the sidebar can be worked on.
+    syncStatus: () => wait({ ...sync }),
+    syncSetup: (clientId) => wait(Object.assign(sync, { clientId, configured: true })).then((x) => ({ ...x })),
+    syncSignIn: () => wait(Object.assign(sync, { signedIn: true, on: true, account: "you@example.com", state: "idle", lastAt: Date.now(), last: "12 files sent" }), 600).then((x) => ({ ...x })),
+    syncSignOut: () => wait(Object.assign(sync, { signedIn: false, on: false, account: "", state: "off" })).then((x) => ({ ...x })),
+    syncSetOn: (on) => wait(Object.assign(sync, { on, state: on ? "idle" : "off" })).then((x) => ({ ...x })),
+    syncNow: () => wait(undefined).then(() => void (sync.lastAt = Date.now())),
+    onSync: () => wait(undefined),
     // In the browser a page is opened when it is asked for, so it starts at once.
     windowReady: () => wait(true),
     onOpenWindow: () => wait(undefined),

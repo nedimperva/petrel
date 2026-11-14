@@ -10,13 +10,15 @@ import { Kbd, say } from "../ui";
 import { tick } from "../joy/sound";
 import { canUpdate, checkForUpdate } from "../updates";
 import { applyPrefs, FONTS, prefs, setPrefs, SIZES, storedValue, THEMES, type Prefs } from "./prefs";
+import SyncSection from "./SyncSection";
 
 export { typesCharacter };
 
-export type Section = "general" | "writing" | "look" | "capture" | "keys" | "ai" | "about";
+export type Section = "general" | "sync" | "writing" | "look" | "capture" | "keys" | "ai" | "about";
 
 const SECTIONS: { id: Section; label: string; icon: string }[] = [
   { id: "general", label: "General", icon: "M3 7h18M3 12h18M3 17h18" },
+  { id: "sync", label: "Sync", icon: "M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3M18 3v4h-4M6 21v-4h4" },
   { id: "writing", label: "Writing", icon: "M4 20h4L19 9l-4-4L4 16z" },
   { id: "look", label: "Look", icon: "M12 3a9 9 0 1 0 9 9c0-1-1-2-2-2h-2a2 2 0 0 1-2-2V6c0-1-1-3-3-3z" },
   { id: "capture", label: "Capture", icon: "M4 13h4l2 3h4l2-3h4M4 13l2-8h12l2 8v6H4z" },
@@ -187,8 +189,6 @@ export default function Settings(p: { section?: Section | "all"; onClose(): void
     say("Copied. Paste it into your Hyprland config (Omarchy: ~/.config/hypr/bindings.conf).");
   };
 
-  const drive = () => /google drive|googledrive|my drive/i.test(info()?.root ?? "");
-
   return (
     <div class="settings-page" role="dialog" aria-label="Settings">
       <nav class="set-nav" aria-label="Settings sections">
@@ -213,17 +213,15 @@ export default function Settings(p: { section?: Section | "all"; onClose(): void
         <Show when={at() === "general"}>
           <h1>General</h1>
           <section class="set-card">
-            <Row label="Your Petrel folder" hint="Every note is a Markdown file here. Put it in Google Drive and every computer has it.">
+            <Row label="Your Petrel folder" hint="Every note is a Markdown file here.">
               <code class="path">{info()?.root ?? "…"}</code>
               <button class="btn" onClick={chooseFolder}>
                 Change…
               </button>
             </Row>
-            <Show when={!drive()}>
-              <p class="muted small set-note">
-                Windows: Google Drive for desktop, "Mirror files", then a folder under <code>My Drive</code>. Linux: rclone bisync or Syncthing to the same folder.
-              </p>
-            </Show>
+            <p class="muted small set-note">
+              To have it on every computer, turn on <button class="link small" onClick={() => setAt("sync")}>Sync</button> with Google Drive. Keep the folder outside Google Drive for desktop: one sync is enough.
+            </p>
             <p class="muted small set-note">If a note changes in two places, Petrel keeps both and shows a card to settle it. The index lives outside the folder and is rebuilt from it.</p>
           </section>
           <section class="set-card">
@@ -400,6 +398,10 @@ export default function Settings(p: { section?: Section | "all"; onClose(): void
               )}
             </For>
           </section>
+        </Show>
+
+        <Show when={at() === "sync"}>
+          <SyncSection />
         </Show>
 
         <Show when={at() === "ai"}>
