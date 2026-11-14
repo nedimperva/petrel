@@ -28,7 +28,7 @@ pub enum Open {
     /// Made and waiting: it was told to start.
     Started,
     /// Already on screen: bring it forward.
-    Focus(tauri::WebviewWindow),
+    Focus(Box<tauri::WebviewWindow>),
     /// Made but still loading: it starts as soon as it is waiting.
     Loading,
 }
@@ -40,7 +40,7 @@ pub fn open(app: &tauri::AppHandle, label: &str) -> Open {
         return Open::Build;
     };
     if w.is_visible().unwrap_or(false) {
-        return Open::Focus(w);
+        return Open::Focus(Box::new(w));
     }
     let state = app.state::<State>();
     let Ok(mut warm) = state.lock() else { return Open::Loading };

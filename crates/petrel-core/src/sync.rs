@@ -190,6 +190,11 @@ fn write_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
     Err(anyhow!("moving {} to {}: {}", tmp.display(), path.display(), last.expect("tried")))
 }
 
+/// Now, as conflict copies are named: `2026-11-14 1830`.
+pub fn stamp_now() -> String {
+    chrono::Local::now().format("%Y-%m-%d %H%M").to_string()
+}
+
 /// `Travel/Rome.md` → `Travel/Rome (conflict 2026-11-14 1830).md`, a name not taken here.
 pub fn conflict_name(root: &Path, rel: &str, stamp: &str) -> String {
     let (folder, file) = rel.rsplit_once('/').map_or(("", rel), |(a, b)| (a, b));

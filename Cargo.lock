@@ -3200,8 +3200,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arboard",
+ "base64 0.22.1",
  "dirs 7.0.0",
  "env_logger",
+ "getrandom 0.3.4",
  "keyring",
  "log",
  "notify-debouncer-mini",
@@ -3209,6 +3211,7 @@ dependencies = [
  "pulldown-cmark",
  "serde",
  "serde_json",
+ "sha2 0.11.1",
  "tauri",
  "tauri-build",
  "tauri-plugin-autostart",

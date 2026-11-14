@@ -5,8 +5,11 @@ mod cli;
 mod commands;
 mod context;
 mod desktop;
+mod drive;
+mod google;
 mod hypr;
 mod notes;
+mod sync;
 mod tray;
 mod warm;
 mod watch;
@@ -378,6 +381,7 @@ fn main() {
                 watcher: Mutex::new(None),
             });
             app.manage(warm::State::default());
+            app.manage(sync::state());
             // Without a tray (no StatusNotifier host on Linux, say), closing the window quits, as before.
             // The Linux tray loads libayatana-appindicator at run time and panics if it is missing.
             match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| tray::build(app))) {
@@ -422,6 +426,7 @@ fn main() {
             if app.state::<AppState>().tray.load(Ordering::SeqCst) {
                 prewarm(app.handle());
             }
+            sync::start(app.handle());
             if capture {
                 open_capture(app.handle());
             }
@@ -441,6 +446,12 @@ fn main() {
             commands::open_picker_window,
             commands::close_picker,
             warm::window_ready,
+            sync::sync_status,
+            sync::sync_setup,
+            sync::sync_sign_in,
+            sync::sync_sign_out,
+            sync::sync_set_on,
+            sync::sync_now,
             commands::show_note_in_main,
             commands::copy_text,
             commands::desktop_settings,
