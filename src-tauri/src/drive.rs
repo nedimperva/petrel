@@ -10,8 +10,25 @@ use anyhow::{anyhow, bail, Context, Result};
 use petrel_core::sync::{Remote, RemoteFile};
 use serde_json::{json, Value};
 
-const API: &str = "https://www.googleapis.com/drive/v3";
-const UPLOAD: &str = "https://www.googleapis.com/upload/drive/v3";
+const GOOGLE: &str = "https://www.googleapis.com";
+
+/// Google's API, or in a debug build `PETREL_DRIVE_URL` (a stand-in Drive for testing, `tests/fake_drive.py`).
+fn base() -> String {
+    if cfg!(debug_assertions) {
+        if let Ok(u) = std::env::var("PETREL_DRIVE_URL") {
+            return u;
+        }
+    }
+    GOOGLE.to_string()
+}
+
+fn api() -> String {
+    format!("{}/drive/v3", base())
+}
+
+fn upload_url() -> String {
+    format!("{}/upload/drive/v3", base())
+}
 const FOLDER: &str = "application/vnd.google-apps.folder";
 /// The folder's name in My Drive.
 pub const FOLDER_NAME: &str = "Petrel";
@@ -77,13 +94,13 @@ impl Drive {
         let q = format!(
             "name = '{FOLDER_NAME}' and mimeType = '{FOLDER}' and 'root' in parents and trashed = false"
         );
-        let v = d.get_json(&format!("{API}/files?q={}&fields=files(id)&spaces=drive", enc(&q)))?;
+        let v = d.get_json(&format!("{}/files?q={}&fields=files(id)&spaces=drive", api(), enc(&q)))?;
         if let Some(id) = v["files"].as_array().and_then(|a| a.first()).and_then(|f| f["id"].as_str()) {
             return Ok(id.to_string());
         }
         let v = d.send_json(
             "POST",
-            &format!("{API}/files?fields=id"),
+            &format!("{}/files?fields=id", api()),
             &json!({ "name": FOLDER_NAME, "mimeType": FOLDER, "parents": ["root"] }),
         )?;
         v["id"].as_str().map(str::to_string).context("Drive made no folder")
@@ -91,7 +108,7 @@ impl Drive {
 
     /// The Google account, for Settings.
     pub fn account(&mut self) -> Result<String> {
-        let v = self.get_json(&format!("{API}/about?fields=user(emailAddress)"))?;
+        let v = self.get_json(&format!("{}/about?fields=user(emailAddress)", api()))?;
         Ok(v["user"]["emailAddress"].as_str().unwrap_or("").to_string())
     }
 
@@ -104,7 +121,7 @@ impl Drive {
         let parent_id = self.folder(parent)?;
         let v = self.send_json(
             "POST",
-            &format!("{API}/files?fields=id"),
+            &format!("{}/files?fields=id", api()),
             &json!({ "name": name, "mimeType": FOLDER, "parents": [parent_id] }),
         )?;
         let id = v["id"].as_str().context("Drive made no folder")?.to_string();
@@ -117,7 +134,7 @@ impl Remote for Drive {
     fn has_changes(&mut self) -> Result<bool> {
         let Some(mut token) = self.cursor.clone() else {
             // First look: start counting changes from now; everything is listed this time anyway.
-            let v = self.get_json(&format!("{API}/changes/startPageToken"))?;
+            let v = self.get_json(&format!("{}/changes/startPageToken", api()))?;
             self.cursor = v["startPageToken"].as_str().map(str::to_string);
             return Ok(true);
         };
@@ -125,7 +142,8 @@ impl Remote for Drive {
         loop {
             let v = self.get_json(&format!(
                 "{API}/changes?pageToken={}&pageSize=1000&spaces=drive&fields=nextPageToken,newStartPageToken,changes(fileId)",
-                enc(&token)
+                enc(&token),
+                API = api()
             ))?;
             any |= v["changes"].as_array().is_some_and(|c| !c.is_empty());
             if let Some(next) = v["nextPageToken"].as_str() {
@@ -152,7 +170,8 @@ impl Remote for Drive {
         loop {
             let mut url = format!(
                 "{API}/files?q={}&pageSize=1000&spaces=drive&fields=nextPageToken,files(id,name,parents,mimeType,md5Checksum)",
-                enc("trashed = false")
+                enc("trashed = false"),
+                API = api()
             );
             if let Some(p) = &page {
                 url.push_str(&format!("&pageToken={}", enc(p)));
@@ -213,7 +232,7 @@ impl Remote for Drive {
         let auth = self.bearer()?;
         let mut resp = self
             .agent
-            .get(&format!("{API}/files/{id}?alt=media"))
+            .get(&format!("{}/files/{id}?alt=media", api()))
             .header("Authorization", &auth)
             .call()
             .map_err(offline)?;
@@ -231,7 +250,7 @@ impl Remote for Drive {
             Some(id) => {
                 let mut resp = self
                     .agent
-                    .patch(&format!("{UPLOAD}/files/{id}?uploadType=media&fields=id,md5Checksum"))
+                    .patch(&format!("{}/files/{id}?uploadType=media&fields=id,md5Checksum", upload_url()))
                     .header("Authorization", &auth)
                     .header("Content-Type", "application/octet-stream")
                     .send(bytes)
@@ -258,7 +277,7 @@ impl Remote for Drive {
                 body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
                 let mut resp = self
                     .agent
-                    .post(&format!("{UPLOAD}/files?uploadType=multipart&fields=id,md5Checksum"))
+                    .post(&format!("{}/files?uploadType=multipart&fields=id,md5Checksum", upload_url()))
                     .header("Authorization", &auth)
                     .header("Content-Type", &format!("multipart/related; boundary={boundary}"))
                     .send(&body[..])
@@ -277,7 +296,8 @@ impl Remote for Drive {
     }
 
     fn trash(&mut self, id: &str) -> Result<()> {
-        match self.send_json("PATCH", &format!("{API}/files/{id}?fields=id"), &json!({ "trashed": true })) {
+        match self.send_json("PATCH", &format!("{}/files/{id}?fields=id", api()), &json!({ "trashed": true }))
+        {
             Ok(_) => Ok(()),
             // Already gone there: nothing left to do.
             Err(e) if e.to_string().contains("404") => Ok(()),
@@ -320,4 +340,56 @@ fn enc(s: &str) -> String {
             _ => format!("%{b:02X}"),
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use petrel_core::sync::{sync, State};
+
+    /// Two folders meet through the stand-in Drive (`tests/fake_drive.py`); see its notes for how to run.
+    #[test]
+    #[ignore]
+    fn drive_against_fake() {
+        assert!(
+            std::env::var("PETREL_DRIVE_URL").is_ok(),
+            "start tests/fake_drive.py and set PETREL_DRIVE_URL"
+        );
+        let tmp = |n: &str| {
+            let d = std::env::temp_dir().join(format!("petrel-drive-{n}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&d);
+            std::fs::create_dir_all(&d).unwrap();
+            d
+        };
+        let (a, b) = (tmp("a"), tmp("b"));
+        std::fs::create_dir_all(a.join("Travel/.history/Rome")).unwrap();
+        std::fs::write(a.join("Travel/Rome.md"), "pasta\n").unwrap();
+        std::fs::write(a.join("Travel/.history/Rome/1-edit.md"), "pas\n").unwrap();
+        std::fs::write(a.join("inbox.md"), "milk\n").unwrap();
+        let root = Drive::find_or_make_root(|| Ok("t".into())).unwrap();
+        assert_eq!(Drive::find_or_make_root(|| Ok("t".into())).unwrap(), root, "found again, not made twice");
+        let (mut sa, mut sb) = (State::default(), State::default());
+        let mut da = Drive::new(|| Ok("t".into()), root.clone(), None);
+        let r = sync(&a, &mut da, &mut sa, "s").unwrap();
+        assert_eq!(r.uploaded, 3, "{r:?}");
+        sa.cursor = da.cursor.clone();
+        let mut db = Drive::new(|| Ok("t".into()), root.clone(), None);
+        let r = sync(&b, &mut db, &mut sb, "s").unwrap();
+        assert_eq!(r.downloaded, 3, "{r:?}");
+        assert_eq!(std::fs::read_to_string(b.join("Travel/Rome.md")).unwrap(), "pasta\n");
+        assert!(b.join("Travel/.history/Rome/1-edit.md").exists());
+        // An edit and a delete on B reach A.
+        std::fs::write(b.join("Travel/Rome.md"), "pasta, gelato\n").unwrap();
+        std::fs::remove_file(b.join("inbox.md")).unwrap();
+        let r = sync(&b, &mut db, &mut sb, "s").unwrap();
+        assert_eq!((r.uploaded, r.trashed_there), (1, 1), "{r:?}");
+        let mut da = Drive::new(|| Ok("t".into()), root.clone(), sa.cursor.clone());
+        let r = sync(&a, &mut da, &mut sa, "s").unwrap();
+        assert_eq!((r.downloaded, r.trashed_here), (1, 1), "{r:?}");
+        assert_eq!(std::fs::read_to_string(a.join("Travel/Rome.md")).unwrap(), "pasta, gelato\n");
+        // Quiet now: the change list says nothing new... after A's own look.
+        let r = sync(&a, &mut da, &mut sa, "s").unwrap();
+        assert_eq!(r, Default::default());
+        assert_eq!(Drive::new(|| Ok("t".into()), String::new(), None).account().unwrap(), "you@example.com");
+    }
 }

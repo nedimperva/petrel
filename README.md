@@ -9,9 +9,13 @@ later you file them into a note or a collection. Collections are just folders (N
 …) and their notes are easy to find and copy, with `{{blanks}}` you fill in as you copy. Claude can tidy,
 shorten, continue or explain your text and answer questions from your notes, but only when you ask.
 
-- **Files are the truth.** Every note is a plain Markdown file in a folder you pick (put it in Google Drive to have
-  it everywhere). The SQLite database is only an index and can be rebuilt. If a file changed in another app while
-  you were editing, both texts are kept.
+- **Files are the truth.** Every note is a plain Markdown file in a folder you pick. The SQLite database is only an
+  index and can be rebuilt. If a file changed in another app while you were editing, both texts are kept.
+- **Sync with Google Drive, built in.** Settings › Sync keeps your folder and `My Drive/Petrel` the same on every
+  computer you sign in on, Windows and Linux alike, with no sync app: a save goes up a couple of seconds later,
+  changes come down every 30 seconds and when you come back to the window, and offline changes wait. A note changed
+  on two computers keeps both texts; a note's history (`Ctrl H`) syncs too. It needs a Google Cloud client of your
+  own (Settings › Sync lists the three steps) and asks only for the files Petrel makes (`drive.file`).
 - **Capture from anywhere.** `Ctrl Alt Space` (or a compositor keybind on Wayland), the tray,
   `petrel --new "text"`, `echo text | petrel --stdin`. Text selected in the app you were in comes along as a quote
   with where it came from. `@recipes`, `@today` or a day (`@fri`, `@nov20`) in a capture files it there,
@@ -28,14 +32,14 @@ shorten, continue or explain your text and answer questions from your notes, but
   (`{{tone: formal / casual}}`) and remember your last answers. `## headings` in a prompt are versions of it.
 - **Two notes at once.** `Ctrl \` opens a second note beside the one you write in; `Ctrl Tab` goes back to the
   last one. A note with headings shows them in the margin.
-- **The folder is live.** A note changed in Drive reloads where you were; a note changed in two places gets a
+- **The folder is live.** A note changed by sync or another app reloads where you were; a note changed in two places gets a
   card in the library to settle it side by side. Pasted web pages come in as clean Markdown.
 - **AI on request.** `Ctrl J` on a note: tidy, shorten, make a list, continue, or a custom ask. The old text is
   shown struck through until you keep or drop the change; a version is taken first. Your own prompts (the Prompts
   collection) are on `Ctrl J` too. `Ctrl K` then a question asks your notes, and `Tab` asks again. The week, when
   you ask: what you wrote, what is still open, and a few sentences on it. Needs an
   Anthropic API key in Settings, kept in the OS keyring.
-- **Never loses text.** Autosave, versions (`Ctrl H`), deleted notes go to `.trash/` in the folder, undo with `z`.
+- **Never loses text.** Autosave, versions (`Ctrl H`, kept in the folder as `.history/`), deleted notes go to `.trash/` in the folder, undo with `z`.
 
 ## Keys
 

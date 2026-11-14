@@ -65,6 +65,11 @@ It is not for sale; it may be open source later.
   the right and `Enter` copies the filled text.
 - **File it later.** An inbox card opened on the sheet has Move to (`m`), Suggest a home (`s`, Claude, only when
   pressed) and Delete (`d`). Moving files it into a note (added to the end) or a collection (as its own note).
+- **Sync is built in (2026-11-14).** Settings › Sync keeps the folder and `My Drive/Petrel` the same through the
+  Drive API, from Rust, with no sync app or service: each file is compared here, there and as both last had it;
+  one side changed is copied over, both changed keeps both (a conflict copy to settle), changed and deleted keeps
+  it, deleted there goes to `.trash/` here. The history syncs as files in `.history/`. A folder inside Google
+  Drive for desktop is refused: one sync per folder.
 - **Collections are folders.** Notes, Prompts, Snippets, Songs, a topic: any top-level folder except `inbox/`.
   The most copied come first.
 - **Copy is the action.** There are no actions. Copy, Copy as Markdown and Copy formatted (HTML for mail and
