@@ -29,6 +29,7 @@ use crate::title;
 
 mod conflicts;
 mod folders;
+pub mod history;
 mod paths;
 mod tasks;
 
@@ -1020,15 +1021,21 @@ impl Store {
         if text.is_empty() {
             return Ok(());
         }
+        let now = self.now();
         self.conn.execute(
             "INSERT INTO note_versions (note_id, content, reason, created_at) VALUES (?1, ?2, ?3, ?4)",
-            params![id, text, reason, self.now()],
+            params![id, text, reason, now],
         )?;
         self.conn.execute(
             "DELETE FROM note_versions WHERE note_id = ?1 AND id NOT IN \
              (SELECT id FROM note_versions WHERE note_id = ?1 ORDER BY created_at DESC, id DESC LIMIT ?2)",
             params![id, NOTE_VERSIONS_KEPT],
         )?;
+        // The same version in the folder, so the history syncs with the notes. A failure here leaves the
+        // version in the index, as before.
+        if let (Ok(root), Ok(row)) = (self.root(), self.row(id)) {
+            let _ = history::write(&root, &row.path, now, reason, text);
+        }
         Ok(())
     }
 
@@ -1099,6 +1106,7 @@ impl Store {
                 bail!("there is already a note called “{new_title}” in that folder");
             }
             rename_with_retry(&abs(&root, &row.path), &abs(&root, &to))?;
+            history::carry(&root, &row.path, &to);
             self.conn.execute(
                 "UPDATE notes SET path = ?2, title = ?3 WHERE id = ?1",
                 params![id, to, new_title],
@@ -1153,6 +1161,7 @@ impl Store {
             std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
         }
         rename_with_retry(&abs(&root, &row.path), &target)?;
+        history::carry(&root, &row.path, &to);
         self.conn.execute(
             "UPDATE notes SET path = ?2, folder = ?3, title = ?4 WHERE id = ?1",
             params![id, to, new_folder, name],
@@ -1481,6 +1490,10 @@ impl Store {
 
     /// A note's saved versions, newest first (the history panel).
     pub fn note_versions(&self, id: i64) -> Result<Vec<NoteVersion>> {
+        // Versions made on another computer arrive as files; read them in first.
+        if let Err(e) = self.reconcile_history(id) {
+            eprintln!("petrel: reading the history of note {id}: {e:#}");
+        }
         let mut st = self.conn.prepare(
             "SELECT id, reason, created_at, length(content) FROM note_versions WHERE note_id = ?1 \
              ORDER BY created_at DESC, id DESC",
@@ -2308,6 +2321,32 @@ mod tests {
         s.undo_notes(&merged.token.token).unwrap();
         assert!(dir.join(&c.path).exists());
         assert_eq!(s.peek_note(target.id).unwrap().body, "Open questions\n");
+    }
+
+    #[test]
+    fn history_travels_with_the_folder() {
+        // Two computers: one folder, two indexes.
+        let dir = tmp();
+        let mut a = store_in(&dir);
+        let n = a.create_note("Travel", "Rome", "first\n", &[]).unwrap();
+        a.snapshot_note(n.id, "ai").unwrap();
+        let hist = dir.join("Travel/.history/Rome");
+        assert_eq!(std::fs::read_dir(&hist).unwrap().count(), 1);
+        let mut b = store_in(&dir);
+        b.scan_notes().unwrap();
+        let id = b.id_of("Travel/Rome.md").unwrap().unwrap();
+        let vs = b.note_versions(id).unwrap();
+        assert_eq!(vs.len(), 1);
+        assert_eq!(vs[0].reason, "ai");
+        assert!(b.note_version_text(vs[0].id).unwrap().starts_with("first"));
+        // Read once: a second look does not add it again.
+        assert_eq!(b.note_versions(id).unwrap().len(), 1);
+        // A rename takes the history along.
+        a.rename_note(n.id, "Roma").unwrap();
+        assert!(dir.join("Travel/.history/Roma").is_dir() && !hist.exists());
+        // The history is not a note.
+        assert!(b.scan_notes().is_ok());
+        assert!(b.id_of("Travel/.history/Roma").unwrap().is_none());
     }
 
     #[test]
