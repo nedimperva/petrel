@@ -230,6 +230,7 @@ export default function Library(p: {
             notes={pages()}
             copies={p.data?.copies ?? {}}
             versions={p.data?.versions ?? {}}
+            firstVersion={p.data?.firstVersion ?? {}}
             onCopy={(n) => void copyCard(n)}
             onRead={(id) => setReading(id)}
             onEdit={p.onEdit}

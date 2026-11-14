@@ -5,7 +5,7 @@
 
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 import type { NoteSummary } from "../api";
-import { blanks } from "../blanks";
+import CardText, { plain } from "./CardText";
 import { loadUsed, type Used } from "../collection/lastUsed";
 import { ago, folderName, KeyHints, typing } from "../ui";
 import { kindOf } from "./Card";
@@ -32,17 +32,6 @@ function shortDay(ms: number): string {
 
 /** The open tasks a preview shows, as a hint of what is still to do in a page. */
 const openTasks = (n: NoteSummary) => tasksOf(n.id);
-
-/** A preview without Markdown marks, for a card. */
-const plain = (s: string) =>
-  s
-    .replace(/^#+\s+/gm, "")
-    .replace(/^\s*[-*] \[[ xX]\]\s*/gm, "")
-    .replace(/^\s*[-*>]\s+/gm, "")
-    .replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_m, t: string, l?: string) => l ?? t)
-    .replace(/[*_`]/g, "")
-    .replace(/\s*\n+\s*/g, " ")
-    .trim();
 
 export default function Shelves(p: {
   data: LibraryData | undefined;
@@ -277,21 +266,16 @@ export default function Shelves(p: {
                             <span class="scard-title">{n.title}</span>
                             <Show when={p.data?.versions[n.id]}>{(v) => <span class="scard-badge">{v()} versions</span>}</Show>
                             <Show when={code && copies(n)}>
-                              <span class="scard-uses">{copies(n)}×</span>
+                              <span class="uses">{copies(n)}×</span>
                             </Show>
                           </span>
-                          <Show when={code} fallback={<span class="scard-text">{plain(n.preview.replace(/\{\{([^}|]+)(\|[^}]*)?\}\}/g, "$1"))}</span>}>
-                            <span class="scard-code">{n.preview.split("\n").find((l) => l.trim()) ?? ""}</span>
-                          </Show>
-                          <Show when={!code}>
-                            <span class="scard-blanks">
-                              <For each={blanks(n.preview).slice(0, 3)}>{(b) => <span class="blank-chip">{b.name}</span>}</For>
-                            </span>
+                          <CardText class={code ? "scard-code" : "scard-text"} code={code} text={code ? (n.preview.split("\n").find((l) => l.trim() && !l.startsWith("#")) ?? "") : (p.data?.firstVersion[n.id] ?? n.preview)} />
+                          <Show when={!code && (copies(n) || lastUse(n))}>
                             <span class="scard-foot">
                               <Show when={copies(n)}>
-                                <b>{copies(n)}×</b>
+                                <span class="uses">{copies(n)}×</span>
                               </Show>
-                              <span>{lastUse(n) || (copies(n) ? "" : "not used yet")}</span>
+                              <span>{lastUse(n)}</span>
                             </span>
                           </Show>
                         </Show>

@@ -3262,8 +3262,8 @@ kbd {
 /* ---- every shortcut on one sheet (Shift ?) ---------------------------------------------------------------- */
 
 .panel.shortcuts {
-  width: min(980px, calc(100vw - 48px));
-  max-height: 80vh;
+  width: min(1180px, calc(100vw - 48px));
+  max-height: 86vh;
   display: flex;
   flex-direction: column;
   border-radius: var(--r-xl);
@@ -3285,9 +3285,11 @@ kbd {
 }
 .shortcuts-grid {
   overflow: auto;
-  padding: var(--s-4) var(--s-5) var(--s-5);
-  columns: 2 360px;
+  padding: var(--s-4) var(--s-5) var(--s-6);
+  columns: 3 320px;
   column-gap: var(--s-6);
+  /* The last rows fade out while there is more below; at the end only the empty padding fades. */
+  mask-image: linear-gradient(to bottom, #000 calc(100% - var(--s-6)), transparent);
 }
 .shortcuts-grid section {
   break-inside: avoid;
@@ -3306,7 +3308,7 @@ kbd {
   align-items: center;
   justify-content: space-between;
   gap: var(--s-3);
-  padding: 5px 0;
+  padding: var(--s-1) 0;
   border-bottom: 1px solid var(--line);
   font-size: var(--t-sm);
 }
@@ -3927,10 +3929,20 @@ kbd {
   background: var(--sunk);
   color: var(--ink-2);
 }
-.scard-uses {
+/* How often a card was copied: one quiet form everywhere, nothing when never. */
+.uses {
   flex: none;
   font-size: var(--t-xs);
+  font-variant-numeric: tabular-nums;
   color: var(--muted);
+}
+.scard-text .blank-chip,
+.ccard-text .blank-chip,
+.scard-code .blank-chip,
+.ccard-code .blank-chip {
+  font-size: 0.9em;
+  line-height: 1.5;
+  padding: 0 5px;
 }
 .scard-text {
   font-size: 12.5px;

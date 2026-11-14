@@ -538,7 +538,7 @@ export default function App() {
   return (
     <div class="app" classList={{ "in-library": view().kind === "library" }}>
       <TitleBar
-        title={view().kind === "library" ? `Library · ${libraryTitle()}` : title() || (noteView()?.id === null ? "New note" : "")}
+        title={settings() ? "Settings" : view().kind === "library" ? `Library · ${libraryTitle()}` : title() || (noteView()?.id === null ? "New note" : "")}
         sidebar={sideOn()}
         onSidebar={toggleSide}
         onSettings={() => setSettings("all")}

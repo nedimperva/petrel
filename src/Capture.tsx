@@ -8,7 +8,7 @@
 // Keep going: opened again within two minutes of the last capture, the window shows that capture faded and adds
 // the new text under it, in the same file. Ctrl Enter makes the new text a capture of its own instead.
 
-import { autocompletion, type Completion, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
+import { autocompletion, startCompletion, type Completion, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
 import { RangeSetBuilder, StateEffect, StateField, type Extension } from "@codemirror/state";
 import { Decoration, EditorView } from "@codemirror/view";
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
@@ -101,7 +101,10 @@ export default function Capture() {
 
   const end = () => (editor ? editor.view.state.field(earlierEnd, false) ?? 0 : 0);
 
-  /** The suggestion list for `#` and `>`: picking one sets where the capture goes and takes the word out. */
+  /** A new collection named once; a second Enter on it makes it. */
+  let armed = "";
+
+  /** The suggestion list for `@`: picking one sets where the capture goes and takes the word out. */
   async function suggest(ctx: CompletionContext): Promise<CompletionResult | null> {
     const line = ctx.state.doc.lineAt(ctx.pos);
     const t = typingToken(line.text.slice(0, ctx.pos - line.from));
@@ -129,7 +132,19 @@ export default function Capture() {
       ...ns.map((n) => ({ label: `@${n.title}`, detail: `add to the end · ${folderName(n.folder)}`, apply: pick({ kind: "note", id: n.id, title: n.title }, n.folder) })),
     ];
     if (w && !folders.some((f) => f.toLowerCase() === w) && !days.length && !ns.length) {
-      options.push({ label: `@${t.word}`, detail: `new collection “${t.word}”`, apply: pick({ kind: "folder", folder: t.word }, t.word) });
+      // A new collection is a new folder: a typo must not make one, so it takes Enter twice.
+      const make = pick({ kind: "folder", folder: t.word }, t.word);
+      const sure = armed === t.word;
+      options.push({
+        label: `@${t.word}`,
+        detail: sure ? `Enter again: new collection “${t.word}”` : `new collection “${t.word}”?`,
+        apply: (view, c, a, b) => {
+          if (armed === t.word) return make(view, c, a, b);
+          armed = t.word;
+          say(`“${t.word}” is not a collection yet. Enter again to make it, or keep typing.`);
+          setTimeout(() => startCompletion(view));
+        },
+      });
     }
     return options.length ? { from, options, filter: false } : null;
   }

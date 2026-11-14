@@ -8,6 +8,8 @@ export interface LibraryData {
   copies: Record<string, number>;
   /** How many `## versions` a prompt or snippet has, by id, when it has two or more. */
   versions: Record<number, number>;
+  /** The first version's text of such a card, which the card shows (the preview would start with its name). */
+  firstVersion: Record<number, string>;
   /** Notes with a conflict copy beside them; the copies are not cards of their own. */
   conflicts: Conflict[];
 }
@@ -19,15 +21,19 @@ export async function loadLibrary(): Promise<LibraryData> {
   const notes = all.filter((n) => !n.folder.startsWith(".") && !copyIds.has(n.id));
   // The preview has no headings in it, so the few prompts and snippets are read whole to count their versions.
   const versions: Record<number, number> = {};
+  const firstVersion: Record<number, string> = {};
   await Promise.all(
     notes
       .filter((n) => hasVersions(n.folder))
       .slice(0, 400)
       .map(async (n) => {
-        const k = versionsOf((await s.peekNote(n.id).catch(() => null))?.body ?? "").length;
-        if (k > 1) versions[n.id] = k;
+        const vs = versionsOf((await s.peekNote(n.id).catch(() => null))?.body ?? "");
+        if (vs.length > 1) {
+          versions[n.id] = vs.length;
+          firstVersion[n.id] = vs[0].text.slice(0, 400);
+        }
       }),
   );
-  return { notes, copies, versions, conflicts };
+  return { notes, copies, versions, firstVersion, conflicts };
 }
 
