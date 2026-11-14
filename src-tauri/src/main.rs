@@ -8,6 +8,7 @@ mod desktop;
 mod hypr;
 mod notes;
 mod tray;
+mod warm;
 mod watch;
 
 use std::path::PathBuf;
@@ -122,17 +123,25 @@ fn run_cli() -> Option<i32> {
     }
 }
 
-/// Opens the capture window, or focuses it if it is open (ui.md §3). It starts hidden and shows itself once the
-/// editor has rendered, like the main window. The title is what a Hyprland float rule matches on: on Wayland
-/// every Petrel window shares the app id.
+/// Opens the capture window, or focuses it if it is open. The window is made once and kept warm (`warm.rs`):
+/// later opens show a page that has already loaded. The title is what a Hyprland float rule matches on: on
+/// Wayland every Petrel window shares the app id.
 pub fn open_capture(app: &tauri::AppHandle) {
-    if let Some(w) = app.get_webview_window("capture") {
-        let _ = w.show();
-        let _ = w.set_focus();
-        arrange(&w);
-        return;
+    match warm::open(app, "capture") {
+        warm::Open::Focus(w) => {
+            let _ = w.show();
+            let _ = w.set_focus();
+            arrange(&w);
+        }
+        warm::Open::Started | warm::Open::Loading => remember_context(app),
+        warm::Open::Build => {
+            remember_context(app);
+            build_capture(app);
+        }
     }
-    remember_context(app);
+}
+
+fn build_capture(app: &tauri::AppHandle) {
     let built = WebviewWindowBuilder::new(app, "capture", WebviewUrl::App("index.html".into()))
         .title("Petrel capture")
         .inner_size(640.0, 260.0)
@@ -140,7 +149,7 @@ pub fn open_capture(app: &tauri::AppHandle) {
         // No frame: the text on a panel, dragged by its empty space (data-tauri-drag-region in the UI).
         .decorations(false)
         .center()
-        // A quick note over whatever you were doing; it closes itself when you're done.
+        // A quick note over whatever you were doing; it hides itself when you're done.
         .always_on_top(true)
         .visible(false)
         .initialization_script("window.__PETREL_CAPTURE__ = true;")
@@ -148,6 +157,24 @@ pub fn open_capture(app: &tauri::AppHandle) {
     if let Err(e) = built {
         log::error!("cannot open the capture window: {e}");
     }
+}
+
+/// Makes the capture window and the picker, hidden, a little after start, so even the first hotkey is quick.
+/// Only with a tray: without one Petrel quits when its windows close, and nothing would be waiting.
+fn prewarm(app: &tauri::AppHandle) {
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        let h = handle.clone();
+        let _ = handle.run_on_main_thread(move || {
+            if h.get_webview_window("capture").is_none() {
+                build_capture(&h);
+            }
+            if h.get_webview_window("picker").is_none() {
+                build_picker(&h);
+            }
+        });
+    });
 }
 
 /// Starts reading what was selected in the window in front, unless Settings turned it off. It must run before the
@@ -188,16 +215,25 @@ fn remember_picker_context(app: &tauri::AppHandle) {
     };
 }
 
-/// Opens the quick picker, or focuses it: a small search over the collections that copies and closes.
+/// Opens the quick picker, or focuses it: a small search over the collections that copies and closes. Kept
+/// warm like the capture window.
 pub fn open_picker(app: &tauri::AppHandle) {
-    if let Some(w) = app.get_webview_window("picker") {
-        remember_picker_context(app);
-        let _ = w.show();
-        let _ = w.set_focus();
-        arrange(&w);
-        return;
+    match warm::open(app, "picker") {
+        warm::Open::Focus(w) => {
+            remember_picker_context(app);
+            let _ = w.show();
+            let _ = w.set_focus();
+            arrange(&w);
+        }
+        warm::Open::Started | warm::Open::Loading => remember_picker_context(app),
+        warm::Open::Build => {
+            remember_picker_context(app);
+            build_picker(app);
+        }
     }
-    remember_picker_context(app);
+}
+
+fn build_picker(app: &tauri::AppHandle) {
     let built = WebviewWindowBuilder::new(app, "picker", WebviewUrl::App("index.html".into()))
         .title("Petrel picker")
         .inner_size(620.0, 440.0)
@@ -341,6 +377,7 @@ fn main() {
                 picker_context: Mutex::new(None),
                 watcher: Mutex::new(None),
             });
+            app.manage(warm::State::default());
             // Without a tray (no StatusNotifier host on Linux, say), closing the window quits, as before.
             // The Linux tray loads libayatana-appindicator at run time and panics if it is missing.
             match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| tray::build(app))) {
@@ -382,6 +419,9 @@ fn main() {
                 let Ok(mut store) = state.store.lock() else { return };
                 sweep(&mut store);
             });
+            if app.state::<AppState>().tray.load(Ordering::SeqCst) {
+                prewarm(app.handle());
+            }
             if capture {
                 open_capture(app.handle());
             }
@@ -400,6 +440,7 @@ fn main() {
             commands::capture_context,
             commands::open_picker_window,
             commands::close_picker,
+            warm::window_ready,
             commands::show_note_in_main,
             commands::copy_text,
             commands::desktop_settings,

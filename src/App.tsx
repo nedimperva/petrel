@@ -10,7 +10,7 @@ import { api, errText, inTauri, type AiStatus, type Note, type NoteSummary, type
 import { plainText } from "./copy";
 import TitleBar from "./TitleBar";
 import Sidebar, { type Place } from "./Sidebar";
-import { loadLibrary } from "./library/Library";
+import { loadLibrary } from "./library/data";
 import NotePage, { type NotePageHandle } from "./note/NotePage";
 import CommandBar, { type Command } from "./palette/CommandBar";
 import { applyPrefs, changePref, parsePrefs, prefs, setPrefs } from "./settings/prefs";

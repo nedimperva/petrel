@@ -166,6 +166,9 @@ export function fakeApi(): Api {
     openCapture: () => wait(undefined).then(() => void window.open("/?capture", "_blank", "width=560,height=320")),
     openPicker: () => wait(undefined).then(() => void window.open("/?picker", "_blank", "width=620,height=440")),
     closePicker: () => wait(undefined).then(() => console.info("picker closed")),
+    // In the browser a page is opened when it is asked for, so it starts at once.
+    windowReady: () => wait(true),
+    onOpenWindow: () => wait(undefined),
     showNoteInMain: () => wait(undefined),
     copyText: async (text, html) => {
       try {

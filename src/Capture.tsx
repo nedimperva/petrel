@@ -1,4 +1,4 @@
-// The capture window (`petrel --capture`, Ctrl Alt Space): text, and one quiet line under it. The file is made in
+// The capture window (`petrel --capture` or the capture hotkey): text, and one quiet line under it. The file is made in
 // inbox/ on the first keystroke and saved as you type. Text selected in the app you were in comes in as a quote
 // with where it came from. `@recipes`, `@today`, a day (`@fri`, `@nov20`) or a note (`@Groceries`) in the text
 // says where it goes (the list offers places as you type, and the word is taken out); Ctrl K picks a
@@ -27,6 +27,7 @@ import { completionTheme } from "./notes/links";
 import { createNoteSaver, type SaveState } from "./notes/saver";
 import { applyPrefs, parsePrefs } from "./settings/prefs";
 import { folderName, KeyHints, say, ToastView } from "./ui";
+import { rest, whenOpened } from "./warm";
 
 /** Opening the window again within this long adds to the last capture. */
 const KEEP_GOING_MS = 2 * 60 * 1000;
@@ -243,6 +244,7 @@ export default function Capture() {
     // A capture left in the inbox can be added to if the window comes back soon.
     await s.setUiSetting(LAST, stays && n ? `${n.id}:${Date.now()}` : "").catch(() => {});
     await s.closeCapture();
+    rest();
   }
 
   const onKey = (e: KeyboardEvent) => {
@@ -285,6 +287,13 @@ export default function Capture() {
       completionTheme,
     ];
     editor.setExtra(extra);
+    void loadFaces();
+    await whenOpened(start);
+  });
+
+  /** The window was asked for: read what was selected and the last capture, then show. */
+  async function start() {
+    if (!editor) return;
     editor.view.focus();
     const s = await api();
     const ctx = s.captureContext().catch(() => null);
@@ -299,7 +308,7 @@ export default function Capture() {
       setEarlier(last.body);
     }
     await s.showWindow();
-    void loadFaces();
+    editor.view.focus();
     places().then((f) => (folders = f), () => {});
     window.addEventListener("keydown", onKey, true);
     const c = await ctx;
@@ -322,7 +331,7 @@ export default function Capture() {
         void done();
       });
     }
-  });
+  }
   onCleanup(() => {
     window.removeEventListener("keydown", onKey, true);
     editor?.destroy();

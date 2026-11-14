@@ -238,6 +238,10 @@ export interface Api {
   openCapture(): Promise<void>;
   openPicker(): Promise<void>;
   closePicker(): Promise<void>;
+  /** A warm window (capture, picker) is loaded and waiting; true means it was already asked for. */
+  windowReady(): Promise<boolean>;
+  /** Calls back when a waiting warm window is asked for. */
+  onOpenWindow(run: () => void): Promise<void>;
   showNoteInMain(id: number): Promise<void>;
   /** `html`: also as rich text, from the Markdown. */
   copyText(text: string, html: boolean): Promise<void>;
@@ -343,6 +347,11 @@ async function tauriApi(): Promise<Api> {
     openCapture: () => invoke("open_capture_window"),
     openPicker: () => invoke("open_picker_window"),
     closePicker: () => invoke("close_picker"),
+    windowReady: () => invoke("window_ready"),
+    onOpenWindow: async (run) => {
+      const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+      await getCurrentWebviewWindow().listen("petrel-open-window", () => run());
+    },
     showNoteInMain: (id) => invoke("show_note_in_main", { id }),
     copyText: (text, html) => invoke("copy_text", { text, html }),
     desktopSettings: () => invoke("desktop_settings"),
