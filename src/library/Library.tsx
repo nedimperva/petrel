@@ -10,7 +10,8 @@ import { api, errText, type AiSuggestion, type Conflict, type Note, type NoteSum
 import type { LibraryData } from "./data";
 import Destination, { type Target } from "../inbox/Destination";
 import { fileCapture } from "../inbox/file";
-import { ago, folderName, KeyHints, say, typing, undoLast } from "../ui";
+import { ago, folderName, Kbd, KeyHints, say, typing, undoLast } from "../ui";
+import { keyLabel } from "../keys";
 import { topOf } from "./Card";
 import FacePicker from "./FacePicker";
 import Mark, { faces, loadFaces } from "./Mark";
@@ -319,7 +320,7 @@ export default function Library(p: {
                 {q()
                   ? "Nothing matches."
                   : p.tab === "inbox"
-                    ? "Inbox zero. Captures from Ctrl Alt Space land here until you file them."
+                    ? `Inbox zero. Captures from ${keyLabel("capture")} land here until you file them.`
                     : p.tab === "all"
                       ? "Nothing to copy yet. Make a collection like Prompts or Snippets in the sidebar."
                       : "Nothing here yet."}
@@ -327,7 +328,7 @@ export default function Library(p: {
             </Show>
             <Show when={p.tab.startsWith("c:")}>
               <button type="button" class="lib-new" onClick={() => p.onNew(p.tab.slice(2))}>
-                New in {heading()} <kbd>Ctrl N</kbd>
+                New in {heading()} <Kbd keys={keyLabel("new")} />
               </button>
             </Show>
           </div>

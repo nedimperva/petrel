@@ -56,9 +56,12 @@ export default function CommandBar(p: {
         const ids = (p.recent ?? []).slice(0, 8);
         const ns = (await Promise.all(ids.map((id) => s.peekNote(id).catch(() => null)))).filter((n) => !!n);
         const recent: NoteSummary[] = ns.map((n) => ({ id: n.id, path: n.path, folder: n.folder, title: n.title, preview: n.body.slice(0, 200), tags: n.tags, pinned: n.pinned, modifiedAt: n.modifiedAt }));
-        if (!p.notesOnly) return recent;
+        // Ctrl K opens on notes: the ones opened lately, then the last edited, so it is never only commands.
+        const want = p.notesOnly ? 12 : 6;
+        if (recent.length >= want) return recent.slice(0, want);
         const seen = new Set(recent.map((n) => n.id));
-        return [...recent, ...(await s.listNotes({ limit: 12 })).filter((n) => !seen.has(n.id))].slice(0, 12);
+        const edited = (await s.listNotes({ limit: want + 4 })).filter((n) => !seen.has(n.id));
+        return [...recent, ...edited].slice(0, want);
       }
       const [byTitle, byWords] = await Promise.all([s.findNotes(text, 8), s.searchNotes(text, 12)]);
       const seen = new Set(byTitle.map((n) => n.id));

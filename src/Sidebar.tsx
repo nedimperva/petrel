@@ -10,6 +10,7 @@ import FacePicker from "./library/FacePicker";
 import Mark, { faces, loadFaces, saveFace } from "./library/Mark";
 import { toCopy } from "./library/faces";
 import { folderName, Kbd, say } from "./ui";
+import { keyLabel } from "./keys";
 
 export type Place = "today" | "inbox" | "tasks" | "all" | `c:${string}` | null;
 
@@ -199,7 +200,7 @@ export default function Sidebar(p: {
           <path d="M12 5v14M5 12h14" />
         </svg>
         New note
-        <Kbd keys="Ctrl N" />
+        <Kbd keys={keyLabel("new")} />
       </button>
 
       <div class="side-group">

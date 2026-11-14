@@ -4,7 +4,7 @@
 
 import { createResource, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { api, errText, type AiStatus, type DesktopSettings } from "../api";
-import { comboOf, conflicts, customKeys, hyprBind, keyOf, platform, setCustomKeys, SHORTCUTS, typesCharacter, type Shortcut } from "../keys";
+import { comboOf, conflicts, customKeys, hyprBind, keyOf, platform, setCustomKeys, setSystemKeys, SHORTCUTS, typesCharacter, type Shortcut } from "../keys";
 import { keyChips } from "../Shortcuts";
 import { Kbd, say } from "../ui";
 import { tick } from "../joy/sound";
@@ -138,7 +138,9 @@ export default function Settings(p: { section?: Section | "all"; onClose(): void
     setListening(null);
     if (s.global && systemBinds()) {
       try {
-        setDesk(await (await api()).setHotkey(s.global, combo));
+        const d = await (await api()).setHotkey(s.global, combo);
+        setDesk(d);
+        setSystemKeys({ capture: d.hotkey, picker: d.pickerHotkey });
       } catch (e) {
         say(errText(e), { error: true });
       }

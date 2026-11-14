@@ -22,11 +22,11 @@ import { parseLinks } from "../notes/parse";
 import { createNoteSaver, type NoteSaver, type SaveState } from "../notes/saver";
 import { prefs } from "../settings/prefs";
 import { wordCount } from "../copy";
-import { folderName, KeyHints, say } from "../ui";
+import { folderName, Kbd, KeyHints, say } from "../ui";
 import { rank } from "../palette/match";
-import { keyOf, matches } from "../keys";
+import { keyLabel, matches } from "../keys";
 
-const chips = (id: string) => keyOf(id).replace(/\+/g, " ");
+const chips = keyLabel;
 import { aiPreview, keepPreview, previewOf, setPreview, type Preview } from "./aiPreview";
 import { currentHeading, outline, type Heading } from "./outline";
 import { EditorView } from "@codemirror/view";
@@ -821,7 +821,7 @@ export default function NotePage(p: Props) {
               <section aria-label="Captured today">
                 <h4>Captured today</h4>
                 <p class="muted small">
-                  {k()} in the inbox. <kbd>Ctrl L</kbd> to file them.
+                  {k()} in the inbox. <Kbd keys={keyLabel("library")} /> to file them.
                 </p>
               </section>
             )}
