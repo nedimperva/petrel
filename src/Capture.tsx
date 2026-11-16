@@ -6,7 +6,8 @@
 // to it; pasted HTML comes in as Markdown.
 //
 // Keep going: opened again within two minutes of the last capture, the window adds the new text under it, in the
-// same file. The old text is folded away behind a line at the top that names it (click it to see it, faded). Ctrl
+// same file. The old text is folded away behind a line at the top that shows its last line, where the new words
+// follow (click it to see it all, faded). Ctrl
 // Enter makes the new text a capture of its own instead.
 //
 // Ctrl D sends it to today's page and back to the inbox, as Ctrl D opens today's page in the main window. The line
@@ -44,6 +45,19 @@ const LAST = "ui.capture.last";
 async function places(): Promise<string[]> {
   const fs = await (await api()).noteFolders();
   return fs.map((f) => f.path).filter((f) => !f.includes("/") && f !== "inbox" && f !== "journal" && !f.startsWith("."));
+}
+
+/** The last line with words in it, where the new text will follow: a quote's `> ` and a task's box taken off. */
+function lastLine(text: string): string {
+  const lines = text
+    .split("\n")
+    .map((l) => l.trim().replace(/^>\s?/, "").replace(/^([-*+]|\d+[.)])\s+(\[[ xX]\]\s+)?/, ""))
+    .filter((l) => /[\p{L}\p{N}]/u.test(l) && l !== "_from capture_");
+  const last = lines.length ? lines[lines.length - 1] : titleLine(text);
+  // A long line shows its end, the words the new text follows.
+  if (last.length <= 64) return last;
+  const tail = last.slice(-64);
+  return `…${tail.slice(tail.indexOf(" ") + 1)}`;
 }
 
 /** Where the last capture's text ends; it is drawn faded and follows edits made before it. */
@@ -477,9 +491,9 @@ export default function Capture() {
             <path d="M4 4v7a4 4 0 0 0 4 4h12" />
             <path d="m15 10 5 5-5 5" />
           </svg>
-          <span data-tauri-drag-region>Adding to</span>
+          <span data-tauri-drag-region>Adding after</span>
           <button class="cap-top-text" title={earlierShown() ? "Fold it away" : "Show it"} aria-expanded={earlierShown()} onClick={() => showEarlier(!earlierShown())}>
-            {titleLine(earlier() ?? "")}
+            {lastLine(earlier() ?? "")}
           </button>
           <span class="grow" data-tauri-drag-region />
           <Kbd keys={keyLabel("capNew")} />

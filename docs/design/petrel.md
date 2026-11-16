@@ -119,8 +119,9 @@ Page: https://claude.ai/artifact/Kan675aYKsn9pvSgDMGRqq. Built: 1, 2, 4–12, 14
   not today; a date more than a month gone is next year's. A collection named like a day wins, except over
   `@today` (`dayWord` in `src/journal/days.ts`).
 - **Keep going.** The capture window opened again within two minutes of the last capture adds the new text under
-  it, in the same file (`ui.capture.last`). The old text is folded behind a line at the top, "Adding to …" (click
-  it to see it faded). `Ctrl Enter` makes the new text its own capture.
+  it, in the same file (`ui.capture.last`). The old text is folded behind a line at the top, "Adding after" and its
+  last line (click it to see it all, faded). On a day's page, a task typed or made after the time (`07:14 [] `,
+  Ctrl Shift X) puts the time on its own line above the task, since a task only counts at the start of a line. `Ctrl Enter` makes the new text its own capture.
 - **Today from capture.** `Ctrl D` in the capture window sends it to today's page and back to the inbox, as
   `Ctrl D` opens today's page in the main window. The line at the top shows the page's last entry.
 - **A quiet bar.** Under the text: the place, a dot for saved, `Esc`, and `?` for the window's keys. Nothing else.
