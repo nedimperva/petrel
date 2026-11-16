@@ -15,7 +15,7 @@ import { toggleTask } from "../editor/commands";
 import { createEditor, type EditorHandle } from "../editor/editor";
 import { cleanPaste } from "../editor/paste";
 import { pictureExtensions } from "../editor/pictures";
-import { addDays, clock, dayTitle, isDayNote, JOURNAL, monthGrid, today } from "../journal/days";
+import { addDays, clock, dayTitle, dueOf, isDayNote, JOURNAL, monthGrid, today } from "../journal/days";
 import { dayExtensions } from "../journal/stamps";
 import { linkExtensions } from "../notes/links";
 import { parseLinks } from "../notes/parse";
@@ -152,6 +152,8 @@ export default function NotePage(p: Props) {
 
   // On today's page: tasks still open on earlier days' pages, and how many captures came in today.
   const [carried, setCarried] = createSignal<OpenTask[]>([]);
+  /** Tasks in any note due today or before (`@fri`, `@nov20`), for today's margin. */
+  const [dueNow, setDueNow] = createSignal<{ t: OpenTask; due: string }[]>([]);
   const [capturedToday, setCapturedToday] = createSignal(0);
   createEffect(
     on(
@@ -166,6 +168,15 @@ export default function NotePage(p: Props) {
               .sort((a, b) => b.title.localeCompare(a.title) || a.line - b.line)
               .slice(0, 8),
           );
+          const written = (t: OpenTask) => (t.folder === JOURNAL && /^\d{4}-\d{2}-\d{2}$/.test(t.title) ? new Date(`${t.title}T12:00`) : new Date(t.modifiedAt));
+          setDueNow(
+            tasks
+              .filter((t) => !(t.folder === JOURNAL && t.title === today()))
+              .map((t) => ({ t, due: dueOf(t.text, written(t)) ?? "" }))
+              .filter((x) => x.due && x.due <= today())
+              .sort((a, b) => a.due.localeCompare(b.due))
+              .slice(0, 8),
+          );
           const start = new Date();
           start.setHours(0, 0, 0, 0);
           setCapturedToday(inbox.filter((n) => n.modifiedAt >= start.getTime()).length);
@@ -173,6 +184,20 @@ export default function NotePage(p: Props) {
       },
     ),
   );
+  /** A task from an earlier day comes onto today's page: out of its note, onto the end of this one. */
+  async function bringHere(t: OpenTask) {
+    try {
+      const s = await api();
+      const tok = await s.takeTask(t.noteId, t.line, t.text);
+      setCarried(carried().filter((x) => x !== t));
+      setDueNow(dueNow().filter((x) => x.t !== t));
+      editor?.insert(`- [ ] ${t.text}`, false);
+      say(`Moved here from ${t.folder === JOURNAL ? dayTitle(t.title) : t.title}`, { undo: () => s.undo(tok.token) });
+    } catch (e) {
+      say(errText(e), { error: true });
+    }
+  }
+
   async function tickCarried(t: OpenTask) {
     try {
       const s = await api();
@@ -210,7 +235,17 @@ export default function NotePage(p: Props) {
         // Today's empty page starts with the time; it is not a file until something is written after it.
         if (p.day === today()) editor?.load(`${clock()} `, 6);
         editor?.view.focus();
-      } else titleInput?.focus();
+      } else {
+        // A collection with a template: the page starts from it, today and the time filled in. It is not a file
+        // until something is written.
+        const folder = p.folder;
+        const t = folder && folder !== "inbox" ? await (await api()).collectionTemplate(folder).catch(() => "") : "";
+        if (t && note() === null && editor && !editor.text()) {
+          const text = fill(t, { today: todayText(), date: todayText(), time: clock() });
+          editor.load(text, text.length);
+        }
+        titleInput?.focus();
+      }
       return;
     }
     try {
@@ -657,6 +692,7 @@ export default function NotePage(p: Props) {
 
   createEffect(() => editor?.setTypewriter(prefs().typewriter));
   createEffect(() => editor?.setFocusMode(prefs().focus));
+  createEffect(() => editor?.setQuietMarks(prefs().quietMarks));
   createEffect(on(() => note()?.id ?? null, (id) => p.onNoteId?.(id)));
   createEffect(() => {
     const d = dayPage();
@@ -849,7 +885,27 @@ export default function NotePage(p: Props) {
                     <button type="button" class="carried-day" onClick={() => p.onDay?.(t.title)} title={`Open ${dayTitle(t.title)}`}>
                       {new Date(`${t.title}T12:00`).toLocaleDateString(undefined, { weekday: "short" })}
                     </button>
+                    <button type="button" class="carried-bring" onClick={(e) => (e.preventDefault(), void bringHere(t))} title="Move it onto today's page">
+                      ↓ here
+                    </button>
                   </label>
+                )}
+              </For>
+            </section>
+          </Show>
+          <Show when={dayPage() === today() && dueNow().length}>
+            <section class="day-carried" aria-label="Due today">
+              <h4>Due</h4>
+              <For each={dueNow()}>
+                {(x) => (
+                  <div class="carried-row">
+                    <span class="carried-text" classList={{ overdue: x.due < today() }}>
+                      {x.t.text}
+                    </span>
+                    <button type="button" class="carried-day" onClick={() => p.onOpen(x.t.noteId)} title={`Open ${x.t.title}`}>
+                      {x.due < today() ? dayTitle(x.due) : x.t.folder === JOURNAL ? dayTitle(x.t.title) : x.t.title.slice(0, 16)}
+                    </button>
+                  </div>
                 )}
               </For>
             </section>

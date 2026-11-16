@@ -335,6 +335,8 @@ export interface Api {
   readClipboard(): Promise<string>;
   openTasks(): Promise<OpenTask[]>;
   tickTask(id: number, line: number, text: string): Promise<UndoToken>;
+  /** Takes an open task out of its note, to be written on today's page. */
+  takeTask(id: number, line: number, text: string): Promise<UndoToken>;
   conflicts(): Promise<Conflict[]>;
   /** A new collection; returns its path. */
   createFolder(folder: string): Promise<string>;
@@ -359,6 +361,9 @@ export interface Api {
   notesHaving(what: "link" | "picture" | "task"): Promise<number[]>;
   topicFaces(): Promise<Record<string, TopicFace>>;
   setTopicFace(top: string, face: TopicFace): Promise<TopicFace>;
+  /** What a new note in this folder's collection starts with ("" for nothing). */
+  collectionTemplate(folder: string): Promise<string>;
+  setCollectionTemplate(top: string, text: string): Promise<void>;
   /** Writes a pasted picture next to notes in `folder`; returns the link (`attachments/<name>`). */
   saveAttachment(folder: string, name: string, bytes: Uint8Array): Promise<string>;
   /** A picture's bytes, for a note in `folder` linking `link`. */
@@ -465,6 +470,7 @@ async function tauriApi(): Promise<Api> {
     readClipboard: () => invoke("read_clipboard"),
     openTasks: () => invoke("open_tasks"),
     tickTask: (id, line, text) => invoke("tick_task", { id, line, text }),
+    takeTask: (id, line, text) => invoke("take_task", { id, line, text }),
     conflicts: () => invoke("conflicts"),
     createFolder: (folder) => invoke("create_folder", { folder }),
     renameFolder: (folder, name) => invoke("rename_folder", { folder, name }),
@@ -480,6 +486,8 @@ async function tauriApi(): Promise<Api> {
     notesBetween: (from, to) => invoke("notes_between", { from, to }),
     notesHaving: (what) => invoke("notes_having", { what }),
     topicFaces: () => invoke("topic_faces"),
+    collectionTemplate: (folder) => invoke("collection_template", { folder }),
+    setCollectionTemplate: (top, text) => invoke("set_collection_template", { top, text }),
     setTopicFace: (top, face) => invoke("set_topic_face", { top, color: face.color, mark: face.mark, copy: face.copy ?? "" }),
     saveAttachment: (folder, name, bytes) =>
       invoke("save_attachment", bytes, {

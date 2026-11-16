@@ -13,7 +13,7 @@ import Sidebar, { type Place } from "./Sidebar";
 import { loadLibrary } from "./library/data";
 import NotePage, { type NotePageHandle } from "./note/NotePage";
 import CommandBar, { type Command } from "./palette/CommandBar";
-import { applyPrefs, changePref, parsePrefs, prefs, setPrefs } from "./settings/prefs";
+import { applyPrefs, changePref, parsePrefs, prefs, setPrefs, stepSize } from "./settings/prefs";
 import { watchQuiet } from "./note/quiet";
 import UpdateNotice from "./UpdateNotice";
 import { setBeforeInstall, watchUpdates } from "./updates";
@@ -434,6 +434,12 @@ export default function App() {
       void openDay(addDays(onDay()!, e.key === "ArrowLeft" ? -1 : 1));
     }
     else if (matches(e, "copyMd") && onNote()) void copy("markdown");
+    else if (mod && !e.altKey && ["=", "+", "-", "_"].includes(e.key) && view().kind === "note") {
+      // Bigger or smaller type, as in a browser; the keyboard's own + and - work too.
+      const size = stepSize(prefs().editorSize, e.key === "-" || e.key === "_" ? -1 : 1);
+      void changePref("editorSize", size, async (k, v) => (await api()).setUiSetting(k, v));
+      say(`Type ${size} px`);
+    }
     else if (e.key === "Escape" && view().kind === "library" && !reviewing()) {
       if (document.querySelector(".scrim")) return;
       void writing();

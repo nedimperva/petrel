@@ -124,3 +124,22 @@ export function dayOptions(typed: string, now = new Date()): { word: string; day
   if (exact) out.push({ word: typed, day: exact });
   return w ? out.slice(0, 4) : out.slice(0, 2);
 }
+
+/** The day a task is due: an `@word` in it that names a day (`@fri`, `@nov20`, `@2026-11-20`, `@tomorrow`). A
+ * weekday or "tomorrow" counts from `written`: the day of the page it is on, or when its note last changed. */
+export function dueOf(text: string, written: Date): string | null {
+  for (const m of text.matchAll(/(?:^|\s)@([\p{L}\d-]+)/gu)) {
+    const d = dayWord(m[1], written);
+    if (d) return d;
+  }
+  return null;
+}
+
+export type DueGroup = "overdue" | "today" | "week" | "later";
+
+/** Where a due day falls from `today`: before it, on it, in the next six days, or after. */
+export function dueGroup(due: string, today: string): DueGroup {
+  if (due < today) return "overdue";
+  if (due === today) return "today";
+  return due <= addDays(today, 6) ? "week" : "later";
+}

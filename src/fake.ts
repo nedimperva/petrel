@@ -39,6 +39,7 @@ export function fakeApi(): Api {
   const lower = (s: string) => s.trim().toLowerCase();
   const pathOf = (folder: string, title: string) => (folder ? `${folder}/${title}.md` : `${title}.md`);
   const wait = <T>(v: T, ms = 0) => new Promise<T>((r) => setTimeout(() => r(v), ms));
+  const templates = new Map<string, string>([["Journal", ""]]);
   let aiModels: [string, string] = ["claude-opus-5-5", "claude-haiku-5-5"];
   const aiStopped = new Set<string>();
   /** Sends a reply a few words at a time, as the real one streams. */
@@ -252,6 +253,8 @@ export function fakeApi(): Api {
         .filter(([path]) => path !== "")
         .map(([path, c]) => ({ path, name: path.split("/").pop() || "Notes", depth: path.split("/").length - 1, count: c }));
     },
+    collectionTemplate: async (folder) => templates.get(folder.split("/")[0]) ?? "",
+    setCollectionTemplate: async (top, text) => void (text.trim() ? templates.set(top, text) : templates.delete(top)),
     sidebarCounts: async () => {
       const all = [...notes.values()];
       return {
@@ -359,6 +362,16 @@ export function fakeApi(): Api {
       if (!lines[line]?.includes(`[ ] ${text}`)) throw new Error(`that task changed in ${n.title}; open the note to tick it`);
       const before = n.body;
       lines[line] = lines[line].replace("[ ]", "[x]");
+      n.body = lines.join("\n");
+      n.modifiedAt = Date.now();
+      return token(() => (n.body = before));
+    },
+    takeTask: async (id, line, text) => {
+      const n = get(id);
+      const lines = n.body.split("\n");
+      if (!lines[line]?.includes(`[ ] ${text}`)) throw new Error(`that task changed in ${n.title}; open the note to move it`);
+      const before = n.body;
+      lines.splice(line, 1);
       n.body = lines.join("\n");
       n.modifiedAt = Date.now();
       return token(() => (n.body = before));

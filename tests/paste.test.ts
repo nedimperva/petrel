@@ -2,8 +2,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { htmlToMarkdown, MEANINGFUL, type HNode } from "../src/editor/paste.ts";
-import { dayOptions, dayWord } from "../src/journal/days.ts";
+import { htmlToMarkdown, linkOver, MEANINGFUL, type HNode } from "../src/editor/paste.ts";
+import { dayOptions, dayWord, dueGroup, dueOf } from "../src/journal/days.ts";
 import { pickRoute } from "../src/inbox/route.ts";
 
 /** A tiny element tree: `el("p", {}, "text", el("b", {}, "bold"))`. */
@@ -76,4 +76,24 @@ test("day words", () => {
   assert.deepEqual(pickRoute("call the dentist @fri", ["Recipes"], [], days)?.route, { kind: "day", date: "2026-11-13" });
   assert.deepEqual(pickRoute("ideas @sat", ["Sat"], [], days)?.route, { kind: "folder", folder: "Sat" });
   assert.deepEqual(pickRoute("ideas @today", ["Today"], [], days)?.route, { kind: "day", date: "2026-11-11" });
+});
+
+test("a link pasted over words wraps them", () => {
+  assert.equal(linkOver("the book", "https://x.example/b\n"), "[the book](https://x.example/b)");
+  assert.equal(linkOver("the book", "not a link"), null);
+  assert.equal(linkOver("", "https://x.example"), null);
+  assert.equal(linkOver("https://a.example", "https://x.example"), null);
+  assert.equal(linkOver("two\nlines", "https://x.example"), null);
+});
+
+test("a task's @day is its due day", () => {
+  const mon = new Date(2026, 10, 16, 9);
+  assert.equal(dueOf("call the bank @fri", mon), "2026-11-20");
+  assert.equal(dueOf("@nov25 send the forms", mon), "2026-11-25");
+  assert.equal(dueOf("mail amra@example.com", mon), null);
+  assert.equal(dueOf("no day here", mon), null);
+  assert.equal(dueGroup("2026-11-15", "2026-11-16"), "overdue");
+  assert.equal(dueGroup("2026-11-16", "2026-11-16"), "today");
+  assert.equal(dueGroup("2026-11-22", "2026-11-16"), "week");
+  assert.equal(dueGroup("2026-11-23", "2026-11-16"), "later");
 });

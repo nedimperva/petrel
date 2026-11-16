@@ -1,10 +1,17 @@
-// Open tasks: every unticked `- [ ]` in every note (the engine reads them all, not only recent ones), grouped by
-// note, the most recently changed first. x ticks one in its file (z or the toast puts it back), Enter opens the
+// Open tasks: every unticked `- [ ]` in every note (the engine reads them all, not only recent ones). Tasks with a
+// day (`@fri`, `@nov20`) come first, under Overdue, Today, This week and Later; the rest are grouped by note, the
+// most recently changed first. x ticks one in its file (z or the toast puts it back), Enter opens the
 // note, typing narrows the list.
 
 import { createMemo, createSignal, For, onMount, Show } from "solid-js";
 import { api, errText, type OpenTask } from "../api";
 import { folderName, KeyHints, say } from "../ui";
+import { dayTitle, dueGroup, dueOf, JOURNAL, today, type DueGroup } from "../journal/days";
+
+const GROUPS: Record<DueGroup, string> = { overdue: "Overdue", today: "Today", week: "This week", later: "Later" };
+
+/** When a task was written, for its weekday words: the day of its page, or when its note last changed. */
+const writtenOn = (t: OpenTask) => (t.folder === JOURNAL && /^\d{4}-\d{2}-\d{2}$/.test(t.title) ? new Date(`${t.title}T12:00`) : new Date(t.modifiedAt));
 
 export default function Tasks(p: { onClose(): void; onOpen(id: number): void; onTicked(noteId: number): void }) {
   let input!: HTMLInputElement;
@@ -25,17 +32,25 @@ export default function Tasks(p: { onClose(): void; onOpen(id: number): void; on
     void load();
   });
 
+  const due = (t: OpenTask) => dueOf(t.text, writtenOn(t));
+  /** Dated tasks first, soonest first; then the rest in the engine's order (newest note first). */
   const shown = createMemo(() => {
     const words = q().toLowerCase().split(/\s+/).filter(Boolean);
-    return (tasks() ?? []).filter((t) => words.every((w) => `${t.text} ${t.title} ${t.folder}`.toLowerCase().includes(w)));
+    const all = (tasks() ?? []).filter((t) => words.every((w) => `${t.text} ${t.title} ${t.folder}`.toLowerCase().includes(w)));
+    const dated = all.filter((t) => due(t)).sort((a, b) => due(a)!.localeCompare(due(b)!));
+    return [...dated, ...all.filter((t) => !due(t))];
   });
-  /** Rows by note, in the order the engine gave (newest note first). */
+  /** Rows under a day group (Overdue, Today…) or, without a day, under their note. */
   const groups = createMemo(() => {
-    const out: { noteId: number; title: string; folder: string; rows: { t: OpenTask; k: number }[] }[] = [];
+    const now = today();
+    const out: { key: string; noteId: number | null; title: string; folder: string; rows: { t: OpenTask; k: number }[] }[] = [];
     shown().forEach((t, k) => {
+      const d = due(t);
+      const key = d ? dueGroup(d, now) : `n${t.noteId}`;
       const last = out[out.length - 1];
-      if (last?.noteId === t.noteId) last.rows.push({ t, k });
-      else out.push({ noteId: t.noteId, title: t.title, folder: t.folder, rows: [{ t, k }] });
+      if (last?.key === key) last.rows.push({ t, k });
+      else if (d) out.push({ key, noteId: null, title: GROUPS[key as DueGroup], folder: "", rows: [{ t, k }] });
+      else out.push({ key, noteId: t.noteId, title: t.title, folder: t.folder, rows: [{ t, k }] });
     });
     return out;
   });
@@ -87,10 +102,19 @@ export default function Tasks(p: { onClose(): void; onOpen(id: number): void; on
           <For each={groups()}>
             {(g) => (
               <section class="task-group">
-                <button class="task-note" onClick={() => (p.onClose(), p.onOpen(g.noteId))}>
-                  <span>{g.folder === "inbox" ? "A capture" : g.title}</span>
-                  <span class="row-sub">{folderName(g.folder)}</span>
-                </button>
+                <Show
+                  when={g.noteId !== null}
+                  fallback={
+                    <h4 class="task-due" classList={{ overdue: g.key === "overdue" }}>
+                      {g.title}
+                    </h4>
+                  }
+                >
+                  <button class="task-note" onClick={() => (p.onClose(), p.onOpen(g.noteId!))}>
+                    <span>{g.folder === "inbox" ? "A capture" : g.title}</span>
+                    <span class="row-sub">{folderName(g.folder)}</span>
+                  </button>
+                </Show>
                 <For each={g.rows}>
                   {(r) => (
                     <div class="palette-row task-row" classList={{ on: r.k === i() }} onMouseMove={() => setI(r.k)}>
@@ -98,6 +122,11 @@ export default function Tasks(p: { onClose(): void; onOpen(id: number): void; on
                       <span class="row-label" onClick={() => (p.onClose(), p.onOpen(r.t.noteId))}>
                         {r.t.text}
                       </span>
+                      <Show when={g.noteId === null}>
+                        <span class="row-sub">
+                          {dayTitle(due(r.t)!)} · {r.t.folder === "inbox" ? "a capture" : r.t.title}
+                        </span>
+                      </Show>
                     </div>
                   )}
                 </For>

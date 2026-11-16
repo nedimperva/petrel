@@ -341,6 +341,22 @@ pub async fn set_topic_face(
     with(&state, |s| s.set_topic_face(&top, &color, &mark, copy.as_deref().unwrap_or("")))
 }
 
+/// Takes an open task out of its note, to be written on today's page.
+#[tauri::command]
+pub async fn take_task(state: State<'_, AppState>, id: i64, line: usize, text: String) -> R<UndoToken> {
+    with(&state, |s| s.take_task(id, line, &text))
+}
+
+#[tauri::command]
+pub async fn collection_template(state: State<'_, AppState>, folder: String) -> R<String> {
+    with(&state, |s| s.collection_template(&folder))
+}
+
+#[tauri::command]
+pub async fn set_collection_template(state: State<'_, AppState>, top: String, text: String) -> R<()> {
+    with(&state, |s| s.set_collection_template(&top, &text))
+}
+
 /// A pasted picture, sent as raw bytes (a JSON array would be several times bigger). The folder and the file
 /// name come in headers, percent-encoded: a header carries ASCII only.
 #[tauri::command]

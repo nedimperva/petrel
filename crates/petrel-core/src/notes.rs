@@ -1539,6 +1539,48 @@ impl Store {
         Ok(TopicFace { color, mark, copy })
     }
 
+    /// What a new note in `folder`'s collection starts with: the `template:` line of its top folder's `.petrel`
+    /// (newlines written as `\n`). Empty when it has none.
+    pub fn collection_template(&self, folder: &str) -> Result<String> {
+        let root = self.root()?;
+        let top = clean_folder(folder);
+        let top = top.split('/').next().unwrap_or("");
+        if top.is_empty() {
+            return Ok(String::new());
+        }
+        let text = std::fs::read_to_string(abs(&root, top).join(FACE_FILE)).unwrap_or_default();
+        Ok(text
+            .lines()
+            .find_map(|l| l.strip_prefix("template:"))
+            .map(|v| unescape_line(v.trim_start()))
+            .unwrap_or_default())
+    }
+
+    /// Sets (or with empty text removes) a collection's template; the other lines of `.petrel` are kept.
+    pub fn set_collection_template(&mut self, top: &str, text: &str) -> Result<()> {
+        let root = self.root()?;
+        let top = clean_folder(top);
+        if top.is_empty() || top.contains('/') || top == INBOX_DIR {
+            bail!("only a collection (a top folder) has a template");
+        }
+        let dir = abs(&root, &top);
+        if !dir.is_dir() {
+            bail!("there is no folder called {top}");
+        }
+        let path = dir.join(FACE_FILE);
+        let old = std::fs::read_to_string(&path).unwrap_or_default();
+        let mut lines: Vec<String> =
+            old.lines().filter(|l| !l.starts_with("template:")).map(str::to_string).collect();
+        if lines.is_empty() {
+            lines.push("# Petrel: how this collection looks in the library.".into());
+        }
+        let text = text.trim_end();
+        if !text.is_empty() {
+            lines.push(format!("template: {}", escape_line(text)));
+        }
+        write_atomic(&path, &(lines.join("\n") + "\n"))
+    }
+
     /// A note's saved versions, newest first (the history panel).
     pub fn note_versions(&self, id: i64) -> Result<Vec<NoteVersion>> {
         // Versions made on another computer arrive as files; read them in first.
@@ -2210,6 +2252,28 @@ fn face_word(s: &str) -> Result<String> {
     Ok(s)
 }
 
+/// A text on one line of `.petrel`: `\` as `\\`, a newline as `\n`.
+fn escape_line(text: &str) -> String {
+    text.replace('\\', "\\\\").replace('\r', "").replace('\n', "\\n")
+}
+
+fn unescape_line(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut chars = line.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('n') => out.push('\n'),
+            Some(o) => out.push(o),
+            None => out.push('\\'),
+        }
+    }
+    out
+}
+
 fn parse_face(text: &str) -> FaceLines {
     let mut f = FaceLines::default();
     for line in text.lines() {
@@ -2351,6 +2415,24 @@ mod tests {
         let d = std::env::temp_dir().join(format!("petrel-notes-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    #[test]
+    fn a_collection_template_round_trips() {
+        let dir = tmp();
+        let mut s = store_in(&dir);
+        s.create_note("Meetings", "First", "x\n", &[]).unwrap();
+        s.set_topic_face("Meetings", "teal", "", "").unwrap();
+        let t = "# {{today}} meeting\n\n## Who\n\nC:\\path";
+        s.set_collection_template("Meetings", t).unwrap();
+        assert_eq!(s.collection_template("Meetings/2026").unwrap(), t);
+        // The look is kept, and the look keeps the template.
+        s.set_topic_face("Meetings", "rose", "", "").unwrap();
+        assert_eq!(s.collection_template("Meetings").unwrap(), t);
+        assert_eq!(s.topic_faces().unwrap()["Meetings"].color, "rose");
+        s.set_collection_template("Meetings", "").unwrap();
+        assert_eq!(s.collection_template("Meetings").unwrap(), "");
+        assert_eq!(s.collection_template("").unwrap(), "");
     }
 
     #[test]
