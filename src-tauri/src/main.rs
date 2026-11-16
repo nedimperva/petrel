@@ -9,6 +9,7 @@ mod drive;
 mod google;
 mod hypr;
 mod notes;
+mod paste;
 mod sync;
 mod tray;
 mod warm;
@@ -360,7 +361,6 @@ fn main() {
                 log::error!("cannot open {}: {e:#}", path.display());
                 e
             })?;
-            sweep(&mut store);
             export_drafts(&mut store, &path);
             log::info!("Petrel {} · {}", env!("CARGO_PKG_VERSION"), path.display());
             let args: Vec<String> = std::env::args().collect();
@@ -415,13 +415,18 @@ fn main() {
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.set_decorations(true);
             }
-            // Petrel can stay open for weeks; the version policies still apply.
+            // Housekeeping a minute after start, off the way of the first window (it thins note histories in the
+            // folder too), then daily: Petrel can stay open for weeks.
             let handle = app.handle().clone();
-            std::thread::spawn(move || loop {
-                std::thread::sleep(SWEEP_EVERY);
-                let state = handle.state::<AppState>();
-                let Ok(mut store) = state.store.lock() else { return };
-                sweep(&mut store);
+            std::thread::spawn(move || {
+                let mut wait = std::time::Duration::from_secs(60);
+                loop {
+                    std::thread::sleep(wait);
+                    wait = SWEEP_EVERY;
+                    let state = handle.state::<AppState>();
+                    let Ok(mut store) = state.store.lock() else { return };
+                    sweep(&mut store);
+                }
             });
             if app.state::<AppState>().tray.load(Ordering::SeqCst) {
                 prewarm(app.handle());
@@ -445,8 +450,10 @@ fn main() {
             commands::capture_context,
             commands::open_picker_window,
             commands::close_picker,
+            paste::paste_into_front,
             warm::window_ready,
             sync::sync_status,
+            sync::sync_log,
             sync::sync_setup,
             sync::sync_sign_in,
             sync::sync_sign_out,
@@ -466,6 +473,16 @@ fn main() {
             notes::find_notes,
             notes::search_notes,
             notes::note_folders,
+            notes::sidebar_counts,
+            notes::collection_template,
+            notes::take_task,
+            notes::set_collection_template,
+            notes::peek_notes,
+            notes::similar_notes,
+            notes::trash_items,
+            notes::trash_peek,
+            notes::trash_restore,
+            notes::trash_empty,
             notes::open_note,
             notes::peek_note,
             notes::create_note,
@@ -513,6 +530,8 @@ fn main() {
             ai::ai_suggest_home,
             ai::ai_related,
             ai::ai_week,
+            ai::ai_cancel,
+            ai::set_ai_models,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Petrel")

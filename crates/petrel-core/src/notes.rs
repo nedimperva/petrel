@@ -28,13 +28,17 @@ use crate::store::{Folder, Store, UndoToken, VERSION_INTERVAL_MS};
 use crate::title;
 
 mod conflicts;
+pub mod fold;
 mod folders;
 pub mod history;
+pub mod passages;
 mod paths;
 mod tasks;
+pub mod trash;
 
 pub use conflicts::Conflict;
 pub use tasks::OpenTask;
+pub use trash::TrashItem;
 
 /// The setting that holds the notes folder.
 pub const ROOT_SETTING: &str = "notes.root";
@@ -840,25 +844,67 @@ impl Store {
         Ok(rows)
     }
 
-    /// `Ctrl P`: notes whose title holds `text`, those starting with it first, then the most recently opened.
+    /// `Ctrl P`, `[[` and Move to: notes whose title (or path) matches `text` the way Ctrl K matches commands,
+    /// with case, accents and one typo forgiven (`fold`). The best match first, then the most recently opened.
     pub fn find_notes(&self, text: &str, limit: usize) -> Result<Vec<NoteSummary>> {
-        let t = text.trim().to_lowercase().replace(['%', '_'], "");
+        if text.trim().is_empty() {
+            let mut stmt = self.conn.prepare_cached(
+                "SELECT id, path, folder, title, preview, tags, pinned, modified_at FROM notes \
+                 ORDER BY accessed_at DESC, modified_at DESC LIMIT ?1",
+            )?;
+            let rows = stmt.query_map(params![limit as i64], summary)?.collect::<rusqlite::Result<_>>()?;
+            return Ok(rows);
+        }
+        let all: Vec<(i64, String, String)> = {
+            let mut stmt = self.conn.prepare_cached(
+                "SELECT id, title, path FROM notes ORDER BY accessed_at DESC, modified_at DESC",
+            )?;
+            let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        let q = fold::fold(text.trim());
+        let mut hits: Vec<(f64, usize, i64)> = all
+            .iter()
+            .enumerate()
+            .filter_map(|(i, (id, title, path))| {
+                let t = fold::score(text, title);
+                // A path holds the folder: "travel rome" finds Travel/Rome.md, but below any title match.
+                let p = if t == 0.0 && fold::fold(path).contains(&q) { 5.0 } else { 0.0 };
+                let s = t.max(p);
+                (s > 0.0).then_some((s, i, *id))
+            })
+            .collect();
+        // Best first; equal scores keep the order of last opened.
+        hits.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+        // Letters merely found in order are a last resort: only when nothing better matched.
+        if hits.first().is_some_and(|h| h.0 >= 25.0) {
+            hits.retain(|h| h.0 >= 25.0 || h.0 == 5.0);
+        }
+        hits.truncate(limit);
+        let ids: Vec<i64> = hits.iter().map(|h| h.2).collect();
         let mut stmt = self.conn.prepare_cached(
-            "SELECT id, path, folder, title, preview, tags, pinned, modified_at FROM notes \
-             WHERE ?1 = '' OR lower(title) LIKE '%' || ?1 || '%' OR lower(path) LIKE '%' || ?1 || '%' \
-             ORDER BY (lower(title) LIKE ?1 || '%') DESC, accessed_at DESC, modified_at DESC LIMIT ?2",
+            "SELECT id, path, folder, title, preview, tags, pinned, modified_at FROM notes WHERE id IN rarray(?1)",
         )?;
-        let rows = stmt.query_map(params![t, limit as i64], summary)?.collect::<rusqlite::Result<_>>()?;
-        Ok(rows)
+        let found: Vec<NoteSummary> = stmt
+            .query_map(params![crate::store::id_array(&ids)], summary)?
+            .collect::<rusqlite::Result<_>>()?;
+        let mut out = Vec::with_capacity(found.len());
+        for id in ids {
+            if let Some(n) = found.iter().find(|n| n.id == id) {
+                out.push(n.clone());
+            }
+        }
+        Ok(out)
     }
 
-    /// Search the text of notes (the same box syntax as drafts' words, without filters).
+    /// Search the text of notes (the same box syntax as drafts' words, without filters), best match first:
+    /// bm25, with a word in the title worth four in the text.
     pub fn search_notes(&self, text: &str, limit: usize) -> Result<Vec<NoteSummary>> {
         let Some(q) = fts_words(text) else { return Ok(Vec::new()) };
         let mut stmt = self.conn.prepare_cached(
             "SELECT n.id, n.path, n.folder, n.title, n.preview, n.tags, n.pinned, n.modified_at \
              FROM notes_fts f JOIN notes n ON n.id = f.rowid WHERE notes_fts MATCH ?1 \
-             ORDER BY n.modified_at DESC LIMIT ?2",
+             ORDER BY bm25(notes_fts, 1.0, 4.0), n.modified_at DESC LIMIT ?2",
         )?;
         let rows = stmt.query_map(params![q, limit as i64], summary)?.collect::<rusqlite::Result<_>>()?;
         Ok(rows)
@@ -884,7 +930,77 @@ impl Store {
         ids.into_iter().map(|id| self.peek_note(id)).collect()
     }
 
+    /// The notes most about a question among `within` only (a filter in Ctrl K), best first. When the words
+    /// match fewer than `limit`, the rest of `within` follows in its order, so a question about a small
+    /// collection reads all of it.
+    pub fn notes_about_within(&self, question: &str, within: &[i64], limit: usize) -> Result<Vec<Note>> {
+        let set: HashSet<i64> = within.iter().copied().collect();
+        let mut ids: Vec<i64> = self
+            .notes_about(question, 400)?
+            .into_iter()
+            .map(|n| n.id)
+            .filter(|id| set.contains(id))
+            .take(limit)
+            .collect();
+        for &id in within {
+            if ids.len() >= limit {
+                break;
+            }
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+        ids.into_iter().map(|id| self.peek_note(id)).collect()
+    }
+
+    /// Notes that share the most telling words with this one, without AI: the note's most frequent words (its
+    /// title's count double), matched in the index, and kept only when a note has at least three of them.
+    pub fn similar_notes(&self, id: i64, limit: usize) -> Result<Vec<NoteSummary>> {
+        let note = self.peek_note(id)?;
+        let mut counts: HashMap<String, usize> = HashMap::new();
+        for w in passages::key_words(&note.title) {
+            *counts.entry(w).or_default() += 2;
+        }
+        for w in fold::fold(&note.body).split(|c: char| !c.is_alphanumeric()) {
+            if w.chars().count() > 3 && !STOP.contains(&w) && !w.chars().all(|c| c.is_ascii_digit()) {
+                *counts.entry(w.to_string()).or_default() += 1;
+            }
+        }
+        let mut words: Vec<(String, usize)> = counts.into_iter().collect();
+        words.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        let words: Vec<String> = words.into_iter().take(16).map(|(w, _)| w).collect();
+        if words.len() < 3 {
+            return Ok(Vec::new());
+        }
+        let q = words.iter().map(|w| format!("\"{w}\"*")).collect::<Vec<_>>().join(" OR ");
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT n.id, n.path, n.folder, n.title, n.preview, n.tags, n.pinned, n.modified_at, n.content \
+             FROM notes_fts f JOIN notes n ON n.id = f.rowid WHERE notes_fts MATCH ?1 AND n.id != ?2 \
+             ORDER BY bm25(notes_fts, 1.0, 4.0) LIMIT 24",
+        )?;
+        let rows: Vec<(NoteSummary, String)> = stmt
+            .query_map(params![q, id], |r| Ok((summary(r)?, r.get::<_, String>(8)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(rows
+            .into_iter()
+            .filter(|(n, body)| {
+                let text = fold::fold(&format!("{} {body}", n.title));
+                words.iter().filter(|w| text.contains(w.as_str())).count() >= 3
+            })
+            .map(|(n, _)| n)
+            .take(limit)
+            .collect())
+    }
+
     /// The folders that hold notes, and the folders above them, in tree order.
+    /// How many notes are right in `folder` ("" is the top of the folder).
+    pub fn count_notes_in(&self, folder: &str) -> Result<usize> {
+        let n: i64 =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM notes WHERE folder = ?1", params![folder], |r| r.get(0))?;
+        Ok(n as usize)
+    }
+
     pub fn note_folders(&self) -> Result<Vec<NoteFolder>> {
         let counts: Vec<(String, i64)> = self
             .conn
@@ -1085,6 +1201,7 @@ impl Store {
             n += 1;
         }
         rename_with_retry(&abs(root, rel), &target)?;
+        trash::note_place(root, &target.file_name().unwrap_or_default().to_string_lossy(), rel);
         self.conn.execute("DELETE FROM notes WHERE path = ?1", params![rel])?;
         Ok(target)
     }
@@ -1486,6 +1603,48 @@ impl Store {
         }
         write_atomic(&path, &(lines.join("\n") + "\n"))?;
         Ok(TopicFace { color, mark, copy })
+    }
+
+    /// What a new note in `folder`'s collection starts with: the `template:` line of its top folder's `.petrel`
+    /// (newlines written as `\n`). Empty when it has none.
+    pub fn collection_template(&self, folder: &str) -> Result<String> {
+        let root = self.root()?;
+        let top = clean_folder(folder);
+        let top = top.split('/').next().unwrap_or("");
+        if top.is_empty() {
+            return Ok(String::new());
+        }
+        let text = std::fs::read_to_string(abs(&root, top).join(FACE_FILE)).unwrap_or_default();
+        Ok(text
+            .lines()
+            .find_map(|l| l.strip_prefix("template:"))
+            .map(|v| unescape_line(v.trim_start()))
+            .unwrap_or_default())
+    }
+
+    /// Sets (or with empty text removes) a collection's template; the other lines of `.petrel` are kept.
+    pub fn set_collection_template(&mut self, top: &str, text: &str) -> Result<()> {
+        let root = self.root()?;
+        let top = clean_folder(top);
+        if top.is_empty() || top.contains('/') || top == INBOX_DIR {
+            bail!("only a collection (a top folder) has a template");
+        }
+        let dir = abs(&root, &top);
+        if !dir.is_dir() {
+            bail!("there is no folder called {top}");
+        }
+        let path = dir.join(FACE_FILE);
+        let old = std::fs::read_to_string(&path).unwrap_or_default();
+        let mut lines: Vec<String> =
+            old.lines().filter(|l| !l.starts_with("template:")).map(str::to_string).collect();
+        if lines.is_empty() {
+            lines.push("# Petrel: how this collection looks in the library.".into());
+        }
+        let text = text.trim_end();
+        if !text.is_empty() {
+            lines.push(format!("template: {}", escape_line(text)));
+        }
+        write_atomic(&path, &(lines.join("\n") + "\n"))
     }
 
     /// A note's saved versions, newest first (the history panel).
@@ -2159,6 +2318,28 @@ fn face_word(s: &str) -> Result<String> {
     Ok(s)
 }
 
+/// A text on one line of `.petrel`: `\` as `\\`, a newline as `\n`.
+fn escape_line(text: &str) -> String {
+    text.replace('\\', "\\\\").replace('\r', "").replace('\n', "\\n")
+}
+
+fn unescape_line(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut chars = line.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('n') => out.push('\n'),
+            Some(o) => out.push(o),
+            None => out.push('\\'),
+        }
+    }
+    out
+}
+
 fn parse_face(text: &str) -> FaceLines {
     let mut f = FaceLines::default();
     for line in text.lines() {
@@ -2209,7 +2390,7 @@ fn summary(r: &rusqlite::Row) -> rusqlite::Result<NoteSummary> {
 }
 
 /// Words too common to help find a note.
-const STOP: &[&str] = &[
+pub(crate) const STOP: &[&str] = &[
     "the", "and", "for", "are", "was", "what", "when", "where", "which", "who", "how", "why", "with", "that",
     "this", "have", "has", "had", "did", "does", "you", "your", "about", "from", "there", "their", "can",
     "could", "would", "should", "will", "into", "any", "all", "but", "not", "notes", "note", "my",
@@ -2220,7 +2401,14 @@ fn fts_words(text: &str) -> Option<String> {
     let words: Vec<String> = text
         .split(|c: char| !c.is_alphanumeric())
         .filter(|w| !w.is_empty())
-        .map(|w| format!("\"{w}\"*"))
+        .map(|w| {
+            let ways: Vec<String> = fold::spellings(w).iter().map(|s| format!("\"{s}\"*")).collect();
+            if ways.len() == 1 {
+                ways[0].clone()
+            } else {
+                format!("({})", ways.join(" OR "))
+            }
+        })
         .collect();
     (!words.is_empty()).then(|| words.join(" AND "))
 }
@@ -2293,6 +2481,59 @@ mod tests {
         let d = std::env::temp_dir().join(format!("petrel-notes-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    #[test]
+    fn a_collection_template_round_trips() {
+        let dir = tmp();
+        let mut s = store_in(&dir);
+        s.create_note("Meetings", "First", "x\n", &[]).unwrap();
+        s.set_topic_face("Meetings", "teal", "", "").unwrap();
+        let t = "# {{today}} meeting\n\n## Who\n\nC:\\path";
+        s.set_collection_template("Meetings", t).unwrap();
+        assert_eq!(s.collection_template("Meetings/2026").unwrap(), t);
+        // The look is kept, and the look keeps the template.
+        s.set_topic_face("Meetings", "rose", "", "").unwrap();
+        assert_eq!(s.collection_template("Meetings").unwrap(), t);
+        assert_eq!(s.topic_faces().unwrap()["Meetings"].color, "rose");
+        s.set_collection_template("Meetings", "").unwrap();
+        assert_eq!(s.collection_template("Meetings").unwrap(), "");
+        assert_eq!(s.collection_template("").unwrap(), "");
+    }
+
+    #[test]
+    fn bosnian_titles_and_text_are_found() {
+        let dir = tmp();
+        let mut s = store_in(&dir);
+        let a = s.create_note("", "Šta ima novo", "vijesti\n", &[]).unwrap();
+        let b = s.create_note("", "Ćevapi", "kod Đorđa u Baščaršiji\n", &[]).unwrap();
+        let c = s.create_note("", "Bread recipe", "flour, water, the word cevapi in passing\n", &[]).unwrap();
+        assert_eq!(s.find_notes("šta", 5).unwrap()[0].id, a.id);
+        assert_eq!(s.find_notes("sta", 5).unwrap()[0].id, a.id);
+        assert_eq!(s.find_notes("cevapi", 5).unwrap()[0].id, b.id);
+        assert_eq!(s.find_notes("recpie", 5).unwrap()[0].id, c.id);
+        let ids = |v: Vec<NoteSummary>| v.into_iter().map(|n| n.id).collect::<Vec<_>>();
+        assert_eq!(ids(s.search_notes("djordja", 5).unwrap()), vec![b.id]);
+        assert_eq!(ids(s.search_notes("Đorđa", 5).unwrap()), vec![b.id]);
+        // The title weighs more than a word in passing.
+        assert_eq!(ids(s.search_notes("cevapi", 5).unwrap()), vec![b.id, c.id]);
+    }
+
+    #[test]
+    fn similar_notes_share_telling_words() {
+        let dir = tmp();
+        let mut s = store_in(&dir);
+        let a = s
+            .create_note("", "Sourdough bread", "starter flour water salt starter overnight proof\n", &[])
+            .unwrap();
+        let b = s
+            .create_note("", "Bread log", "fed the starter, more flour and water, salt last\n", &[])
+            .unwrap();
+        let _c = s.create_note("", "Trip", "flour shop near the station\n", &[]).unwrap();
+        let near: Vec<i64> = s.similar_notes(a.id, 5).unwrap().into_iter().map(|n| n.id).collect();
+        assert_eq!(near, vec![b.id]);
+        let within = s.notes_about_within("starter", &[_c.id, b.id], 8).unwrap();
+        assert_eq!(within.iter().map(|n| n.id).collect::<Vec<_>>(), vec![b.id, _c.id]);
     }
 
     #[test]
@@ -2515,7 +2756,7 @@ mod tests {
         assert_eq!(s.peek(d.id).unwrap().folder, Folder::Inbox);
         assert!(s.promotion(d.id).unwrap().is_none());
         assert!(!dir.join("Projects/Notes in Petrel.md").exists());
-        assert!(std::fs::read_dir(dir.join(TRASH_DIR)).unwrap().count() == 1, "undo trashes, never deletes");
+        assert!(s.trash_items().unwrap().len() == 1, "undo trashes, never deletes");
         assert!(s.peek(linker.id).unwrap().content.contains("[[d:Notes in Petrel]]"));
 
         let journal = s.create_note("", "Journal", "Start.\n", &[]).unwrap();

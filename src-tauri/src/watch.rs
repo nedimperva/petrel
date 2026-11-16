@@ -28,7 +28,7 @@ pub fn start(app: &tauri::AppHandle, root: &Path) {
             return;
         }
         // A change in the folder goes to Drive soon (when sync is on; the sync thread decides).
-        crate::sync::nudge(&handle, false);
+        crate::sync::nudge_paths(&handle, paths.clone());
         let state = handle.state::<AppState>();
         let report = {
             let Ok(mut store) = state.store.lock() else { return };

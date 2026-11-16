@@ -1,15 +1,17 @@
 // Ctrl K: search or ask. Typing finds notes (by title first, then by words) and commands. A question (ending in
 // `?`, or the Ask row at the end of the list) asks Claude to answer from the notes, with the notes it used as cards to open.
-// Ctrl P opens the same bar on notes only. A few words narrow the notes found: `in:travel`, `pinned`, `today`,
-// `this week`, `has:link`, `has:picture`, `has:task` (palette/filters.ts). After an answer, Tab asks again: the
+// Ctrl P opens the same bar on notes only. A few words narrow the notes found: `in:travel`, `is:pinned`, `when:today`,
+// `when:week`, `has:link`, `has:picture`, `has:task` (palette/filters.ts). After an answer, Tab asks again: the
 // follow-up goes with the earlier answers and the same notes, and Ctrl Enter keeps the whole exchange as a note.
 
-import { createEffect, createResource, createSignal, For, onMount, Show } from "solid-js";
-import { api, errText, type AiAnswer, type AiSource, type NoteSummary } from "../api";
+import { createEffect, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { aiLive, api, errText, type AiAnswer, type AiSource, type NoteSummary } from "../api";
 import { answerHtml } from "../copy";
 import { ago, folderName, Kbd, say } from "../ui";
-import { keep, noFilters, parseFilters } from "./filters";
+import { acceptOffer, inFolder, keep, noFilters, parseFilters } from "./filters";
 import { rank } from "./match";
+import { jumpTo } from "../note/jump";
+import { usageLine } from "../ai/usage";
 
 export interface Command {
   id: string;
@@ -22,7 +24,13 @@ export interface Command {
 
 const escapeRe = (w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-type Row = { kind: "ask" } | { kind: "note"; n: NoteSummary } | { kind: "command"; c: Command };
+type Row = { kind: "ask" } | { kind: "note"; n: NoteSummary } | { kind: "command"; c: Command } | { kind: "new"; title: string; folder: string };
+
+/** An answer still being written, without the `Sources:` line it ends with. */
+/** Words that read as a question: they end in `?` or start like one. */
+const asks = (t: string) => /\?\s*$/.test(t) || /^(what|how|why|when|where|who|which|do|did|does|is|are|can|should|summari[sz]e|list|find)\b/i.test(t.trim());
+
+const unsourced = (t: string) => t.replace(/\n\s*\**Sources:[\s\S]*$/, "");
 
 export default function CommandBar(p: {
   commands: Command[];
@@ -31,16 +39,32 @@ export default function CommandBar(p: {
   /** The notes written on last, newest first: the list before anything is typed. */
   recent?: number[];
   aiReady: boolean;
+  /** Questions about this note alone ("Ask about this note" in Ctrl J): no search, only the Ask row. */
+  about?: { id: number; title: string };
+  /** A question to ask at once, when the bar opens. */
+  ask?: string;
   onOpen(id: number): void;
   onAiSetup(): void;
   onClose(): void;
 }) {
   let input!: HTMLInputElement;
   // Focused at once, so the first letters typed after Ctrl K are not lost.
-  onMount(() => input.focus());
-  const [q, setQ] = createSignal("");
+  onMount(() => {
+    input.focus();
+    if (p.ask?.trim()) void ask();
+  });
+  const [q, setQ] = createSignal(p.ask ?? "");
+  /** Every note the filters let through, not only the ones listed: what a question with filters reads. */
+  const [within, setWithin] = createSignal<number[]>([]);
   const [i, setI] = createSignal(0);
   const [answer, setAnswer] = createSignal<AiAnswer | "loading" | null>(null);
+  /** The answer as it is written. */
+  const [partial, setPartial] = createSignal("");
+  /** The answer being written now; closing the bar stops it. */
+  let running: string | null = null;
+  onCleanup(() => {
+    if (running) void api().then((a) => a.aiCancel(running!));
+  });
   const [asked, setAsked] = createSignal("");
   /** The questions answered before the latest one, in this exchange. */
   const [thread, setThread] = createSignal<{ question: string; answer: AiAnswer }[]>([]);
@@ -49,6 +73,7 @@ export default function CommandBar(p: {
   const [moreLoading, setMoreLoading] = createSignal(false);
   const filters = () => parseFilters(q());
   const [notes] = createResource(q, async (text) => {
+    if (p.about) return [];
     const s = await api();
     const f = parseFilters(text);
     if (noFilters(f)) {
@@ -69,7 +94,8 @@ export default function CommandBar(p: {
     }
     // With filters, look wider and narrow after.
     let found: NoteSummary[];
-    if (f.words) {
+    // A question with filters lists every note the filters let through: the question is asked of them all.
+    if (f.words && !asks(f.words)) {
       const [byTitle, byWords] = await Promise.all([s.findNotes(f.words, 200), s.searchNotes(f.words, 200)]);
       const seen = new Set(byTitle.map((n) => n.id));
       found = [...byTitle, ...byWords.filter((n) => !seen.has(n.id))];
@@ -80,24 +106,48 @@ export default function CommandBar(p: {
       const ok = new Set(await s.notesHaving(h));
       found = found.filter((n) => ok.has(n.id));
     }
+    setWithin(found.map((n) => n.id));
     return found.slice(0, 30);
   });
+
+  /** What a new note from the typed text would be: the words as its title, `@word` as its collection. */
+  const newNote = (): { title: string; folder: string } | null => {
+    if (!noFilters(filters())) return null;
+    const text = q().trim();
+    const at = /(^|\s)@(\S+)/.exec(text);
+    const title = text.replace(/(^|\s)@\S+/, " ").replace(/\s+/g, " ").trim();
+    if (!title || title.length > 120) return null;
+    const typed = at?.[2] ?? "";
+    const known = typed ? (folders() ?? []).find((f) => inFolder(f, typed) && !f.includes("/")) : undefined;
+    return { title, folder: known ?? typed };
+  };
+  const [folders] = createResource(async () => (await (await api()).noteFolders()).map((f) => f.path).filter((f) => f && !f.startsWith(".")));
 
   const commands = () => {
     if (p.notesOnly) return [];
     const live = p.commands.filter((c) => !c.when || c.when());
     return q().trim() ? rank(q(), live, (c) => c.label) : live.slice(0, 9);
   };
-  const isQuestion = () => noFilters(filters()) && (/\?\s*$/.test(q()) || /^(what|how|why|when|where|who|which|do|did|does|is|are|can|should|summari[sz]e|list|find)\b/i.test(q().trim()));
+  /** The words asked, without the filters: `in:travel what did I pack?` asks "what did I pack?" of travel. */
+  const question = () => (noFilters(filters()) ? q().trim() : filters().words);
+  const isQuestion = () =>
+    !!p.about || asks(question());
 
   const rows = (): Row[] => {
     const out: Row[] = [];
+    if (p.about) return q().trim() ? [{ kind: "ask" }] : [];
     const ns = (notes() ?? []).map((n) => ({ kind: "note", n }) as Row);
     const cs = commands().map((c) => ({ kind: "command", c }) as Row);
     if (q().trim() && !p.notesOnly && isQuestion()) out.push({ kind: "ask" });
     // A command that matches well beats notes; otherwise notes first.
     out.push(...(q().trim() && cs.length && ns.length === 0 ? cs : [...ns, ...cs]));
     if (q().trim() && !p.notesOnly && !isQuestion() && noFilters(filters())) out.push({ kind: "ask" });
+    // No note by that name: make it. `@travel` says where.
+    const want = newNote();
+    if (want && !isQuestion() && !(notes() ?? []).some((n) => n.title.toLowerCase() === want.title.toLowerCase())) {
+      // After the notes; with no note found, after the commands that match too, so "trash" still runs Trash.
+      out.splice(ns.length ? ns.length : cs.length && q().trim() ? cs.length : 0, 0, { kind: "new", ...want });
+    }
     return out;
   };
 
@@ -125,13 +175,21 @@ export default function CommandBar(p: {
     const re = new RegExp(`(${ws.map(escapeRe).join("|")})`, "giu");
     return text.split(re).filter(Boolean).map((t) => ({ t, on: ws.some((w) => w.toLowerCase() === t.toLowerCase()) }));
   };
-  const paragraphs = () =>
-    (peek()?.body ?? "")
-      .slice(0, 2400)
+  // The preview starts at the passage with the words, when they are further down than it shows.
+  const paragraphs = () => {
+    const body = peek()?.body ?? "";
+    const lower = body.toLowerCase();
+    const hits = marked().map((w) => lower.indexOf(w.toLowerCase())).filter((x) => x >= 0);
+    const first = hits.length ? Math.min(...hits) : 0;
+    const from = first > 600 ? body.lastIndexOf("\n\n", first) + 2 : 0;
+    const out = body
+      .slice(from, from + 2400)
       .split(/\n{2,}/)
       .map((x) => x.replace(/^#+\s+/, "").trim())
       .filter(Boolean)
       .slice(0, 8);
+    return from > 0 ? ["…", ...out] : out;
+  };
 
   /** A note named in an answer, `[[Title]]`: click it to open it. */
   async function openCited(title: string) {
@@ -143,21 +201,29 @@ export default function CommandBar(p: {
   }
 
   async function ask() {
-    const question = q().trim();
-    if (!question) return;
+    const asking = question();
+    if (!asking) return;
     if (!p.aiReady) {
       p.onClose();
       return p.onAiSetup();
     }
-    setAsked(question);
+    setAsked(asking);
     setThread([]);
     setFollowing(false);
     setAnswer("loading");
+    const live = aiLive(setPartial);
+    running = live.id;
+    setPartial("");
     try {
-      setAnswer(await (await api()).aiAsk(question));
+      const only = p.about ? [p.about.id] : undefined;
+      const among = !p.about && !noFilters(filters()) ? within() : undefined;
+      setAnswer(await (await api()).aiAsk(asking, undefined, only, live, among));
     } catch (e) {
       setAnswer(null);
-      say(errText(e), { error: true });
+      if (running === live.id) say(errText(e), { error: true });
+    } finally {
+      if (running === live.id) running = null;
+      setPartial("");
     }
   }
 
@@ -175,11 +241,15 @@ export default function CommandBar(p: {
     const all = turns();
     const notes = [...new Set(all.flatMap((t) => t.answer.read ?? t.answer.sources.map((s) => s.id)))];
     setMoreLoading(true);
+    const live = aiLive(setPartial);
+    running = live.id;
+    setPartial("");
     try {
       const next = await (await api()).aiAsk(
         question,
         all.map((t) => ({ question: t.question, answer: t.answer.answer })),
         notes,
+        live,
       );
       setThread(all);
       setAsked(question);
@@ -188,6 +258,8 @@ export default function CommandBar(p: {
     } catch (e) {
       say(errText(e), { error: true });
     } finally {
+      if (running === live.id) running = null;
+      setPartial("");
       setMoreLoading(false);
     }
   }
@@ -203,12 +275,26 @@ export default function CommandBar(p: {
   const choose = (r: Row | undefined) => {
     if (!r) return;
     if (r.kind === "ask") return void ask();
+    if (r.kind === "new") return void makeNote(r.title, r.folder);
     // Read before closing: the bar's owner may hand a different onOpen while it is open (a note beside).
     const open = p.onOpen;
     p.onClose();
-    if (r.kind === "note") open(r.n.id);
-    else r.c.run();
+    if (r.kind === "note") {
+      jumpTo(r.n.id, marked());
+      open(r.n.id);
+    } else r.c.run();
   };
+
+  async function makeNote(title: string, folder: string) {
+    const open = p.onOpen;
+    try {
+      const n = await (await api()).createNote(folder, title, "", []);
+      p.onClose();
+      open(n.id);
+    } catch (e) {
+      say(errText(e), { error: true });
+    }
+  }
 
   async function saveAnswer() {
     const a = answer();
@@ -239,6 +325,14 @@ export default function CommandBar(p: {
       e.stopPropagation();
       return setFollowing(true);
     }
+    // A plain word that could be a filter ("today", "pinned") becomes one on Tab.
+    if (e.key === "Tab" && !answer() && filters().offers.length) {
+      e.preventDefault();
+      e.stopPropagation();
+      setQ(acceptOffer(q()));
+      input.value = q();
+      return setI(0);
+    }
     if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) setI((i() + 1) % Math.max(1, n));
     else if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p" && !p.notesOnly)) setI((i() + n - 1) % Math.max(1, n));
     else if (e.key === "Enter" && answer() && answer() !== "loading" && e.ctrlKey) void saveAnswer();
@@ -257,7 +351,7 @@ export default function CommandBar(p: {
           <input
             class="palette-input"
             ref={input}
-            placeholder={p.placeholder ?? (p.notesOnly ? "Find a note…" : "Search, run a command, or ask your notes a question…")}
+            placeholder={p.placeholder ?? (p.about ? `Ask about ${p.about.title}…` : p.notesOnly ? "Find a note…" : "Search, run a command, or ask your notes a question…")}
             value={q()}
             onInput={(e) => {
               setQ(e.currentTarget.value);
@@ -268,6 +362,13 @@ export default function CommandBar(p: {
             }}
             onKeyDown={key}
           />
+          <Show when={!answer() && filters().offers[0]}>
+            {(o) => (
+              <button class="filter-offer small nowrap" onMouseDown={(e) => (e.preventDefault(), setQ(acceptOffer(q())), (input.value = q()))}>
+                <kbd>Tab</kbd> {o().label}
+              </button>
+            )}
+          </Show>
           <Show when={!p.notesOnly && answer() && answer() !== "loading"}>
             <span class="muted small nowrap">
               <kbd>Tab</kbd> ask again
@@ -300,8 +401,18 @@ export default function CommandBar(p: {
                     {r.kind === "ask" ? (
                       <>
                         <span class="row-icon spark">✦</span>
-                        <span class="row-label">Ask your notes: “{q().trim()}”</span>
-                        <span class="row-sub">{p.aiReady ? "Claude answers from your notes" : "add a key in Settings first"}</span>
+                        <span class="row-label">
+                          {p.about ? "Ask about this note" : noFilters(filters()) ? "Ask your notes" : "Ask these notes"}: “{question()}”
+                        </span>
+                        <span class="row-sub">
+                          {!p.aiReady ? "add a key in Settings first" : p.about ? `Claude answers from ${p.about.title}` : noFilters(filters()) ? "Claude answers from your notes" : `Claude reads only the ${within().length} found`}
+                        </span>
+                      </>
+                    ) : r.kind === "new" ? (
+                      <>
+                        <span class="row-icon">+</span>
+                        <span class="row-label">New note “{r.title}”</span>
+                        <span class="row-sub">{r.folder ? `in ${folderName(r.folder)}` : "add @collection to file it"}</span>
                       </>
                     ) : r.kind === "note" ? (
                       <>
@@ -352,7 +463,14 @@ export default function CommandBar(p: {
               if (t?.dataset.title) void openCited(t.dataset.title);
             }}
           >
-            <Show when={answer() !== "loading"} fallback={<p class="ai-thinking">Claude is reading your notes…</p>}>
+            <Show
+              when={answer() !== "loading"}
+              fallback={
+                <Show when={partial()} fallback={<p class="ai-thinking">Claude is reading your notes…</p>}>
+                  <div class="answer-text streaming" innerHTML={answerHtml(unsourced(partial()))} />
+                </Show>
+              }
+            >
               {(() => {
                 const a = answer() as AiAnswer;
                 return (
@@ -369,6 +487,10 @@ export default function CommandBar(p: {
                       <p class="answer-q">{asked()}</p>
                     </Show>
                     <div class="answer-text" innerHTML={answerHtml(a.answer)} />
+                    <Show when={moreLoading() && partial()}>
+                      <p class="answer-q">{more()}</p>
+                      <div class="answer-text streaming" innerHTML={answerHtml(unsourced(partial()))} />
+                    </Show>
                     <Show when={following()}>
                       <form
                         class="answer-more"
@@ -414,6 +536,9 @@ export default function CommandBar(p: {
                           )}
                         </For>
                       </div>
+                    </Show>
+                    <Show when={a.usage}>
+                      <p class="ai-usage">{usageLine(a.usage)}</p>
                     </Show>
                     <div class="row end">
                       <Show when={a.sources.length}>

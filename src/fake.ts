@@ -2,7 +2,7 @@
 // and collections, and an AI that answers from a script. The real rules (files, conflicts, front matter, links)
 // are in crates/petrel-core/src/notes.rs and its tests; this is enough to work on the screens.
 
-import type { AiSuggestion, Api, Note, NoteSummary, NoteVersion, OpenTask, SyncStatus, TopicFace, UndoToken } from "./api";
+import type { AiLive, AiSuggestion, Api, Note, NoteSummary, NoteVersion, OpenTask, SyncStatus, TopicFace, UndoToken } from "./api";
 import { parseLinks } from "./notes/parse";
 
 const MIN = 60_000;
@@ -37,9 +37,36 @@ export function fakeApi(): Api {
     autostartError: null,
   };
   const lower = (s: string) => s.trim().toLowerCase();
+  /** `.trash/`: two things, one older than a month, so the panel has something to show. */
+  const trash = new Map<string, { n: Note; at: number }>();
   const pathOf = (folder: string, title: string) => (folder ? `${folder}/${title}.md` : `${title}.md`);
   const wait = <T>(v: T, ms = 0) => new Promise<T>((r) => setTimeout(() => r(v), ms));
+  const templates = new Map<string, string>([["Journal", ""]]);
+  let aiModels: [string, string] = ["claude-opus-5-5", "claude-haiku-5-5"];
+  const aiStopped = new Set<string>();
+  /** Sends a reply a few words at a time, as the real one streams. */
+  const fakeStream = async (text: string, live?: AiLive) => {
+    if (!live) return wait(text, 900);
+    let soFar = "";
+    for (const w of text.split(/(?<=\s)/)) {
+      await wait(null, 40);
+      if (aiStopped.has(live.id)) throw "stopped";
+      soFar += w;
+      live.onText(soFar);
+    }
+    return text;
+  };
+  const fakeUsage = (inChars: number, outChars: number) => ({
+    model: aiModels[0],
+    inputTokens: Math.round(inChars / 4) + 300,
+    outputTokens: Math.round(outChars / 4),
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+  });
   const sync: SyncStatus = { configured: false, clientId: "", signedIn: false, account: "", on: false, state: "off", message: null, lastAt: null, last: null };
+  // `?synced` in the address starts signed in to Drive, to try the sync screens.
+  if (typeof location !== "undefined" && location.search.includes("synced"))
+    Object.assign(sync, { configured: true, signedIn: true, on: true, account: "you@example.com", state: "idle", lastAt: Date.now(), last: "2 files received" });
 
   const add = (folder: string, title: string, body: string, tags: string[] = [], age = 0, pinned = false): Note => {
     const t = Date.now() - age;
@@ -101,6 +128,11 @@ export function fakeApi(): Api {
   add("Songs", "Wish you were here", "Intro: Em G Em G Em A Em A G\n\nC         D/F#\nSo, so you think you can tell\n", [], 90 * DAY);
   add("journal", dayOf(DAY), "08:40 Slow start. First cold morning, coffee on the balcony.\n\n17:05\n- [x] Call the dentist\n- [ ] Send the Mostar dates to Lejla\n", [], DAY);
   add("journal", dayOf(0), "08:12 Want to finish the shelf plan this week.\n", [], 40 * MIN);
+  for (const [title, body, days] of [["Old shopping list", "- milk\n- bread\n", 45], ["Draft reply to Amra", "Thanks, the 20th works.\n", 2]] as const) {
+    const n = add("", title, body, [], days * 864e5);
+    notes.delete(n.id);
+    trash.set(`20261001-0900${days} ${title}.md`, { n, at: Date.now() - days * 864e5 });
+  }
   const faces: Record<string, TopicFace> = { Prompts: { color: "plum", mark: "spark" }, Songs: { color: "rose", mark: "music" } };
   const pictures = new Map<string, Uint8Array>();
   copies["Prompts/Code review.md"] = 14;
@@ -158,7 +190,7 @@ export function fakeApi(): Api {
       .map((x) => x.n);
   };
 
-  return {
+  const self: Api = {
     appInfo: () => wait({ version: "dev", dbPath: "(browser, nothing saved)", debug: true }),
     rescueText: () => wait("(nowhere)"),
     closeWindow: () => wait(undefined),
@@ -167,8 +199,16 @@ export function fakeApi(): Api {
     openCapture: () => wait(undefined).then(() => void window.open("/?capture", "_blank", "width=560,height=320")),
     openPicker: () => wait(undefined).then(() => void window.open("/?picker", "_blank", "width=620,height=440")),
     closePicker: () => wait(undefined).then(() => console.info("picker closed")),
+    pasteIntoFront: (shift) => wait(undefined).then(() => console.info(shift ? "pasted with Ctrl Shift V" : "pasted")),
     // Sync in the browser: a pretend Google account, so Settings › Sync and the sidebar can be worked on.
     syncStatus: () => wait({ ...sync }),
+    syncLog: () =>
+      wait([
+        { at: Date.now() - 60e3, what: "merged", path: "Tern release.md" },
+        { at: Date.now() - 60e3, what: "received", path: "journal/2026-11-16.md" },
+        { at: Date.now() - 3600e3, what: "sent", path: "Prompts/Code review.md" },
+        { at: Date.now() - 3600e3, what: "to the trash here", path: "inbox/milk.md" },
+      ]),
     syncSetup: (clientId) => wait(Object.assign(sync, { clientId, configured: true })).then((x) => ({ ...x })),
     syncSignIn: () => wait(Object.assign(sync, { signedIn: true, on: true, account: "you@example.com", state: "idle", lastAt: Date.now(), last: "12 files sent" }), 600).then((x) => ({ ...x })),
     syncSignOut: () => wait(Object.assign(sync, { signedIn: false, on: false, account: "", state: "off" })).then((x) => ({ ...x })),
@@ -231,6 +271,18 @@ export function fakeApi(): Api {
         .filter(([path]) => path !== "")
         .map(([path, c]) => ({ path, name: path.split("/").pop() || "Notes", depth: path.split("/").length - 1, count: c }));
     },
+    collectionTemplate: async (folder) => templates.get(folder.split("/")[0]) ?? "",
+    setCollectionTemplate: async (top, text) => void (text.trim() ? templates.set(top, text) : templates.delete(top)),
+    sidebarCounts: async () => {
+      const all = [...notes.values()];
+      return {
+        folders: await self.noteFolders(),
+        loose: all.filter((n) => n.folder === "").length,
+        inbox: all.filter((n) => n.folder === "inbox").length,
+        tasks: (await self.openTasks()).length,
+      };
+    },
+    peekNotes: async (ids) => ids.filter((id) => notes.has(id)).map((id) => ({ ...get(id) })),
     openNote: async (id) => ({ ...get(id) }),
     peekNote: async (id) => ({ ...get(id) }),
     createNote: async (folder, title, body, tags) => ({ ...add(folder, freeTitle(folder, title), body, tags) }),
@@ -281,7 +333,26 @@ export function fakeApi(): Api {
     trashNote: async (id) => {
       const n = get(id);
       notes.delete(id);
-      return token(() => notes.set(n.id, n));
+      const name = `${new Date().toISOString().slice(0, 19).replace(/[-:]/g, "").replace("T", "-")} ${n.title}.md`;
+      trash.set(name, { n, at: Date.now() });
+      return token(() => (trash.delete(name), notes.set(n.id, n)));
+    },
+    trashItems: async () =>
+      [...trash.entries()]
+        .map(([name, t]) => ({ name, title: t.n.title, from: t.n.path, at: t.at, folder: false }))
+        .sort((a, b) => b.at - a.at),
+    trashPeek: async (name) => trash.get(name)?.n.body.slice(0, 4000) ?? "",
+    trashRestore: async (name) => {
+      const t = trash.get(name);
+      if (!t) throw new Error(`${name} is no longer in the trash`);
+      trash.delete(name);
+      notes.set(t.n.id, t.n);
+      return t.n.id;
+    },
+    trashEmpty: async (days) => {
+      let n = 0;
+      for (const [name, t] of trash) if (t.at < Date.now() - days * 864e5) (trash.delete(name), n++);
+      return n;
     },
     undo: async (t) => {
       const u = undos.get(t);
@@ -328,6 +399,16 @@ export function fakeApi(): Api {
       if (!lines[line]?.includes(`[ ] ${text}`)) throw new Error(`that task changed in ${n.title}; open the note to tick it`);
       const before = n.body;
       lines[line] = lines[line].replace("[ ]", "[x]");
+      n.body = lines.join("\n");
+      n.modifiedAt = Date.now();
+      return token(() => (n.body = before));
+    },
+    takeTask: async (id, line, text) => {
+      const n = get(id);
+      const lines = n.body.split("\n");
+      if (!lines[line]?.includes(`[ ] ${text}`)) throw new Error(`that task changed in ${n.title}; open the note to move it`);
+      const before = n.body;
+      lines.splice(line, 1);
       n.body = lines.join("\n");
       n.modifiedAt = Date.now();
       return token(() => (n.body = before));
@@ -463,12 +544,19 @@ export function fakeApi(): Api {
           }
         : { text: null, app: null, title: null, link: null },
 
-    aiStatus: async () => ({ ready: aiKey !== null, model: "claude-opus-5-5", error: null }),
+    aiStatus: async () => ({ ready: aiKey !== null, model: aiModels[0], fastModel: aiModels[1], error: null }),
     setAiKey: async (key) => {
       aiKey = key;
-      return { ready: key !== null, model: "claude-opus-5-5", error: null };
+      return { ready: key !== null, model: aiModels[0], fastModel: aiModels[1], error: null };
     },
-    aiWrite: async ({ task, text }) => {
+    setAiModels: async (model, fast) => {
+      aiModels = [model || "claude-opus-5-5", fast || "claude-haiku-5-5"];
+      return { ready: aiKey !== null, model: aiModels[0], fastModel: aiModels[1], error: null };
+    },
+    aiCancel: async (id) => {
+      aiStopped.add(id);
+    },
+    aiWrite: async ({ task, text }, live) => {
       const t = text.trim();
       const out: Record<string, string> = {
         tidy: t.replace(/\s+\n/g, "\n").replace(/^(\w)/, (c) => c.toUpperCase()),
@@ -482,12 +570,18 @@ export function fakeApi(): Api {
         title: "Release checklist",
         prompt: `Done as the prompt asks:\n\n${t}`,
       };
-      return wait(out[task] ?? t, 900);
+      const reply = await fakeStream(out[task] ?? t, live);
+      return { text: reply, usage: fakeUsage(text.length, reply.length) };
     },
-    aiAsk: async (q, _earlier, ids) => {
-      const found = ids?.length ? ids.map(get) : about(q, 3);
+    aiAsk: async (q, _earlier, ids, live, within) => {
+      const found = ids?.length ? ids.map(get) : within ? [...about(q, 50).filter((n) => within.includes(n.id)), ...within.map(get)].filter((n, i, a) => a.indexOf(n) === i).slice(0, 3) : about(q, 3);
+      const answer = found.length
+        ? `From your notes: **${found[0].title}** is the closest. ${found[0].body.replace(/^#.*\n/, "").trim().split("\n")[0]}`
+        : "Nothing in your notes seems to be about that.";
+      await fakeStream(answer, live);
       return wait(
         {
+          usage: fakeUsage(4000, answer.length),
           answer: found.length
             ? `From your notes: **${found[0].title}** is the closest. ${found[0].body.replace(/^#.*\n/, "").trim().split("\n")[0]}`
             : "Nothing in your notes seems to be about that.",
@@ -519,5 +613,13 @@ export function fakeApi(): Api {
         900,
       );
     },
+    similarNotes: async (id) => {
+      const me = get(id);
+      return about(me.title + " " + me.body, 8)
+        .filter((n) => n.id !== id)
+        .slice(0, 4)
+        .map(summary);
+    },
   };
+  return self;
 }

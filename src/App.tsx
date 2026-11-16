@@ -13,7 +13,7 @@ import Sidebar, { type Place } from "./Sidebar";
 import { loadLibrary } from "./library/data";
 import NotePage, { type NotePageHandle } from "./note/NotePage";
 import CommandBar, { type Command } from "./palette/CommandBar";
-import { applyPrefs, changePref, parsePrefs, prefs, setPrefs } from "./settings/prefs";
+import { applyPrefs, changePref, parsePrefs, prefs, setPrefs, stepSize } from "./settings/prefs";
 import { watchQuiet } from "./note/quiet";
 import UpdateNotice from "./UpdateNotice";
 import { setBeforeInstall, watchUpdates } from "./updates";
@@ -35,6 +35,7 @@ const Versions = lazy(() => import("./versions/Versions"));
 
 const Week = lazy(() => import("./journal/Week"));
 const Tasks = lazy(() => import("./palette/Tasks"));
+const Trash = lazy(() => import("./palette/Trash"));
 
 type View =
   | { kind: "library"; tab: string; review?: boolean }
@@ -73,7 +74,9 @@ export default function App() {
   const [view, setView] = createSignal<View>({ kind: "note", id: null, folder: NEW_FOLDER });
   const [title, setTitle] = createSignal("");
   const [tab, setTab] = createSignal("all");
-  const [bar, setBar] = createSignal<"all" | "notes" | "beside" | null>(null);
+  const [bar, setBar] = createSignal<"all" | "notes" | "beside" | "about" | null>(null);
+  /** "Ask about this note" from Ctrl J: the note, and the question if one was typed there. */
+  const [asking, setAsking] = createSignal<{ id: number; title: string; ask?: string } | null>(null);
   const [beside, setBeside] = createSignal<number | null>(null);
   // The sidebar: shown unless hidden with Ctrl 0 (ui.sidebar); docked on a wide window, over the page on a narrow one.
   const [sideOn, setSideOn] = createSignal(true);
@@ -108,10 +111,11 @@ export default function App() {
     clearTimeout(noticeTimer);
     noticeTimer = setTimeout(() => setNotice(null), 5000);
   };
-  const [ai, setAi] = createSignal<AiStatus>({ ready: false, model: "", error: null });
+  const [ai, setAi] = createSignal<AiStatus>({ ready: false, model: "", fastModel: "", error: null });
   const [root, setRoot] = createSignal("");
   const [rev, setRev] = createSignal(0);
-  const [lib] = createResource(rev, loadLibrary);
+  // The library's data (every note's summary) is read only while the library is open.
+  const [lib] = createResource(() => (view().kind === "library" ? rev() + 1 : false), loadLibrary);
   let page: NotePageHandle | undefined;
   const back: View[] = [];
 
@@ -145,7 +149,8 @@ export default function App() {
   // A panel opened from Ctrl K goes back to it on Esc; one closed because a note was opened from it does not.
   let barClosedAt = 0;
   let lastGo = 0;
-  const panels = { tasks: false, week: false, history: false };
+  const panels = { tasks: false, week: false, history: false, trash: false };
+  const [trashOpen, setTrash] = createSignal(false);
   const openPanel = (which: keyof typeof panels, set: (on: boolean) => void) => {
     panels[which] = Date.now() - barClosedAt < 400;
     set(true);
@@ -333,6 +338,7 @@ export default function App() {
         void (page ? page.flush() : Promise.resolve(true)).then(() => setTasks(true));
       },
     },
+    { id: "trash", label: "Trash: put back a deleted note, or empty the old ones", run: () => openPanel("trash", setTrash) },
     { id: "copy", label: "Copy", when: onNote, run: () => void copy("plain") },
     { id: "copy-md", label: "Copy as Markdown", get keys() { return keyLabel("copyMd"); }, when: onNote, run: () => void copy("markdown") },
     { id: "copy-html", label: "Copy formatted (for mail and docs)", when: onNote, run: () => void copy("html") },
@@ -392,7 +398,7 @@ export default function App() {
     }
   }
 
-  const overlay = () => !!(bar() || settings() || history() || moving() || week() || tasks() || keysOpen());
+  const overlay = () => !!(bar() || settings() || history() || moving() || week() || tasks() || trashOpen() || keysOpen());
 
   // Ctrl Tab and Ctrl \ come before the editor, which would indent or type them.
   const earlyKey = (e: KeyboardEvent) => {
@@ -433,6 +439,12 @@ export default function App() {
       void openDay(addDays(onDay()!, e.key === "ArrowLeft" ? -1 : 1));
     }
     else if (matches(e, "copyMd") && onNote()) void copy("markdown");
+    else if (mod && !e.altKey && ["=", "+", "-", "_"].includes(e.key) && view().kind === "note") {
+      // Bigger or smaller type, as in a browser; the keyboard's own + and - work too.
+      const size = stepSize(prefs().editorSize, e.key === "-" || e.key === "_" ? -1 : 1);
+      void changePref("editorSize", size, async (k, v) => (await api()).setUiSetting(k, v));
+      say(`Type ${size} px`);
+    }
     else if (e.key === "Escape" && view().kind === "library" && !reviewing()) {
       if (document.querySelector(".scrim")) return;
       void writing();
@@ -481,6 +493,9 @@ export default function App() {
     } catch {
       applyPrefs(prefs());
     }
+    // The window shows as soon as it looks right; the keyring and the folder scan come after, so a slow keyring
+    // or a big folder never keeps the window from opening.
+    await s.showWindow();
     setRoot((await s.notesInfo().catch(() => ({ root: "" }))).root);
     watchUpdates(() => prefs().updates);
     const stored = await s.uiSettings().catch(() => ({}) as Record<string, string>);
@@ -495,10 +510,9 @@ export default function App() {
     }
     const [lastId, at] = ((stored["last.note"] ?? "") as string).split(":").map(Number);
     if (lastId && Date.now() - at < RESUME_MS) void go({ kind: "note", id: lastId, folder: "" }, false);
-    setAi(await s.aiStatus().catch(() => ({ ready: false, model: "", error: null })));
+    void s.aiStatus().then(setAi, () => {});
     await s.scanNotes().catch((e) => say(`The Petrel folder cannot be read: ${errText(e)}`, { error: true }));
     setRev(rev() + 1);
-    await s.showWindow();
     await s.listen({
       quit: async () => {
         await page?.flush();
@@ -506,6 +520,10 @@ export default function App() {
         await s.closeWindow();
       },
       openNote: (id) => void openNote(id),
+      lastSync: () => {
+        void page?.flush();
+        say("Sending the last changes to Drive before closing…");
+      },
       focus: () => {
         void rescan();
         // Back at the window: see what changed on the other computer.
@@ -608,6 +626,7 @@ export default function App() {
                 onDay={(d) => void openDay(d)}
                 onNoteId={(id) => (seen(id), setNoteFolder(page?.note()?.folder ?? null))}
                 onBeside={(id) => void openBeside(id)}
+                onAsk={(about) => (setAsking(about), setBar("about"))}
                 besideOpen={beside() !== null}
                 notice={notice()}
                 ref={(h) => (page = h)}
@@ -654,6 +673,8 @@ export default function App() {
           placeholder={bar() === "beside" ? "Open a note beside this one…" : undefined}
           recent={others()}
           aiReady={ai().ready}
+          about={bar() === "about" ? (asking() ?? undefined) : undefined}
+          ask={bar() === "about" ? asking()?.ask : undefined}
           onOpen={bar() === "beside" ? (id) => void openBeside(id) : openNote}
           onAiSetup={() => setSettings("ai")}
           onClose={() => {
@@ -673,6 +694,7 @@ export default function App() {
             onClose={() => setSettings(false)}
             onRoot={(r) => (setRoot(r), setRev(rev() + 1))}
             onAi={setAi}
+            onOpen={(id) => (setSettings(false), void openNote(id))}
           />
         </Show>
         <Show when={tasks()}>
@@ -683,6 +705,9 @@ export default function App() {
               if (current()?.id === id) void page?.refresh();
             }}
           />
+        </Show>
+        <Show when={trashOpen()}>
+          <Trash onClose={() => closePanel("trash", setTrash)} onOpen={(id) => void openNote(id)} onChanged={() => setRev(rev() + 1)} />
         </Show>
         <Show when={week()}>
           <Week

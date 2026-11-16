@@ -20,6 +20,8 @@ import { syntaxHighlighting, HighlightStyle } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
 import { insertLink, toggleBold, toggleItalic, toggleList, toggleTask } from "./commands";
 import { taskExtensions } from "./tasks";
+import { findBar } from "./findBar";
+import { blocks, quietMarks } from "./marks";
 
 export interface EditorHandle {
   view: EditorView;
@@ -38,6 +40,8 @@ export interface EditorHandle {
   setFocusMode(on: boolean): void;
   /** Typewriter scrolling: the line being typed stays in the middle of the window. */
   setTypewriter(on: boolean): void;
+  /** Markdown's marks hide on every line but the one being edited. */
+  setQuietMarks(on: boolean): void;
   /** Extensions loaded after the editor is up (links), so they cost nothing on the way to the first keystroke. */
   setExtra(ext: Extension): void;
   destroy(): void;
@@ -147,7 +151,8 @@ export function createEditor(
   const readOnly = new Compartment();
   const focus = new Compartment();
   const typewriter = new Compartment();
-  const modes = { focus: false, typewriter: false };
+  const modes = { focus: false, typewriter: false, marks: false };
+  const marks = new Compartment();
   const state = EditorState.create({
     doc: "",
     extensions: [
@@ -158,12 +163,14 @@ export function createEditor(
       readOnly.of(EditorState.readOnly.of(false)),
       focus.of([]),
       typewriter.of([]),
+      marks.of([]),
+      blocks,
       extra.of([]),
       markdown({ base: markdownLanguage }),
       syntaxHighlighting(markdownHighlight),
       taskExtensions,
       placeholder(o.placeholder ?? "Start writing. It saves as you type."),
-      search({ top: true }),
+      search({ top: true, createPanel: findBar }),
       // Petrel's own keys first. Alt ↑/↓ (move line), Shift Alt ↓ (duplicate line) and Enter continuing lists
       // come with the defaults and the Markdown language.
       keymap.of([
@@ -193,6 +200,7 @@ export function createEditor(
         effects: [
           focus.reconfigure(modes.focus ? focusDim : []),
           typewriter.reconfigure(modes.typewriter ? typewriterScroll : []),
+          marks.reconfigure(modes.marks ? quietMarks : []),
           extra.reconfigure(extraExt),
         ],
       });
@@ -222,6 +230,10 @@ export function createEditor(
     setTypewriter(on) {
       modes.typewriter = on;
       view.dispatch({ effects: typewriter.reconfigure(on ? typewriterScroll : []) });
+    },
+    setQuietMarks(on) {
+      modes.marks = on;
+      view.dispatch({ effects: marks.reconfigure(on ? quietMarks : []) });
     },
     setExtra(ext) {
       extraExt = ext;

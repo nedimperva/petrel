@@ -6,7 +6,7 @@
 // Pasted pictures are saved next to the note and shown under their line.
 
 import { createEffect, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
-import { api, errText, type AiRelated, type AiTask, type Backlinks, type Note, type NoteSummary, type OpenTask } from "../api";
+import { aiLive, api, errText, type AiRelated, type AiTask, type Backlinks, type Note, type NoteSummary, type OpenTask } from "../api";
 import { blanks, fill, todayText } from "../blanks";
 import FillBlanks from "../collection/FillBlanks";
 import { lastVersions } from "../collection/BlankFields";
@@ -15,7 +15,7 @@ import { toggleTask } from "../editor/commands";
 import { createEditor, type EditorHandle } from "../editor/editor";
 import { cleanPaste } from "../editor/paste";
 import { pictureExtensions } from "../editor/pictures";
-import { addDays, clock, dayTitle, isDayNote, JOURNAL, monthGrid, today } from "../journal/days";
+import { addDays, clock, dayTitle, dueOf, isDayNote, JOURNAL, monthGrid, today } from "../journal/days";
 import { dayExtensions } from "../journal/stamps";
 import { linkExtensions } from "../notes/links";
 import { parseLinks } from "../notes/parse";
@@ -31,6 +31,9 @@ import { aiPreview, keepPreview, previewOf, setPreview, type Preview } from "./a
 import { currentHeading, outline, type Heading } from "./outline";
 import { EditorView } from "@codemirror/view";
 import { hush } from "./quiet";
+import { takeJump } from "./jump";
+import { usageLine } from "../ai/usage";
+import { addAsk, ASKS_KEY, parseAsks } from "../ai/asks";
 
 export interface NotePageHandle {
   note(): Note | null;
@@ -66,6 +69,8 @@ interface Props {
   onNoteId?(id: number | null): void;
   /** Open a note on the right (Shift Enter on a link). */
   onBeside?(id: number): void;
+  /** Opens Ctrl K for questions about this note alone, asking `ask` at once when given. */
+  onAsk?(about: { id: number; title: string; ask?: string }): void;
   /** A note is open beside: the margin is taken. */
   besideOpen?: boolean;
   /** A line in the footer for a moment ("Updated from Drive"). */
@@ -97,6 +102,9 @@ const MENU_H = 400;
 /** Where the cursor and the scroll were in each note this session, so going back never jumps. */
 const places = new Map<number, { anchor: number; head: number; top: number }>();
 
+/** Characters after which a note counts as long (see `measureSoon`). */
+const LONG_NOTE = 20_000;
+
 export default function NotePage(p: Props) {
   let host!: HTMLDivElement;
   let titleInput!: HTMLInputElement;
@@ -110,13 +118,27 @@ export default function NotePage(p: Props) {
   const [related, setRelated] = createSignal<AiRelated[] | "loading" | null>(null);
   // The one AI menu (Ctrl J, or `/` on an empty line). `whole`: nothing was selected when it opened.
   const [menu, setMenu] = createSignal<{ x: number; y: number; i: number; q: string; whole: boolean; from: number; to: number; head: number } | null>(null);
-  const [explain, setExplain] = createSignal<{ x: number; y: number; text: string | null; at: number } | null>(null);
+  const [explain, setExplain] = createSignal<{ x: number; y: number; text: string | null; at: number; partial?: string; usage?: string } | null>(null);
   // The last AI request, for Try again.
   let last: { task: AiTask; from: number; to: number; instruction?: string; label?: string } | null = null;
   // Ctrl J's own prompts: the Prompts collection, the most copied first.
   const [prompts, setPrompts] = createSignal<NoteSummary[]>([]);
+  /** What was typed into Ctrl J before, newest first. */
+  const [asks, setAsks] = createSignal<string[]>([]);
+  const rememberAsk = async (q: string) => {
+    const next = addAsk(asks(), q);
+    setAsks(next);
+    await (await api()).setUiSetting(ASKS_KEY, JSON.stringify(next)).catch(() => {});
+  };
   const [filling, setFilling] = createSignal<{ title: string; text: string; from: number; to: number; selected: string } | null>(null);
   let seq = 0;
+  /** The AI reply being written now, to stop it on Esc. */
+  let running: string | null = null;
+  const stopRunning = () => {
+    if (running) void api().then((a) => a.aiCancel(running!));
+    running = null;
+  };
+  onCleanup(stopRunning);
 
   /** The day this page is, if it is a day's page: from the view, or from the note that was opened. */
   const dayPage = (): string | null => {
@@ -141,6 +163,8 @@ export default function NotePage(p: Props) {
 
   // On today's page: tasks still open on earlier days' pages, and how many captures came in today.
   const [carried, setCarried] = createSignal<OpenTask[]>([]);
+  /** Tasks in any note due today or before (`@fri`, `@nov20`), for today's margin. */
+  const [dueNow, setDueNow] = createSignal<{ t: OpenTask; due: string }[]>([]);
   const [capturedToday, setCapturedToday] = createSignal(0);
   createEffect(
     on(
@@ -155,6 +179,15 @@ export default function NotePage(p: Props) {
               .sort((a, b) => b.title.localeCompare(a.title) || a.line - b.line)
               .slice(0, 8),
           );
+          const written = (t: OpenTask) => (t.folder === JOURNAL && /^\d{4}-\d{2}-\d{2}$/.test(t.title) ? new Date(`${t.title}T12:00`) : new Date(t.modifiedAt));
+          setDueNow(
+            tasks
+              .filter((t) => !(t.folder === JOURNAL && t.title === today()))
+              .map((t) => ({ t, due: dueOf(t.text, written(t)) ?? "" }))
+              .filter((x) => x.due && x.due <= today())
+              .sort((a, b) => a.due.localeCompare(b.due))
+              .slice(0, 8),
+          );
           const start = new Date();
           start.setHours(0, 0, 0, 0);
           setCapturedToday(inbox.filter((n) => n.modifiedAt >= start.getTime()).length);
@@ -162,6 +195,20 @@ export default function NotePage(p: Props) {
       },
     ),
   );
+  /** A task from an earlier day comes onto today's page: out of its note, onto the end of this one. */
+  async function bringHere(t: OpenTask) {
+    try {
+      const s = await api();
+      const tok = await s.takeTask(t.noteId, t.line, t.text);
+      setCarried(carried().filter((x) => x !== t));
+      setDueNow(dueNow().filter((x) => x.t !== t));
+      editor?.insert(`- [ ] ${t.text}`, false);
+      say(`Moved here from ${t.folder === JOURNAL ? dayTitle(t.title) : t.title}`, { undo: () => s.undo(tok.token) });
+    } catch (e) {
+      say(errText(e), { error: true });
+    }
+  }
+
   async function tickCarried(t: OpenTask) {
     try {
       const s = await api();
@@ -173,7 +220,16 @@ export default function NotePage(p: Props) {
     }
   }
 
-  const loadLinks = async (id: number) => setLinks(await (await api()).backlinks(id).catch(() => ({ linked: [], mentioned: [] })));
+  const loadLinks = async (id: number) => {
+    const s = await api();
+    const [l, near] = await Promise.all([s.backlinks(id).catch(() => ({ linked: [], mentioned: [] })), s.similarNotes(id).catch(() => [])]);
+    setLinks(l);
+    // Notes already listed as linking here are not repeated as similar.
+    const shown = new Set([...l.linked, ...l.mentioned].map((b) => b.id));
+    setSimilar(near.filter((n) => !shown.has(n.id)));
+  };
+  /** Notes that share telling words with this one, from the index: no AI, no key. */
+  const [similar, setSimilar] = createSignal<NoteSummary[]>([]);
 
   const keepPlace = () => {
     const n = note();
@@ -199,7 +255,17 @@ export default function NotePage(p: Props) {
         // Today's empty page starts with the time; it is not a file until something is written after it.
         if (p.day === today()) editor?.load(`${clock()} `, 6);
         editor?.view.focus();
-      } else titleInput?.focus();
+      } else {
+        // A collection with a template: the page starts from it, today and the time filled in. It is not a file
+        // until something is written.
+        const folder = p.folder;
+        const t = folder && folder !== "inbox" ? await (await api()).collectionTemplate(folder).catch(() => "") : "";
+        if (t && note() === null && editor && !editor.text()) {
+          const text = fill(t, { today: todayText(), date: todayText(), time: clock() });
+          editor.load(text, text.length);
+        }
+        titleInput?.focus();
+      }
       return;
     }
     try {
@@ -209,6 +275,12 @@ export default function NotePage(p: Props) {
       measure();
       void loadLinks(n.id);
       editor?.view.focus();
+      // Opened from a search: start where the words are.
+      const found = takeJump(n.id, editor?.text() ?? "");
+      if (found !== null && editor) {
+        editor.view.dispatch({ selection: { anchor: found }, effects: EditorView.scrollIntoView(found, { y: "center" }) });
+        return;
+      }
       // Coming back to today's page starts a new entry under the last one, the time already there. It is not
       // written until something is typed after it.
       if (editor && n.folder === JOURNAL && n.title === today() && n.body.trim()) {
@@ -276,15 +348,26 @@ export default function NotePage(p: Props) {
       const at = task === "continue" || task === "summarize" ? to : from;
       v.dispatch({ effects: setPreview.of({ from: at, to: task === "continue" || task === "summarize" ? at : to, text: null, error: null, label: label ?? LABELS[task] }) });
     }
-    try {
-      const out = await (await api()).aiWrite({ task, text, context: doc.toString(), instruction, noteId: note()?.id });
+    // The reply shows as it is written; Esc stops it (the connection is dropped, so Claude stops too).
+    const live = aiLive((soFar) => {
       if (mine !== seq) return;
-      if (task === "explain") return setExplain((e) => e && { ...e, text: out });
+      if (task === "explain") return setExplain((e) => e && { ...e, partial: soFar });
+      const pv = previewOf(v.state);
+      if (pv && pv.text === null) v.dispatch({ effects: setPreview.of({ ...pv, partial: soFar }) });
+    });
+    running = live.id;
+    try {
+      const { text: out, usage } = await (await api()).aiWrite({ task, text, context: doc.toString(), instruction, noteId: note()?.id }, live);
+      if (mine !== seq) return;
+      if (task === "explain") return setExplain((e) => e && { ...e, text: out, usage: usageLine(usage) });
       if (task === "title") return proposeTitle(out);
       const pv = previewOf(v.state);
       if (!pv) return;
       const lead = (task === "continue" || task === "summarize") && pv.from > 0 && doc.sliceString(pv.from - 1, pv.from) !== "\n" ? "\n\n" : "";
-      v.dispatch({ effects: setPreview.of({ ...pv, text: lead + out }) });
+      v.dispatch({ effects: setPreview.of({ ...pv, text: lead + out, usage: usageLine(usage) }) });
+      // Back to the text, so Enter and Esc go to the suggestion; not when the person is typing somewhere else.
+      const at = document.activeElement;
+      if (!at || at === document.body || !(at instanceof HTMLInputElement || at instanceof HTMLTextAreaElement)) v.focus();
     } catch (e) {
       if (mine !== seq) return;
       if (task === "explain") return setExplain(null), say(errText(e), { error: true });
@@ -307,9 +390,11 @@ export default function NotePage(p: Props) {
     keep() {
       const pv = previewOf(view().state);
       if (pv?.text != null) keepPreview(view());
+      view().focus();
     },
     drop() {
       seq++;
+      stopRunning();
       view().dispatch({ effects: setPreview.of(null) });
       view().focus();
     },
@@ -361,6 +446,7 @@ export default function NotePage(p: Props) {
 
   async function loadPrompts() {
     const s = await api();
+    void s.uiSettings().then((u) => setAsks(parseAsks(u[ASKS_KEY])), () => {});
     const [all, counts] = await Promise.all([s.listNotes({ limit: 2000 }), s.copyCounts()]);
     setPrompts(
       all
@@ -449,18 +535,33 @@ export default function NotePage(p: Props) {
     out.push({ label: "Continue from here", hint: "from the cursor", group: "Write", icon: "continue", go: () => void run("continue", m.head, m.head) });
     out.push({ label: "Summarize the note", hint: "the text above the cursor", group: "Write", icon: "summarize", go: () => void run("summarize", m.head, m.head) });
     out.push({ label: "Suggest a title", hint: "renames it if you keep it", group: "Write", icon: "title", go: () => void run("title", 0, len) });
+    const about = note();
+    if (about) out.push({ label: "Ask about this note", hint: "a question, answered from it", group: "Write", icon: "explain", go: () => askAbout() });
     const promptRange = m.whole ? { from: 0, to: len } : { from: m.from, to: m.to };
     for (const n of prompts())
       out.push({ label: n.title, hint: m.whole ? "the whole note" : "the selection", group: "Your prompts", icon: "prompt", go: () => void runPrompt(n, promptRange) });
-    const q = m.q.trim();
-    if (!q) return out;
-    const found = rank(q, out, (x) => x.label);
     const target = has ? { from: m.from, to: m.to } : { from: 0, to: len };
-    return [
-      ...found,
-      { label: `Ask: “${q}”`, hint: has ? "rewrite it this way" : "rewrite the note this way", icon: "ask", go: () => void run("custom", target.from, target.to, q) },
-    ];
+    for (const a of asks())
+      out.push({ label: a, hint: has ? "the selection" : "the whole note", group: "Asked before", icon: "ask", go: () => void (rememberAsk(a), run("custom", target.from, target.to, a)) });
+    const q = m.q.trim();
+    if (!q) return out.filter((x) => x.group !== "Asked before" || asks().indexOf(x.label) < 3);
+    const found = rank(q, out, (x) => x.label);
+    const asked = /\?\s*$/.test(q) && note();
+    const rewrite: MenuItem = { label: `Ask: “${q}”`, hint: has ? "rewrite it this way" : "rewrite the note this way", icon: "ask", go: () => void (rememberAsk(q), run("custom", target.from, target.to, q)) };
+    const question: MenuItem = { label: `Ask about this note: “${q}”`, hint: "answered from it", icon: "explain", go: () => askAbout(q) };
+    // A question mark means a question, so it comes before the rewrite.
+    const both = !note() ? [rewrite] : asked ? [question, rewrite] : [rewrite, question];
+    return [...found.filter((x) => x.label !== "Ask about this note"), ...both];
   };
+
+  /** "Ask about this note": the question goes to Ctrl K, which answers from this note alone. */
+  async function askAbout(q?: string) {
+    const n = note();
+    if (!n) return;
+    if (!p.aiReady) return p.onAiSetup();
+    await saver.flush();
+    p.onAsk?.({ id: n.id, title: n.title, ask: q });
+  }
 
   const menuKey = (e: KeyboardEvent) => {
     const m = menu();
@@ -506,7 +607,16 @@ export default function NotePage(p: Props) {
     setOutLinks([...new Set(parseLinks(t).map((l) => l.inner.split("|")[0].trim()))].slice(0, 30));
     setHere(currentHeading(heads(), editor?.cursor() ?? 0));
   };
-  const hasLinks = () => !!(links().linked.length || links().mentioned.length || related());
+  // Counting words and reading headings and links goes over the whole text; on a long note that waits for a
+  // pause in the typing instead of running on every key.
+  let measureTimer: ReturnType<typeof setTimeout> | undefined;
+  const measureSoon = () => {
+    clearTimeout(measureTimer);
+    if ((editor?.view.state.doc.length ?? 0) < LONG_NOTE) return measure();
+    measureTimer = setTimeout(measure, 400);
+  };
+  onCleanup(() => clearTimeout(measureTimer));
+  const hasLinks = () => !!(links().linked.length || links().mentioned.length || related() || similar().length);
   const minLevel = () => Math.min(...heads().map((h) => h.level));
   const jump = (from: number) => {
     const v = view();
@@ -517,7 +627,7 @@ export default function NotePage(p: Props) {
   onMount(() => {
     editor = createEditor(host, () => {
       saver.changed();
-      measure();
+      measureSoon();
       setTypingNow(true);
       clearTimeout(typingTimer);
       typingTimer = setTimeout(() => setTypingNow(false), 1500);
@@ -621,6 +731,7 @@ export default function NotePage(p: Props) {
 
   createEffect(() => editor?.setTypewriter(prefs().typewriter));
   createEffect(() => editor?.setFocusMode(prefs().focus));
+  createEffect(() => editor?.setQuietMarks(prefs().quietMarks));
   createEffect(on(() => note()?.id ?? null, (id) => p.onNoteId?.(id)));
   createEffect(() => {
     const d = dayPage();
@@ -639,9 +750,27 @@ export default function NotePage(p: Props) {
   });
 
   const onKey = (e: KeyboardEvent) => {
+    // An AI suggestion answers Enter, Esc and R wherever the focus went while Claude wrote it (the menu that
+    // started it is gone by then, so the keys used to land nowhere). Inside the editor its own keymap does it.
+    const pv = editor && previewOf(view().state);
+    const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
+    if (pv && !typing && !view().contentDOM.contains(e.target as Node) && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      const ready = pv.text != null && !pv.error;
+      const done = pv.text != null || !!pv.error;
+      const act =
+        e.key === "Enter" && ready ? actions.keep : e.key === "Escape" ? actions.drop : e.key.toLowerCase() === "r" && done ? actions.retry : null;
+      if (act) {
+        e.preventDefault();
+        e.stopPropagation();
+        act();
+        return view().focus();
+      }
+    }
     if (explain() && e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
+      seq++;
+      stopRunning();
       setExplain(null);
       return editor?.view.focus();
     }
@@ -682,7 +811,7 @@ export default function NotePage(p: Props) {
   const synced = () => /google drive|googledrive|my drive|onedrive|dropbox|syncthing/i.test(p.root);
 
   return (
-    <div class="page" classList={{ "day-page": !!dayPage() }}>
+    <div class="page" classList={{ "day-page": !!dayPage(), "beside-open": !!p.besideOpen }}>
       <div class="page-main">
         <div class="sheet">
           <Show when={dayPage()}>
@@ -727,51 +856,16 @@ export default function NotePage(p: Props) {
           />
           <div class="writer" ref={host} />
         </div>
-        <Show when={hasLinks()}>
-          <div class="page-links">
-            <Show when={links().linked.length}>
-              <h4>Linked from</h4>
-              <For each={links().linked}>
-                {(b) => (
-                  <button class="link-row" onClick={() => p.onOpen(b.id)}>
-                    <span class="link-title">{b.title}</span>
-                    <span class="link-line">{b.line.replace(/\[\[|\]\]/g, "")}</span>
-                  </button>
-                )}
-              </For>
-            </Show>
-            <Show when={links().mentioned.length}>
-              <h4>Mentioned in</h4>
-              <For each={links().mentioned}>
-                {(b) => (
-                  <button class="link-row" onClick={() => p.onOpen(b.id)}>
-                    <span class="link-title">{b.title}</span>
-                    <span class="link-line">{b.line}</span>
-                  </button>
-                )}
-              </For>
-            </Show>
-            <Show when={related()}>
-              <h4>
-                <span class="spark">✦</span> Related
-              </h4>
-              <Show when={Array.isArray(related())} fallback={<p class="ai-thinking">Claude is looking through your notes…</p>}>
-                <Show when={(related() as AiRelated[]).length} fallback={<p class="muted small">Nothing closely related.</p>}>
-                  <For each={related() as AiRelated[]}>
-                    {(r) => (
-                      <button class="link-row" onClick={() => p.onOpen(r.id)}>
-                        <span class="link-title">{r.title}</span>
-                        <span class="link-line">{r.why}</span>
-                      </button>
-                    )}
-                  </For>
-                </Show>
-              </Show>
-            </Show>
-          </div>
-        </Show>
-      </div>
-      <Show when={!p.besideOpen}>
+        {/* On a narrow page the margin waits at the right edge as a rail of short lines, one per heading (the one you
+            are in is darker); hovering it opens the margin over the text. A wide page shows the margin as it is. */}
+        <div class="margin-dock">
+        <div class="margin-rail" aria-hidden="true">
+          <Show when={!dayPage() && heads().length} fallback={<For each={[0, 1, 2]}>{() => <span class="rail-dash" />}</For>}>
+            <For each={heads().slice(0, 24)}>
+              {(h, i) => <span class="rail-dash" classList={{ on: i() === here() }} style={{ width: `${Math.max(6, 18 - (h.level - minLevel()) * 5)}px` }} />}
+            </For>
+          </Show>
+        </div>
         <aside class="note-margin" classList={{ quiet: typingNow() }} aria-label="About this note">
           <Show when={dayPage()}>
             {(d) => (
@@ -811,7 +905,27 @@ export default function NotePage(p: Props) {
                     <button type="button" class="carried-day" onClick={() => p.onDay?.(t.title)} title={`Open ${dayTitle(t.title)}`}>
                       {new Date(`${t.title}T12:00`).toLocaleDateString(undefined, { weekday: "short" })}
                     </button>
+                    <button type="button" class="carried-bring" onClick={(e) => (e.preventDefault(), void bringHere(t))} title="Move it onto today's page">
+                      ↓ here
+                    </button>
                   </label>
+                )}
+              </For>
+            </section>
+          </Show>
+          <Show when={dayPage() === today() && dueNow().length}>
+            <section class="day-carried" aria-label="Due today">
+              <h4>Due</h4>
+              <For each={dueNow()}>
+                {(x) => (
+                  <div class="carried-row">
+                    <span class="carried-text" classList={{ overdue: x.due < today() }}>
+                      {x.t.text}
+                    </span>
+                    <button type="button" class="carried-day" onClick={() => p.onOpen(x.t.noteId)} title={`Open ${x.t.title}`}>
+                      {x.due < today() ? dayTitle(x.due) : x.t.folder === JOURNAL ? dayTitle(x.t.title) : x.t.title.slice(0, 16)}
+                    </button>
+                  </div>
                 )}
               </For>
             </section>
@@ -883,6 +997,17 @@ export default function NotePage(p: Props) {
                 )}
               </For>
             </Show>
+            <Show when={!related() && similar().length}>
+              <h4>Shares words with</h4>
+              <For each={similar()}>
+                {(n) => (
+                  <button class="link-row" onClick={() => p.onOpen(n.id)}>
+                    <span class="link-title">{n.folder === "inbox" ? n.preview.split("\n")[0] || n.title : n.title}</span>
+                    <span class="link-line">{folderName(n.folder)}</span>
+                  </button>
+                )}
+              </For>
+            </Show>
             <Show when={related()}>
               <h4>
                 <span class="spark">✦</span> Related
@@ -908,7 +1033,8 @@ export default function NotePage(p: Props) {
             </button>
           </Show>
         </aside>
-      </Show>
+        </div>
+      </div>
       <footer class="page-foot">
         <span>{dayPage() ? "Journal" : folderName(note()?.folder ?? p.folder)}</span>
         <Show when={words()}>
@@ -1014,7 +1140,7 @@ export default function NotePage(p: Props) {
             <div class="menu-head">
               <span class="spark">✦</span> Explained
             </div>
-            <p classList={{ "ai-thinking": x().text === null }}>{x().text ?? "Claude is reading…"}</p>
+            <p classList={{ "ai-thinking": x().text === null && !x().partial }}>{x().text ?? (x().partial || "Claude is reading…")}</p>
             <div class="row">
               <button class="btn small" disabled={!x().text} onClick={insertExplain}>
                 Add below as a quote
@@ -1023,6 +1149,9 @@ export default function NotePage(p: Props) {
                 Close <kbd>Esc</kbd>
               </button>
             </div>
+            <Show when={x().usage}>
+              <p class="ai-usage">{x().usage}</p>
+            </Show>
           </div>
         )}
       </Show>

@@ -67,6 +67,8 @@ class H(BaseHTTPRequestHandler):
         if m and q.get("alt") == "media":
             f = files.get(m.group(1))
             return self.send(200, f["data"]) if f else self.send(404, {"error": {"message": "not found"}})
+        if m and m.group(1) in files:
+            return self.send(200, meta(m.group(1)))
         self.send(404, {"error": {"message": self.path}})
 
     def do_POST(self):
@@ -107,13 +109,21 @@ class H(BaseHTTPRequestHandler):
             changes.append(m.group(1))
             return self.send(200, {"id": m.group(1), "md5Checksum": hashlib.md5(raw).hexdigest()})
         m = re.match(r"/drive/v3/files/([^/]+)$", u.path)
+        body = json.loads(raw or b"{}")
         if m and "addParents" in q:
             f = files[m.group(1)]
             f["parents"] = [q["addParents"] if p == q["removeParents"] else p for p in f["parents"]]
+            if "name" in body:
+                f["name"] = body["name"]
             changes.append(m.group(1))
-            return self.send(200, {"id": m.group(1)})
+            return self.send(200, {"id": m.group(1), "md5Checksum": hashlib.md5(f["data"]).hexdigest()})
+        if m and "name" in body:
+            f = files[m.group(1)]
+            f["name"] = body["name"]
+            changes.append(m.group(1))
+            return self.send(200, {"id": m.group(1), "md5Checksum": hashlib.md5(f["data"]).hexdigest()})
         if m:
-            files[m.group(1)]["trashed"] = json.loads(raw).get("trashed", False)
+            files[m.group(1)]["trashed"] = body.get("trashed", False)
             changes.append(m.group(1))
             return self.send(200, {"id": m.group(1)})
         self.send(404, {"error": {"message": self.path}})

@@ -14,7 +14,8 @@ shorten, continue or explain your text and answer questions from your notes, but
 - **Sync with Google Drive, built in.** Settings › Sync keeps your folder and `My Drive/Petrel` the same on every
   computer you sign in on, Windows and Linux alike, with no sync app: a save goes up a couple of seconds later,
   changes come down every 30 seconds and when you come back to the window, and offline changes wait. A note changed
-  on two computers keeps both texts; a note's history (`Ctrl H`) syncs too. It needs a Google Cloud client of your
+  on two computers is merged when the edits are in different places and keeps both texts when they clash; a note's
+  history (`Ctrl H`) syncs too. Quit gives sync up to five seconds first, and Settings › Sync lists what it did lately. It needs a Google Cloud client of your
   own (Settings › Sync lists the three steps) and asks only for the files Petrel makes (`drive.file`).
 - **Capture from anywhere.** `Ctrl Alt Space` (or a compositor keybind on Wayland), the tray,
   `petrel --new "text"`, `echo text | petrel --stdin`. Text selected in the app you were in comes along as a quote
@@ -39,13 +40,13 @@ shorten, continue or explain your text and answer questions from your notes, but
   collection) are on `Ctrl J` too. `Ctrl K` then a question asks your notes, and `Tab` asks again. The week, when
   you ask: what you wrote, what is still open, and a few sentences on it. Needs an
   Anthropic API key in Settings, kept in the OS keyring.
-- **Never loses text.** Autosave, versions (`Ctrl H`, kept in the folder as `.history/`), deleted notes go to `.trash/` in the folder, undo with `z`.
+- **Never loses text.** Autosave, versions (`Ctrl H`, kept in the folder as `.history/`), deleted notes go to `.trash/` in the folder, undo with `z`. `Ctrl K` › Trash shows what is there, puts a note back where it was, and empties only what is older than thirty days.
 
 ## Keys
 
 | Where | Keys |
 |---|---|
-| Anywhere | `Ctrl K` search, commands or ask (`in:travel`, `pinned`, `today`, `this week`, `has:link`, `has:picture`, `has:task`) · `Ctrl P` find a note · `Ctrl N` new note · `Ctrl D` today's page · `Ctrl L` library · `Ctrl 0` the sidebar · `Ctrl Tab` the note before (hold `Ctrl` for the last few) · `Ctrl Shift Enter` a note beside · `Ctrl ,` settings |
+| Anywhere | `Ctrl K` search, commands or ask (`in:travel`, `is:pinned`, `when:today`, `when:week`, `has:link`, `has:picture`, `has:task`; a plain "today" or "pinned" is offered as a filter, Tab takes it) · `Ctrl P` find a note · `Ctrl N` new note · `Ctrl D` today's page · `Ctrl L` library · `Ctrl 0` the sidebar · `Ctrl Tab` the note before (hold `Ctrl` for the last few) · `Ctrl Shift Enter` a note beside · `Ctrl ,` settings |
 | Settings | `Ctrl ,` or the sliders in the title bar: General, Writing, Look, Capture, Keys (click a shortcut, press the new keys; on Omarchy the capture and picker show the `bind` line to copy), AI, About |
 | Shortcuts | `Ctrl /`, or `?` when not typing: every shortcut on this computer |
 | Sidebar | click a collection to open it · `F2` or a double-click renames it · right-click or `⋯`: colour and mark, pages or to copy, a collection inside, show in the folder, the trash · "New collection" makes one |
@@ -57,7 +58,7 @@ shorten, continue or explain your text and answer questions from your notes, but
 | An opened card | `Enter` copy (fill the blanks first) · `Tab` next blank · `Alt ←` `Alt →` other versions · `↑` earlier answers · `1`–`9` pick a choice · `e` edit · in the inbox: `m` move · `s` suggest a home · `1`–`3` pick one · `d` delete |
 | To settle (a card in the inbox) | `1` keep the note · `2` keep the other text · `3` or `b` keep both · `Esc` later |
 | Capture window | `@topic`, `@today`, `@fri`, `@nov20` or `@Note` says where it goes · `Ctrl K` choose from a list · `Ctrl D` today's page or the inbox · `?` the keys · `Esc` done (an empty capture is dropped) · `Ctrl Enter` done, or a new capture when adding to the last one |
-| Quick picker | type to find (things to copy; matching notes after them) · `Enter` copy and close · `Alt ←` `Alt →` other versions · `Tab` next blank · `Ctrl O` open in Petrel |
+| Quick picker | type to find (things to copy; matching notes after them) · `Enter` copy and close · `Ctrl Enter` copy and paste into the app (`Ctrl Shift Enter` for a terminal; on Linux it needs `wtype`, or `xdotool` on X11) · `Alt ←` `Alt →` other versions · `Tab` next blank · `Ctrl O` open in Petrel |
 
 The design: [docs/design/petrel.md](docs/design/petrel.md). Notes rules: [docs/design/notes.md](docs/design/notes.md).
 Command line: [docs/cli.md](docs/cli.md).

@@ -64,12 +64,20 @@ const PAPER_SAY: Record<string, string> = {
   clock: "Paper, Linen, then Night",
 };
 
-export default function Settings(p: { section?: Section | "all"; onClose(): void; onRoot(root: string): void; onAi(s: AiStatus): void }) {
+export default function Settings(p: { section?: Section | "all"; onClose(): void; onRoot(root: string): void; onAi(s: AiStatus): void; onOpen?(id: number): void }) {
   const [at, setAt] = createSignal<Section>(p.section && p.section !== "all" ? p.section : "general");
   const [info, { refetch: refetchInfo }] = createResource(async () => (await api()).notesInfo());
   const [app] = createResource(async () => (await api()).appInfo());
   const [desk, { mutate: setDesk }] = createResource<DesktopSettings>(async () => (await api()).desktopSettings());
   const [ai, { mutate: setAi }] = createResource<AiStatus>(async () => (await api()).aiStatus());
+  const saveModels = async (model: string, fast: string) => {
+    try {
+      setAi(await (await api()).setAiModels(model.trim(), fast.trim()));
+      say("Saved");
+    } catch (e) {
+      say(errText(e), { error: true });
+    }
+  };
   const [key, setKey] = createSignal("");
   const version = () => app()?.version ?? "";
   const [checking, setChecking] = createSignal(false);
@@ -285,6 +293,7 @@ export default function Settings(p: { section?: Section | "all"; onClose(): void
           </section>
           <section class="set-card">
             <Toggle label="A quiet page" hint="The title bar, sidebar, margin and footer fade while you type. Move the mouse and they come back." on={prefs().quiet} onChange={(on) => void pref("quiet", on)} />
+            <Toggle label="Quiet Markdown" hint="The marks (#, **, [[ ]]) hide on every line but the one you are on, so bold reads as bold. The file stays plain Markdown." on={prefs().quietMarks} onChange={(on) => void pref("quietMarks", on)} />
             <Toggle label="Paragraph focus" hint="The other paragraphs fade while you type." on={prefs().focus} onChange={(on) => void pref("focus", on)} />
             <Toggle label="Typewriter scrolling" hint="The line you type stays in the middle of the window." on={prefs().typewriter} onChange={(on) => void pref("typewriter", on)} />
             <Toggle
@@ -412,7 +421,7 @@ export default function Settings(p: { section?: Section | "all"; onClose(): void
         </Show>
 
         <Show when={at() === "sync"}>
-          <SyncSection />
+          <SyncSection onOpen={p.onOpen} />
         </Show>
 
         <Show when={at() === "ai"}>
@@ -444,6 +453,12 @@ export default function Settings(p: { section?: Section | "all"; onClose(): void
                 <button class="btn" onClick={() => saveKey(null)}>
                   Remove key
                 </button>
+              </Row>
+              <Row label="Model" hint="For writing and answering. Empty is the default.">
+                <input class="set-model" value={ai()!.model} aria-label="Model" onChange={(e) => void saveModels(e.currentTarget.value, ai()!.fastModel)} />
+              </Row>
+              <Row label="Fast model" hint="For small jobs: a title, tidying, a list, where a capture goes, related notes.">
+                <input class="set-model" value={ai()!.fastModel} aria-label="Fast model" onChange={(e) => void saveModels(ai()!.model, e.currentTarget.value)} />
               </Row>
             </Show>
             <Show when={ai()?.error}>

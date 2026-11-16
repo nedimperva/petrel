@@ -17,6 +17,8 @@ export interface Prefs {
   focus: boolean;
   /** The title bar, sidebar, margin and footer fade while you type, until the mouse moves. */
   quiet: boolean;
+  /** Markdown's marks (#, **, [[ ]]) hide on every line but the one you are on. */
+  quietMarks: boolean;
   writeFont: WriteFont;
   /** The petrel crosses the page once when the inbox is clear. */
   petrel: boolean;
@@ -36,6 +38,7 @@ export const DEFAULTS: Prefs = {
   typewriter: false,
   focus: false,
   quiet: true,
+  quietMarks: true,
   writeFont: "literata",
   petrel: true,
   sound: false,
@@ -45,6 +48,11 @@ export const DEFAULTS: Prefs = {
 };
 
 export const SIZES = [15, 16, 17, 18, 19, 20, 22];
+/** The next type size up (1) or down (-1) from `size`, within SIZES. */
+export function stepSize(size: number, dir: 1 | -1): number {
+  if (dir > 0) return SIZES.find((x) => x > size) ?? SIZES[SIZES.length - 1];
+  return [...SIZES].reverse().find((x) => x < size) ?? SIZES[0];
+}
 export const KEEP_GOING = [0, 1, 2, 5, 10, 30];
 export const THEMES: { id: Theme; label: string }[] = [
   { id: "system", label: "System" },
@@ -67,6 +75,7 @@ const KEYS: Record<keyof Prefs, string> = {
   typewriter: "ui.typewriter",
   focus: "ui.focus",
   quiet: "ui.quiet",
+  quietMarks: "ui.quiet_marks",
   writeFont: "ui.write_font",
   petrel: "ui.petrel",
   sound: "ui.sound",
@@ -89,6 +98,7 @@ export function parsePrefs(m: Record<string, string>): Prefs {
     typewriter: m[KEYS.typewriter] === "1",
     focus: m[KEYS.focus] === "1",
     quiet: flag(m[KEYS.quiet], DEFAULTS.quiet),
+    quietMarks: flag(m[KEYS.quietMarks], DEFAULTS.quietMarks),
     writeFont: FONTS.some((x) => x.id === f) ? (f as WriteFont) : DEFAULTS.writeFont,
     petrel: flag(m[KEYS.petrel], DEFAULTS.petrel),
     sound: flag(m[KEYS.sound], DEFAULTS.sound),

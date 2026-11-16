@@ -113,6 +113,7 @@ impl Store {
             k += 1;
         }
         rename_with_retry(&dir, &target)?;
+        super::trash::note_place(&root, &target.file_name().unwrap_or_default().to_string_lossy(), &folder);
         let gone = self.conn.execute(
             "DELETE FROM notes WHERE folder = ?1 OR folder LIKE ?2 ESCAPE '\\'",
             params![folder, format!("{}/%", like_escape(&folder))],

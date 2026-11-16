@@ -47,7 +47,30 @@ pub trait Remote {
     fn upload(&mut self, path: &str, id: Option<&str>, bytes: &[u8]) -> Result<RemoteFile>;
     /// To the remote's trash, where it can be got back.
     fn trash(&mut self, id: &str) -> Result<()>;
+    /// Moves or renames the file `id` to `path`, keeping its history there. `None` when the remote cannot, and
+    /// the engine uploads a copy and trashes the old one instead.
+    fn move_to(&mut self, _id: &str, _path: &str) -> Result<Option<RemoteFile>> {
+        Ok(None)
+    }
+    /// Several uploads at once; a remote that can run them side by side overrides this.
+    fn upload_many(&mut self, items: &[(String, Option<String>, Vec<u8>)]) -> Vec<Result<RemoteFile>> {
+        items.iter().map(|(path, id, bytes)| self.upload(path, id.as_deref(), bytes)).collect()
+    }
+    /// Several downloads at once, in the order asked.
+    fn download_many(&mut self, ids: &[String]) -> Vec<Result<Vec<u8>>> {
+        ids.iter().map(|id| self.download(id)).collect()
+    }
 }
+
+/// How many files go to `upload_many` or `download_many` at a time, so a first sync of a big folder does not
+/// hold every file in memory at once.
+const BATCH: usize = 24;
+
+/// A note longer than this is not kept for merging; it keeps both copies on a clash, as before.
+const BASE_MAX: usize = 512 * 1024;
+
+/// A full look at the local folder at least this often, in case the watcher missed something.
+pub const FULL_SCAN_MS: i64 = 60 * 60 * 1000;
 
 /// What both sides had after the last sync, and a cache so unchanged files are not read again.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -59,6 +82,14 @@ pub struct State {
     pub seen: BTreeMap<String, (i64, u64, String)>,
     /// Whatever the remote keeps to know what changed (Drive's page token).
     pub cursor: Option<String>,
+    /// When the whole local folder was last scanned (ms). Between full scans only the paths the watcher
+    /// names are looked at again.
+    #[serde(default)]
+    pub full_at: i64,
+    /// Where the text of each synced note is kept, by md5, so a note changed on both sides can be merged
+    /// against what both had (`<state file>.base/`). Not saved in the state; `load` sets it.
+    #[serde(skip)]
+    pub base_dir: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -70,7 +101,41 @@ pub struct Synced {
 
 impl State {
     pub fn load(path: &Path) -> State {
-        std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+        let mut s: State =
+            std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        s.base_dir = Some(path.with_extension("base"));
+        s
+    }
+
+    /// The text a note had at the last sync, if it was kept.
+    fn base_text(&self, md5: &str) -> Option<String> {
+        std::fs::read_to_string(self.base_dir.as_ref()?.join(md5)).ok()
+    }
+
+    /// Keeps the synced text of each note that has none kept yet, and (after a full scan) drops what no note
+    /// has any more. Notes only: other files are not merged.
+    fn keep_bases(&self, root: &Path, prune: bool) {
+        let Some(dir) = &self.base_dir else { return };
+        if std::fs::create_dir_all(dir).is_err() {
+            return;
+        }
+        for (path, s) in &self.synced {
+            if !path.ends_with(".md") || is_history(path) || dir.join(&s.md5).exists() {
+                continue;
+            }
+            let Ok(bytes) = std::fs::read(local(root, path)) else { continue };
+            if bytes.len() <= BASE_MAX && md5_hex(&bytes) == s.md5 {
+                let _ = write_bytes(&dir.join(&s.md5), &bytes);
+            }
+        }
+        if prune {
+            let wanted: BTreeSet<&str> = self.synced.values().map(|s| s.md5.as_str()).collect();
+            for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+                if !wanted.contains(e.file_name().to_string_lossy().as_ref()) {
+                    let _ = std::fs::remove_file(e.path());
+                }
+            }
+        }
     }
 
     pub fn save(&self, path: &Path) -> Result<()> {
@@ -90,10 +155,23 @@ pub struct Report {
     /// Deleted here, so moved to the remote's trash.
     pub trashed_there: usize,
     pub conflicts: usize,
+    /// Moved or renamed on one side, so moved on the other rather than copied again.
+    pub moved: usize,
+    /// Both changed in different places, so both edits were kept in one text.
+    pub merged: usize,
     /// Local files written or moved, relative to the folder, for the index to read again.
     pub changed: Vec<String>,
     /// Files that failed this time, with why; they are tried again next time.
     pub failed: Vec<(String, String)>,
+    /// Each thing done, in order: what (`sent`, `received`, `moved`, `merged`, `kept both`, `to the trash
+    /// here`, `to the trash there`) and the path. For the sync log.
+    pub log: Vec<(String, String)>,
+}
+
+impl Report {
+    fn did(&mut self, what: &str, path: &str) {
+        self.log.push((what.to_string(), path.to_string()));
+    }
 }
 
 /// Whether a path in the folder syncs.
@@ -118,7 +196,46 @@ pub fn scan(
     seen: &mut BTreeMap<String, (i64, u64, String)>,
 ) -> Result<BTreeMap<String, String>> {
     let mut out = BTreeMap::new();
-    let mut stack = vec![root.to_path_buf()];
+    walk(root, root.to_path_buf(), seen, &mut out);
+    seen.retain(|k, _| out.contains_key(k));
+    Ok(out)
+}
+
+/// The local files as `scan` sees them, trusting `seen` for everything except the paths named (files or
+/// folders, relative), which are looked at again. The watcher names what changed; this saves walking a folder
+/// of thousands of notes and their histories every 30 seconds.
+pub fn scan_paths(
+    root: &Path,
+    seen: &mut BTreeMap<String, (i64, u64, String)>,
+    paths: &[String],
+) -> BTreeMap<String, String> {
+    for rel in paths {
+        let under = format!("{rel}/");
+        seen.retain(|k, _| k != rel && !k.starts_with(&under));
+    }
+    let mut out: BTreeMap<String, String> =
+        seen.iter().map(|(k, (_, _, m))| (k.clone(), m.clone())).collect();
+    for rel in paths {
+        if rel.is_empty() || !syncs(rel) {
+            continue;
+        }
+        let path = local(root, rel);
+        match std::fs::metadata(&path) {
+            Ok(m) if m.is_dir() => walk(root, path, seen, &mut out),
+            Ok(m) if m.is_file() => look(root, &path, &m, seen, &mut out),
+            _ => {}
+        }
+    }
+    out
+}
+
+fn walk(
+    root: &Path,
+    start: PathBuf,
+    seen: &mut BTreeMap<String, (i64, u64, String)>,
+    out: &mut BTreeMap<String, String>,
+) {
+    let mut stack = vec![start];
     while let Some(dir) = stack.pop() {
         let Ok(rd) = std::fs::read_dir(&dir) else { continue };
         for e in rd.flatten() {
@@ -132,28 +249,38 @@ pub fn scan(
                 stack.push(path);
                 continue;
             }
-            if !meta.is_file() || meta.len() > MAX_BYTES {
-                continue;
-            }
-            let mtime = meta
-                .modified()
-                .ok()
-                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                .map_or(0, |d| d.as_millis() as i64);
-            let md5 = match seen.get(&rel) {
-                Some((t, n, m)) if *t == mtime && *n == meta.len() => m.clone(),
-                _ => {
-                    let Ok(bytes) = std::fs::read(&path) else { continue };
-                    let m = md5_hex(&bytes);
-                    seen.insert(rel.clone(), (mtime, meta.len(), m.clone()));
-                    m
-                }
-            };
-            out.insert(rel, md5);
+            look(root, &path, &meta, seen, out);
         }
     }
-    seen.retain(|k, _| out.contains_key(k));
-    Ok(out)
+}
+
+/// One file: its md5 from `seen` when its size and time are the same, read again when not.
+fn look(
+    root: &Path,
+    path: &Path,
+    meta: &std::fs::Metadata,
+    seen: &mut BTreeMap<String, (i64, u64, String)>,
+    out: &mut BTreeMap<String, String>,
+) {
+    let Some(rel) = rel_of(root, path) else { return };
+    if !syncs(&rel) || !meta.is_file() || meta.len() > MAX_BYTES {
+        return;
+    }
+    let mtime = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_millis() as i64);
+    let md5 = match seen.get(&rel) {
+        Some((t, n, m)) if *t == mtime && *n == meta.len() => m.clone(),
+        _ => {
+            let Ok(bytes) = std::fs::read(path) else { return };
+            let m = md5_hex(&bytes);
+            seen.insert(rel.clone(), (mtime, meta.len(), m.clone()));
+            m
+        }
+    };
+    out.insert(rel, md5);
 }
 
 fn rel_of(root: &Path, path: &Path) -> Option<String> {
@@ -212,8 +339,16 @@ pub fn conflict_name(root: &Path, rel: &str, stamp: &str) -> String {
     }
 }
 
+/// Whether a path is a note's version (`.history/`), which is removed outright when the other side thinned it.
+fn is_history(rel: &str) -> bool {
+    rel.split('/').any(|part| part == ".history")
+}
+
 /// Moves a local file to `.trash/`, as Petrel's own trash does.
 fn to_trash(root: &Path, rel: &str) -> Result<()> {
+    if is_history(rel) {
+        return std::fs::remove_file(local(root, rel)).with_context(|| format!("removing {rel}"));
+    }
     let dir = root.join(TRASH_DIR);
     std::fs::create_dir_all(&dir)?;
     let file = rel.rsplit('/').next().unwrap_or(rel);
@@ -224,13 +359,35 @@ fn to_trash(root: &Path, rel: &str) -> Result<()> {
         target = dir.join(format!("{stamp} {n} {file}"));
         n += 1;
     }
-    std::fs::rename(local(root, rel), &target).with_context(|| format!("moving {rel} to the trash"))
+    std::fs::rename(local(root, rel), &target).with_context(|| format!("moving {rel} to the trash"))?;
+    crate::notes::trash::note_place(root, &target.file_name().unwrap_or_default().to_string_lossy(), rel);
+    Ok(())
 }
 
-/// Runs one sync of `root` with `remote`. `stamp` names conflict copies (`2026-11-14 1830`).
+/// Runs one sync of `root` with `remote`, looking at the whole local folder. `stamp` names conflict copies
+/// (`2026-11-14 1830`).
 pub fn sync(root: &Path, remote: &mut dyn Remote, state: &mut State, stamp: &str) -> Result<Report> {
+    sync_hinted(root, remote, state, stamp, None)
+}
+
+/// One sync. `hint` names the local paths that may have changed since the last one (an empty list: none);
+/// `None` scans the whole folder.
+pub fn sync_hinted(
+    root: &Path,
+    remote: &mut dyn Remote,
+    state: &mut State,
+    stamp: &str,
+    hint: Option<&[String]>,
+) -> Result<Report> {
     let mut report = Report::default();
-    let here = scan(root, &mut state.seen)?;
+    let here = match hint {
+        Some(paths) => scan_paths(root, &mut state.seen, paths),
+        None => {
+            let h = scan(root, &mut state.seen)?;
+            state.full_at = chrono::Utc::now().timestamp_millis();
+            h
+        }
+    };
     let local_changed = here.len() != state.synced.len()
         || here.iter().any(|(p, m)| state.synced.get(p).is_none_or(|s| &s.md5 != m));
     let remote_changed = remote.has_changes()?;
@@ -254,27 +411,187 @@ pub fn sync(root: &Path, remote: &mut dyn Remote, state: &mut State, stamp: &str
             .collect()
     };
 
-    let paths: BTreeSet<String> =
+    let mut paths: BTreeSet<String> =
         here.keys().chain(there.keys()).chain(state.synced.keys()).cloned().collect();
-    let mut failures_in_a_row = 0;
+    moves(root, remote, state, &mut report, &here, &there, &mut paths);
+
+    // One-sided changes go in batches, so a remote can run them side by side; the rest one by one.
+    let mut ups: Vec<(String, Option<String>)> = Vec::new();
+    let mut downs: Vec<(String, RemoteFile, Option<String>)> = Vec::new();
+    let mut rest: Vec<String> = Vec::new();
     for path in paths {
         let l = here.get(&path).cloned();
         let r = there.get(&path).cloned();
-        let b = state.synced.get(&path).cloned();
-        let done = decide(root, remote, state, &mut report, &path, l, r, b, stamp);
-        match done {
-            Ok(()) => failures_in_a_row = 0,
-            Err(e) => {
-                report.failed.push((path.clone(), format!("{e:#}")));
-                failures_in_a_row += 1;
-                // Offline or signed out: stop rather than fail every file one by one.
-                if failures_in_a_row >= 3 {
-                    return Err(e.context("sync stopped after three failures in a row"));
+        let base = state.synced.get(&path).map(|s| s.md5.clone());
+        let rm = r.as_ref().map(|f| f.md5.clone());
+        if l == rm {
+            match &r {
+                Some(f) => {
+                    state.synced.insert(path, Synced { id: f.id.clone(), md5: f.md5.clone() });
                 }
+                None => {
+                    state.synced.remove(&path);
+                }
+            }
+            continue;
+        }
+        match (l != base, rm != base, l.is_some(), r) {
+            (true, false, true, r) => ups.push((path, r.map(|f| f.id))),
+            (false, true, _, Some(f)) => downs.push((path, f, l)),
+            _ => rest.push(path),
+        }
+    }
+    let mut failures_in_a_row = 0;
+    let failed = |report: &mut Report, in_a_row: &mut usize, path: &str, e: anyhow::Error| -> Result<()> {
+        report.failed.push((path.to_string(), format!("{e:#}")));
+        *in_a_row += 1;
+        // Offline or signed out: stop rather than fail every file one by one.
+        if *in_a_row >= 3 {
+            return Err(e.context("sync stopped after three failures in a row"));
+        }
+        Ok(())
+    };
+
+    for chunk in ups.chunks(BATCH) {
+        let mut items = Vec::new();
+        for (path, id) in chunk {
+            match std::fs::read(local(root, path)) {
+                Ok(bytes) => items.push((path.clone(), id.clone(), bytes)),
+                Err(e) => report.failed.push((path.clone(), format!("reading {path}: {e}"))),
+            }
+        }
+        let results = remote.upload_many(&items);
+        for ((path, _, bytes), res) in items.iter().zip(results) {
+            match res {
+                Ok(f) => {
+                    // What was sent, whatever the remote reports, is what both sides now have.
+                    state.synced.insert(path.clone(), Synced { id: f.id, md5: md5_hex(bytes) });
+                    report.uploaded += 1;
+                    report.did("sent", path);
+                    failures_in_a_row = 0;
+                }
+                Err(e) => failed(&mut report, &mut failures_in_a_row, path, e)?,
             }
         }
     }
+    for chunk in downs.chunks(BATCH) {
+        let mut wanted = Vec::new();
+        for (path, f, seen) in chunk {
+            match unchanged(root, path, seen.as_deref()) {
+                Ok(true) => wanted.push((path, f)),
+                Ok(false) => {
+                    report.failed.push((path.clone(), format!("{path} changed while syncing; next time")))
+                }
+                Err(e) => report.failed.push((path.clone(), format!("{e:#}"))),
+            }
+        }
+        let ids: Vec<String> = wanted.iter().map(|(_, f)| f.id.clone()).collect();
+        let results = remote.download_many(&ids);
+        for ((path, f), res) in wanted.into_iter().zip(results) {
+            match res.and_then(|bytes| write_bytes(&local(root, path), &bytes)) {
+                Ok(()) => {
+                    state.synced.insert(path.clone(), Synced { id: f.id.clone(), md5: f.md5.clone() });
+                    report.downloaded += 1;
+                    report.did("received", path);
+                    report.changed.push(path.clone());
+                    failures_in_a_row = 0;
+                }
+                Err(e) => failed(&mut report, &mut failures_in_a_row, path, e)?,
+            }
+        }
+    }
+    for path in rest {
+        let l = here.get(&path).cloned();
+        let r = there.get(&path).cloned();
+        let b = state.synced.get(&path).cloned();
+        match decide(root, remote, state, &mut report, &path, l, r, b, stamp) {
+            Ok(()) => failures_in_a_row = 0,
+            Err(e) => failed(&mut report, &mut failures_in_a_row, &path, e)?,
+        }
+    }
+    state.keep_bases(root, hint.is_none());
     Ok(report)
+}
+
+/// Renames and moves, on either side, done as moves on the other rather than a new copy and a deletion. A
+/// move is a file gone from one path and the same text (md5) new at another, on one side only. Handled paths
+/// are taken out of `paths`; anything that fails is left to the ordinary rules.
+#[allow(clippy::too_many_arguments)]
+fn moves(
+    root: &Path,
+    remote: &mut dyn Remote,
+    state: &mut State,
+    report: &mut Report,
+    here: &BTreeMap<String, String>,
+    there: &BTreeMap<String, RemoteFile>,
+    paths: &mut BTreeSet<String>,
+) {
+    // Moved here: gone here and unchanged there; new here only, with the same text.
+    let mut gone: Vec<(String, Synced)> = state
+        .synced
+        .iter()
+        .filter(|(p, s)| !here.contains_key(*p) && there.get(*p).is_some_and(|f| f.md5 == s.md5))
+        .map(|(p, s)| (p.clone(), s.clone()))
+        .collect();
+    let new_here: Vec<(String, String)> = here
+        .iter()
+        .filter(|(p, _)| !state.synced.contains_key(*p) && !there.contains_key(*p))
+        .map(|(p, m)| (p.clone(), m.clone()))
+        .collect();
+    let mut moved_here = BTreeSet::new();
+    for (to, md5) in new_here {
+        let Some(i) = gone.iter().position(|(_, s)| s.md5 == md5) else { continue };
+        let (from, s) = gone.remove(i);
+        match remote.move_to(&s.id, &to) {
+            Ok(Some(f)) => {
+                state.synced.remove(&from);
+                state.synced.insert(to.clone(), Synced { id: f.id, md5 });
+                paths.remove(&from);
+                paths.remove(&to);
+                moved_here.insert(s.id);
+                report.moved += 1;
+                report.did("moved", &to);
+            }
+            // Not supported, or failed: the copy-and-trash rules still get there.
+            Ok(None) => return,
+            Err(_) => continue,
+        }
+    }
+    // Moved there: the same id at a new path, the old path unchanged here and gone there.
+    let by_id: BTreeMap<&str, (&String, &Synced)> =
+        state.synced.iter().map(|(p, s)| (s.id.as_str(), (p, s))).collect();
+    let mut todo = Vec::new();
+    for (to, f) in there {
+        if state.synced.contains_key(to) || here.contains_key(to) || moved_here.contains(&f.id) {
+            continue;
+        }
+        let Some((from, s)) = by_id.get(f.id.as_str()) else { continue };
+        if *from == to || there.contains_key(*from) || here.get(*from) != Some(&s.md5) || f.md5 != s.md5 {
+            continue;
+        }
+        todo.push(((*from).clone(), to.clone(), f.clone()));
+    }
+    for (from, to, f) in todo {
+        let target = local(root, &to);
+        let moved = target
+            .parent()
+            .map_or(Ok(()), std::fs::create_dir_all)
+            .and_then(|()| std::fs::rename(local(root, &from), &target));
+        if moved.is_err() {
+            continue;
+        }
+        if let Some(seen) = state.seen.remove(&from) {
+            state.seen.insert(to.clone(), seen);
+        }
+        state.synced.remove(&from);
+        state.synced.insert(to.clone(), Synced { id: f.id, md5: f.md5 });
+        paths.remove(&from);
+        paths.remove(&to);
+        report.did("moved", &to);
+        report.changed.push(from);
+        report.changed.push(to);
+        report.moved += 1;
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -311,11 +628,13 @@ fn decide(
                 let f = upload(root, remote, path, r.as_ref().map(|f| f.id.as_str()))?;
                 synced(state, &f.id, &f.md5);
                 report.uploaded += 1;
+                report.did("sent", path);
             }
             None => {
                 if let Some(f) = &r {
                     remote.trash(&f.id)?;
                     report.trashed_there += 1;
+                    report.did("to the trash there", path);
                 }
                 state.synced.remove(path);
             }
@@ -325,6 +644,7 @@ fn decide(
                 download(root, remote, path, f, l.as_deref())?;
                 synced(state, &f.id, &f.md5);
                 report.downloaded += 1;
+                report.did("received", path);
                 report.changed.push(path.to_string());
             }
             None => {
@@ -334,6 +654,7 @@ fn decide(
                     }
                     to_trash(root, path)?;
                     report.trashed_here += 1;
+                    report.did("to the trash here", path);
                     report.changed.push(path.to_string());
                 }
                 state.synced.remove(path);
@@ -341,9 +662,19 @@ fn decide(
         },
         // Both changed, to different text (equal text returned above).
         _ => match (&l, &r) {
-            (Some(_), Some(f)) => {
-                // The text here stays at its name; the other is kept beside it, and both go to both sides.
+            (Some(here), Some(f)) => {
                 let bytes = remote.download(&f.id)?;
+                // Changed in different places: both edits in one text, on both sides.
+                if let Some(merged) = merged(root, state, path, here, base.as_deref(), &bytes)? {
+                    let u = remote.upload(path, Some(&f.id), merged.as_bytes())?;
+                    write_bytes(&local(root, path), merged.as_bytes())?;
+                    synced(state, &u.id, &md5_hex(merged.as_bytes()));
+                    report.merged += 1;
+                    report.did("merged", path);
+                    report.changed.push(path.to_string());
+                    return Ok(());
+                }
+                // The text here stays at its name; the other is kept beside it, and both go to both sides.
                 let copy = conflict_name(root, path, stamp);
                 write_bytes(&local(root, &copy), &bytes)?;
                 report.changed.push(copy.clone());
@@ -352,18 +683,21 @@ fn decide(
                 let u = upload(root, remote, path, Some(&f.id))?;
                 synced(state, &u.id, &u.md5);
                 report.conflicts += 1;
+                report.did("kept both", path);
             }
             // Deleted there, changed here: keep it.
             (Some(_), None) => {
                 let u = upload(root, remote, path, None)?;
                 synced(state, &u.id, &u.md5);
                 report.uploaded += 1;
+                report.did("sent", path);
             }
             // Deleted here, changed there: bring it back.
             (None, Some(f)) => {
                 download(root, remote, path, f, None)?;
                 synced(state, &f.id, &f.md5);
                 report.downloaded += 1;
+                report.did("received", path);
                 report.changed.push(path.to_string());
             }
             (None, None) => {
@@ -372,6 +706,30 @@ fn decide(
         },
     }
     Ok(())
+}
+
+/// A note both sides changed, merged against the text both had at the last sync, when the changes are in
+/// different places. `None` when it is not a note, the base was not kept, the file changed since the scan,
+/// or the changes clash.
+fn merged(
+    root: &Path,
+    state: &State,
+    path: &str,
+    here: &str,
+    base: Option<&str>,
+    there: &[u8],
+) -> Result<Option<String>> {
+    if !path.ends_with(".md") || is_history(path) {
+        return Ok(None);
+    }
+    let Some(base) = base.and_then(|m| state.base_text(m)) else { return Ok(None) };
+    let Ok(there) = std::str::from_utf8(there) else { return Ok(None) };
+    let bytes = std::fs::read(local(root, path))?;
+    if md5_hex(&bytes) != here {
+        return Ok(None);
+    }
+    let Ok(ours) = std::str::from_utf8(&bytes) else { return Ok(None) };
+    Ok(crate::merge::merge3(&base, ours, there))
 }
 
 /// Whether the local file is still what the scan saw (or still missing), so a write never lands on new typing.
@@ -444,6 +802,11 @@ mod tests {
             self.trashed.push(id.into());
             Ok(())
         }
+        fn move_to(&mut self, id: &str, path: &str) -> Result<Option<RemoteFile>> {
+            let (p, b) = self.files.get_mut(id).ok_or_else(|| anyhow!("no {id}"))?;
+            *p = path.to_string();
+            Ok(Some(RemoteFile { id: id.into(), path: path.into(), md5: md5_hex(b) }))
+        }
     }
 
     fn tmp() -> PathBuf {
@@ -502,7 +865,38 @@ mod tests {
         let r = sync(&b, &mut drive, &mut sb, "s").unwrap();
         assert_eq!(r.trashed_here, 1);
         assert!(!local(&b, "inbox/milk.md").exists());
-        assert_eq!(std::fs::read_dir(b.join(TRASH_DIR)).unwrap().count(), 1);
+        let trashed = std::fs::read_dir(b.join(TRASH_DIR)).unwrap().flatten();
+        assert_eq!(trashed.filter(|e| !e.file_name().to_string_lossy().starts_with('.')).count(), 1);
+        // Where it came from is written down, for Put back.
+        assert!(std::fs::read_to_string(b.join(TRASH_DIR).join(".places"))
+            .unwrap()
+            .contains("\tinbox/milk.md"));
+    }
+
+    #[test]
+    fn edits_in_different_places_merge() {
+        let (a, b) = (tmp(), tmp());
+        let mut drive = Fake::default();
+        let base = |d: &Path| State { base_dir: Some(d.join(".state.base")), ..State::default() };
+        let (mut sa, mut sb) = (base(&a), base(&b));
+        put(&a, "Trip.md", "# Trip\n\nMonday: museum\nTuesday: market\nWednesday: hike\n");
+        sync(&a, &mut drive, &mut sa, "s").unwrap();
+        sync(&b, &mut drive, &mut sb, "s").unwrap();
+        put(&a, "Trip.md", "# Trip\n\nMonday: old town\nTuesday: market\nWednesday: hike\n");
+        put(&b, "Trip.md", "# Trip\n\nMonday: museum\nTuesday: market\nWednesday: lake\n");
+        sync(&a, &mut drive, &mut sa, "s").unwrap();
+        let r = sync(&b, &mut drive, &mut sb, "s").unwrap();
+        assert_eq!((r.merged, r.conflicts), (1, 0));
+        let both = "# Trip\n\nMonday: old town\nTuesday: market\nWednesday: lake\n";
+        assert_eq!(read(&b, "Trip.md"), both);
+        sync(&a, &mut drive, &mut sa, "s").unwrap();
+        assert_eq!(read(&a, "Trip.md"), both);
+        assert!(!local(&b, "Trip (conflict s).md").exists());
+        // A clash on the same line still keeps both copies.
+        put(&a, "Trip.md", &both.replace("market", "bazaar"));
+        put(&b, "Trip.md", &both.replace("market", "souk"));
+        sync(&a, &mut drive, &mut sa, "s").unwrap();
+        assert_eq!(sync(&b, &mut drive, &mut sb, "s").unwrap().conflicts, 1);
     }
 
     #[test]
@@ -560,6 +954,63 @@ mod tests {
         sync(&a, &mut drive, &mut sa, "s").unwrap();
         assert_eq!(read(&a, "OnlyB.md"), "b\n");
         assert_eq!(drive.files.len(), 3);
+    }
+
+    #[test]
+    fn a_rename_is_a_move_on_both_sides() {
+        let (a, b) = (tmp(), tmp());
+        let mut drive = Fake::default();
+        let (mut sa, mut sb) = (State::default(), State::default());
+        put(&a, "inbox/Rome.md", "pasta\n");
+        sync(&a, &mut drive, &mut sa, "s").unwrap();
+        sync(&b, &mut drive, &mut sb, "s").unwrap();
+        std::fs::create_dir_all(local(&a, "Travel")).unwrap();
+        std::fs::rename(local(&a, "inbox/Rome.md"), local(&a, "Travel/Rome.md")).unwrap();
+        let r = sync(&a, &mut drive, &mut sa, "s").unwrap();
+        assert_eq!((r.moved, r.uploaded, r.trashed_there), (1, 0, 0));
+        assert!(drive.trashed.is_empty());
+        let r = sync(&b, &mut drive, &mut sb, "s").unwrap();
+        assert_eq!((r.moved, r.downloaded, r.trashed_here), (1, 0, 0));
+        assert_eq!(read(&b, "Travel/Rome.md"), "pasta\n");
+        assert!(!local(&b, "inbox/Rome.md").exists());
+        assert_eq!(sync(&b, &mut drive, &mut sb, "s").unwrap(), Report::default());
+    }
+
+    #[test]
+    fn a_hinted_scan_reads_only_what_it_is_told() {
+        let a = tmp();
+        let mut drive = Fake::default();
+        let mut sa = State::default();
+        put(&a, "One.md", "one\n");
+        put(&a, "Two.md", "two\n");
+        sync(&a, &mut drive, &mut sa, "s").unwrap();
+        assert!(sa.full_at > 0);
+        put(&a, "One.md", "one, more\n");
+        put(&a, "Two.md", "two, more\n");
+        let r = sync_hinted(&a, &mut drive, &mut sa, "s", Some(&["One.md".to_string()])).unwrap();
+        assert_eq!(r.uploaded, 1);
+        // The full scan finds the other one.
+        assert_eq!(sync(&a, &mut drive, &mut sa, "s").unwrap().uploaded, 1);
+        // A folder named by the watcher is walked; a removed file is seen as removed.
+        std::fs::remove_file(local(&a, "One.md")).unwrap();
+        put(&a, "Travel/Rome.md", "pasta\n");
+        let hint = ["One.md".to_string(), "Travel".to_string()];
+        let r = sync_hinted(&a, &mut drive, &mut sa, "s", Some(&hint)).unwrap();
+        assert_eq!((r.uploaded, r.trashed_there), (1, 1));
+    }
+
+    #[test]
+    fn a_thinned_version_is_removed_not_trashed() {
+        let (a, b) = (tmp(), tmp());
+        let mut drive = Fake::default();
+        let (mut sa, mut sb) = (State::default(), State::default());
+        put(&a, "Travel/.history/Rome/1-edit.md", "old\n");
+        sync(&a, &mut drive, &mut sa, "s").unwrap();
+        sync(&b, &mut drive, &mut sb, "s").unwrap();
+        std::fs::remove_file(local(&a, "Travel/.history/Rome/1-edit.md")).unwrap();
+        sync(&a, &mut drive, &mut sa, "s").unwrap();
+        assert_eq!(sync(&b, &mut drive, &mut sb, "s").unwrap().trashed_here, 1);
+        assert!(!b.join(TRASH_DIR).exists());
     }
 
     #[test]

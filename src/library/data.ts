@@ -22,18 +22,16 @@ export async function loadLibrary(): Promise<LibraryData> {
   // The preview has no headings in it, so the few prompts and snippets are read whole to count their versions.
   const versions: Record<number, number> = {};
   const firstVersion: Record<number, string> = {};
-  await Promise.all(
-    notes
-      .filter((n) => hasVersions(n.folder))
-      .slice(0, 400)
-      .map(async (n) => {
-        const vs = versionsOf((await s.peekNote(n.id).catch(() => null))?.body ?? "");
-        if (vs.length > 1) {
-          versions[n.id] = vs.length;
-          firstVersion[n.id] = vs[0].text.slice(0, 400);
-        }
-      }),
-  );
+  const ids = notes.filter((n) => hasVersions(n.folder)).slice(0, 400).map((n) => n.id);
+  // One call for all of them: 400 calls each took their turn at the index.
+  const whole = ids.length ? await s.peekNotes(ids).catch(() => []) : [];
+  for (const n of whole) {
+    const vs = versionsOf(n.body);
+    if (vs.length > 1) {
+      versions[n.id] = vs.length;
+      firstVersion[n.id] = vs[0].text.slice(0, 400);
+    }
+  }
   return { notes, copies, versions, firstVersion, conflicts };
 }
 

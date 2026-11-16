@@ -118,6 +118,26 @@ impl Store {
         Ok(self.remember_notes(vec![UndoStep::NoteText { path: row.path.clone(), before, after }]))
     }
 
+    /// Takes an open task's line out of its note, to be written on another page (today's). Refused, as a tick is,
+    /// when the line changed since it was listed.
+    pub fn take_task(&mut self, id: i64, line: usize, text: &str) -> Result<UndoToken> {
+        let root = self.root()?;
+        let row = self.row(id)?;
+        let path = abs(&root, &row.path);
+        let before = std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+        let mut lines: Vec<&str> = before.split('\n').collect();
+        let Some(&old) = lines.get(line) else { bail!("that task is no longer in {}", row.title) };
+        if open_task(old.trim_end_matches('\r')) != Some(text.trim()) {
+            bail!("that task changed in {}; open the note to move it", row.title);
+        }
+        lines.remove(line);
+        let after = lines.join("\n");
+        self.note_version_if_due(id, &before)?;
+        write_atomic(&path, &after)?;
+        self.index_file(&root, &row.path)?;
+        Ok(self.remember_notes(vec![UndoStep::NoteText { path: row.path.clone(), before, after }]))
+    }
+
     /// How many tasks a note still has open (for the page's count after a tick).
     pub fn open_task_count(&self, id: i64) -> Result<usize> {
         let content: String =
@@ -130,6 +150,20 @@ impl Store {
 mod tests {
     use super::super::tests_support::{store_in, tmp};
     use super::*;
+
+    #[test]
+    fn a_task_is_taken_out_of_its_note() {
+        let dir = tmp();
+        let mut s = store_in(&dir);
+        let n = s
+            .create_note("journal", "2026-11-10", "09:00 plan\n- [ ] call the bank\n- [ ] milk\n", &[])
+            .unwrap();
+        let t = s.open_tasks().unwrap();
+        let bank = t.iter().find(|t| t.text == "call the bank").unwrap();
+        s.take_task(n.id, bank.line, &bank.text).unwrap();
+        assert_eq!(s.peek_note(n.id).unwrap().body, "09:00 plan\n- [ ] milk\n");
+        assert!(s.take_task(n.id, bank.line, &bank.text).is_err());
+    }
 
     #[test]
     fn tasks_outside_code_and_front() {

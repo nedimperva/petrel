@@ -2,8 +2,8 @@
 // whether it holds things to copy (cards in the library and the picker) or pages. Saved at once to the folder's
 // `.petrel` file, so the other computer gets it with the folder.
 
-import { createSignal, For, onMount } from "solid-js";
-import { errText } from "../api";
+import { createSignal, For, onMount, Show } from "solid-js";
+import { api, errText } from "../api";
 import { folderName, say } from "../ui";
 import { COLORS, colorOf, MARKS, toCopy } from "./faces";
 import { faces, saveFace } from "./Mark";
@@ -15,6 +15,16 @@ export default function FacePicker(p: { top: string; onClose(): void }) {
   const [color, setColor] = createSignal(current().color || colorOf(p.top, faces()));
   const [mark, setMark] = createSignal(current().mark || "dot");
   const [copy, setCopy] = createSignal(current().copy ?? "");
+  const [template, setTemplate] = createSignal<string | null>(null);
+  onMount(async () => setTemplate(await (await api()).collectionTemplate(p.top).catch(() => "")));
+  async function saveTemplate(text: string) {
+    try {
+      await (await api()).setCollectionTemplate(p.top, text);
+      say(text.trim() ? "New notes here start from this" : "No template");
+    } catch (e) {
+      say(errText(e), { error: true });
+    }
+  }
 
   async function save(c: string, m: string, k = copy()) {
     setColor(c);
@@ -32,7 +42,7 @@ export default function FacePicker(p: { top: string; onClose(): void }) {
       class="scrim"
       onMouseDown={(e) => e.target === e.currentTarget && p.onClose()}
       onKeyDown={(e) => {
-        if (e.key === "Escape" || e.key === "Enter") {
+        if (e.key === "Escape" || (e.key === "Enter" && !(e.target instanceof HTMLTextAreaElement))) {
           e.preventDefault();
           e.stopPropagation();
           p.onClose();
@@ -94,6 +104,19 @@ export default function FacePicker(p: { top: string; onClose(): void }) {
             )}
           </For>
         </div>
+        <Show when={!toCopy(p.top, { [p.top]: { color: "", mark: "", copy: copy() } })}>
+          <h3 class="face-label">New notes start with</h3>
+          <textarea
+            class="face-template"
+            rows={5}
+            placeholder={"# {{today}}\n\n## Notes"}
+            value={template() ?? ""}
+            onChange={(e) => void saveTemplate(e.currentTarget.value)}
+          />
+          <p class="muted small">
+            <code>{"{{today}}"}</code> and <code>{"{{time}}"}</code> fill themselves; other blanks stay to fill in.
+          </p>
+        </Show>
         <p class="muted small">Kept in {p.top}/.petrel, so it moves and syncs with the folder.</p>
       </div>
     </div>

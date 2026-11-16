@@ -1,5 +1,7 @@
-// A few words in Ctrl K that narrow what is found: `in:travel`, `pinned`, `today`, `this week`, `has:link`,
-// `has:picture`, `has:task`. The rest of the text is searched as before. Pure, for `npm test`.
+// A few words in Ctrl K that narrow what is found: `in:travel`, `is:pinned`, `when:today`, `when:week`,
+// `has:link`, `has:picture`, `has:task`. The rest of the text is searched as before. Plain words that look like
+// a filter ("today", "week", "inbox", "pinned") stay words, so "week plan" finds the note; they are offered as a
+// filter instead (`offers`), which Tab turns on (`acceptOffer`). Pure, for `npm test`.
 
 import type { NoteSummary } from "../api";
 
@@ -10,12 +12,30 @@ export interface Filters {
   /** Changed since this moment (ms). */
   since: number | null;
   has: ("link" | "picture" | "task")[];
+  /** Plain words that could be a filter, and the filter each would be: Tab takes the first. */
+  offers: { word: string; filter: string; label: string }[];
 }
 
 export const noFilters = (f: Filters) => !f.folder && !f.pinned && f.since === null && !f.has.length;
 
+const OFFERS: { re: RegExp; filter: string; label: string }[] = [
+  { re: /(^|\s)(pinned)(?=\s|$)/i, filter: "is:pinned", label: "only pinned notes" },
+  { re: /(^|\s)(this\s+week|week)(?=\s|$)/i, filter: "when:week", label: "changed this week" },
+  { re: /(^|\s)(today)(?=\s|$)/i, filter: "when:today", label: "changed today" },
+  { re: /(^|\s)(inbox)(?=\s|$)/i, filter: "in:inbox", label: "only the inbox" },
+];
+
+/** The query with the first offer turned into its filter. */
+export function acceptOffer(q: string): string {
+  for (const o of OFFERS) {
+    const m = o.re.exec(q);
+    if (m) return (q.slice(0, m.index) + m[1] + o.filter + q.slice(m.index + m[0].length)).replace(/\s+/g, " ").trim() + " ";
+  }
+  return q;
+}
+
 export function parseFilters(q: string, now = new Date()): Filters {
-  const f: Filters = { words: "", folder: null, pinned: false, since: null, has: [] };
+  const f: Filters = { words: "", folder: null, pinned: false, since: null, has: [], offers: [] };
   const midnight = (back: number) => new Date(now.getFullYear(), now.getMonth(), now.getDate() - back).getTime();
   let rest = ` ${q} `;
   const take = (re: RegExp, then: (m: RegExpExecArray) => void) => {
@@ -31,11 +51,14 @@ export function parseFilters(q: string, now = new Date()): Filters {
     const h = w.startsWith("link") ? "link" : w.startsWith("task") || w === "todo" ? "task" : "picture";
     if (!f.has.includes(h)) f.has.push(h);
   });
-  take(/\s(?:is:)?pinned(?=\s)/i, () => (f.pinned = true));
-  take(/\s(?:this\s+)?week(?=\s)/i, () => (f.since = midnight(6)));
-  take(/\stoday(?=\s)/i, () => (f.since = midnight(0)));
-  take(/\sinbox(?=\s)/i, () => (f.folder = "inbox"));
+  take(/\sis:pinned(?=\s)/i, () => (f.pinned = true));
+  take(/\swhen:(?:this-?)?week(?=\s)/i, () => (f.since = midnight(6)));
+  take(/\swhen:today(?=\s)/i, () => (f.since = midnight(0)));
   f.words = rest.replace(/\s+/g, " ").trim();
+  for (const o of OFFERS) {
+    const m = o.re.exec(f.words);
+    if (m) f.offers.push({ word: m[2], filter: o.filter, label: o.label });
+  }
   return f;
 }
 

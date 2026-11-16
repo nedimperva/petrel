@@ -122,6 +122,15 @@ export function htmlToMarkdown(body: HNode): string {
     .trim();
 }
 
+/** A pasted web address over selected words: the words become the link text. Not when the words are an address
+ * themselves, span lines, or are already inside a link. */
+export function linkOver(selected: string, pasted: string): string | null {
+  const url = pasted.trim();
+  if (!/^(https?:\/\/|mailto:)\S+$/i.test(url)) return null;
+  if (!selected.trim() || selected.includes("\n") || /^(https?:|mailto:)/i.test(selected.trim()) || /[[\]]/.test(selected)) return null;
+  return `[${selected}](${url})`;
+}
+
 /** Converts pasted HTML; `converted` is told, for the toast. Pictures are left to pictures.ts. */
 export function cleanPaste(converted: () => void): Extension {
   return EditorView.domEventHandlers({
@@ -130,6 +139,13 @@ export function cleanPaste(converted: () => void): Extension {
       if (!data || data.files.length) return false;
       const html = data.getData("text/html");
       const plain = data.getData("text/plain");
+      const sel = view.state.selection.main;
+      const link = sel.empty ? null : linkOver(view.state.sliceDoc(sel.from, sel.to), plain);
+      if (link) {
+        e.preventDefault();
+        view.dispatch({ changes: { from: sel.from, to: sel.to, insert: link }, selection: { anchor: sel.from + link.length }, userEvent: "input.paste" });
+        return true;
+      }
       if (!html || !MEANINGFUL.test(html)) return false;
       // Inside a code block, the text as it is.
       const before = view.state.sliceDoc(0, view.state.selection.main.from);

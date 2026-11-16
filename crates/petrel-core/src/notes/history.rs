@@ -13,6 +13,7 @@ use anyhow::Result;
 use rusqlite::params;
 
 use super::{abs, write_atomic, NOTE_VERSIONS_KEPT};
+use crate::retention::{self, VersionAge};
 use crate::store::Store;
 
 pub const DIR: &str = ".history";
@@ -124,7 +125,59 @@ impl Store {
              (SELECT id FROM note_versions WHERE note_id = ?1 ORDER BY created_at DESC, id DESC LIMIT ?2)",
             params![id, NOTE_VERSIONS_KEPT],
         )?;
+        self.thin_history(id)?;
         Ok(())
+    }
+
+    /// Thins one note's versions by age tier (`retention`), in the index and in its history folder alike.
+    /// Buckets depend only on a version's time, so two computers thinning the same history keep the same
+    /// versions, and a reconcile never brings a thinned one back from the other side.
+    pub(super) fn thin_history(&self, id: i64) -> Result<usize> {
+        let now = self.now();
+        let r = self.retention()?;
+        let rows: Vec<(i64, String, i64)> = {
+            let mut st = self.conn.prepare(
+                "SELECT id, reason, created_at FROM note_versions WHERE note_id = ?1 \
+                 ORDER BY created_at DESC, id DESC",
+            )?;
+            let rows = st.query_map(params![id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        let ages: Vec<VersionAge> = rows
+            .iter()
+            .map(|(vid, reason, created_at)| VersionAge {
+                id: *vid,
+                draft_id: id,
+                reason,
+                created_at: *created_at,
+            })
+            .collect();
+        let doomed = retention::versions_to_thin(&ages, now, &r);
+        if doomed.is_empty() {
+            return Ok(0);
+        }
+        let dir = self.root().ok().zip(self.row(id).ok()).map(|(root, row)| dir_for(&root, &row.path));
+        for (vid, reason, created_at) in rows.iter().filter(|(vid, _, _)| doomed.contains(vid)) {
+            self.conn.execute("DELETE FROM note_versions WHERE id = ?1", params![vid])?;
+            if let Some(dir) = &dir {
+                let _ = std::fs::remove_file(dir.join(file_name(*created_at, reason)));
+            }
+        }
+        Ok(doomed.len())
+    }
+
+    /// Thins every note's history; part of the daily sweep.
+    pub fn thin_note_histories(&self) -> Result<usize> {
+        let ids: Vec<i64> = {
+            let mut st = self.conn.prepare("SELECT DISTINCT note_id FROM note_versions")?;
+            let rows = st.query_map([], |r| r.get(0))?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        let mut n = 0;
+        for id in ids {
+            n += self.thin_history(id).unwrap_or(0);
+        }
+        Ok(n)
     }
 }
 
@@ -140,5 +193,38 @@ mod tests {
         assert_eq!(parse_name("1731600000000-edit.md"), Some((1731600000000, "edit".into())));
         assert_eq!(parse_name("notes.md"), None);
         assert_eq!(file_name(5, "a i!"), "5-ai.md");
+    }
+
+    #[test]
+    fn old_versions_thin_in_the_index_and_the_folder() {
+        use std::sync::atomic::{AtomicI64, Ordering};
+        use std::sync::Arc;
+        let dir = crate::notes::tests_support::tmp();
+        let mut s = crate::notes::tests_support::store_in(&dir);
+        let clock = Arc::new(AtomicI64::new(1_700_000_000_000));
+        let c = clock.clone();
+        s.set_clock(move || c.load(Ordering::Relaxed));
+        let n = s.create_note("", "Plan", "v0\n", &[]).unwrap();
+        // A version every ten minutes for two days: all kept at first.
+        for i in 0..288 {
+            clock.fetch_add(10 * 60 * 1000, Ordering::Relaxed);
+            s.note_version(n.id, &format!("v{i}\n"), "edit").unwrap();
+        }
+        let count = |s: &Store| -> i64 {
+            s.conn
+                .query_row("SELECT COUNT(*) FROM note_versions WHERE note_id = ?1", [n.id], |r| r.get(0))
+                .unwrap()
+        };
+        assert_eq!(count(&s), NOTE_VERSIONS_KEPT);
+        let thinned = s.thin_note_histories().unwrap();
+        assert!(thinned > 100, "{thinned}");
+        let left = count(&s);
+        // The last hour whole (6), then one an hour for the day before.
+        assert!((20..=40).contains(&left), "{left}");
+        assert_eq!(files(&dir_for(&dir, "Plan.md")).len() as i64, left);
+        // Thinning again at the same time changes nothing, and a reconcile brings nothing back.
+        assert_eq!(s.thin_note_histories().unwrap(), 0);
+        s.reconcile_history(n.id).unwrap();
+        assert_eq!(count(&s), left);
     }
 }
