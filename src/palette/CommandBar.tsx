@@ -1,15 +1,16 @@
 // Ctrl K: search or ask. Typing finds notes (by title first, then by words) and commands. A question (ending in
 // `?`, or the Ask row at the end of the list) asks Claude to answer from the notes, with the notes it used as cards to open.
-// Ctrl P opens the same bar on notes only. A few words narrow the notes found: `in:travel`, `pinned`, `today`,
-// `this week`, `has:link`, `has:picture`, `has:task` (palette/filters.ts). After an answer, Tab asks again: the
+// Ctrl P opens the same bar on notes only. A few words narrow the notes found: `in:travel`, `is:pinned`, `when:today`,
+// `when:week`, `has:link`, `has:picture`, `has:task` (palette/filters.ts). After an answer, Tab asks again: the
 // follow-up goes with the earlier answers and the same notes, and Ctrl Enter keeps the whole exchange as a note.
 
 import { createEffect, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { aiLive, api, errText, type AiAnswer, type AiSource, type NoteSummary } from "../api";
 import { answerHtml } from "../copy";
 import { ago, folderName, Kbd, say } from "../ui";
-import { keep, noFilters, parseFilters } from "./filters";
+import { acceptOffer, inFolder, keep, noFilters, parseFilters } from "./filters";
 import { rank } from "./match";
+import { jumpTo } from "../note/jump";
 
 export interface Command {
   id: string;
@@ -22,7 +23,7 @@ export interface Command {
 
 const escapeRe = (w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-type Row = { kind: "ask" } | { kind: "note"; n: NoteSummary } | { kind: "command"; c: Command };
+type Row = { kind: "ask" } | { kind: "note"; n: NoteSummary } | { kind: "command"; c: Command } | { kind: "new"; title: string; folder: string };
 
 /** An answer still being written, without the `Sources:` line it ends with. */
 const unsourced = (t: string) => t.replace(/\n\s*\**Sources:[\s\S]*$/, "");
@@ -93,6 +94,19 @@ export default function CommandBar(p: {
     return found.slice(0, 30);
   });
 
+  /** What a new note from the typed text would be: the words as its title, `@word` as its collection. */
+  const newNote = (): { title: string; folder: string } | null => {
+    if (!noFilters(filters())) return null;
+    const text = q().trim();
+    const at = /(^|\s)@(\S+)/.exec(text);
+    const title = text.replace(/(^|\s)@\S+/, " ").replace(/\s+/g, " ").trim();
+    if (!title || title.length > 120) return null;
+    const typed = at?.[2] ?? "";
+    const known = typed ? (folders() ?? []).find((f) => inFolder(f, typed) && !f.includes("/")) : undefined;
+    return { title, folder: known ?? typed };
+  };
+  const [folders] = createResource(async () => (await (await api()).noteFolders()).map((f) => f.path).filter((f) => f && !f.startsWith(".")));
+
   const commands = () => {
     if (p.notesOnly) return [];
     const live = p.commands.filter((c) => !c.when || c.when());
@@ -108,6 +122,11 @@ export default function CommandBar(p: {
     // A command that matches well beats notes; otherwise notes first.
     out.push(...(q().trim() && cs.length && ns.length === 0 ? cs : [...ns, ...cs]));
     if (q().trim() && !p.notesOnly && !isQuestion() && noFilters(filters())) out.push({ kind: "ask" });
+    // No note by that name: make it. `@travel` says where.
+    const want = newNote();
+    if (want && !isQuestion() && !(notes() ?? []).some((n) => n.title.toLowerCase() === want.title.toLowerCase())) {
+      out.splice(ns.length ? ns.length : 0, 0, { kind: "new", ...want });
+    }
     return out;
   };
 
@@ -135,13 +154,21 @@ export default function CommandBar(p: {
     const re = new RegExp(`(${ws.map(escapeRe).join("|")})`, "giu");
     return text.split(re).filter(Boolean).map((t) => ({ t, on: ws.some((w) => w.toLowerCase() === t.toLowerCase()) }));
   };
-  const paragraphs = () =>
-    (peek()?.body ?? "")
-      .slice(0, 2400)
+  // The preview starts at the passage with the words, when they are further down than it shows.
+  const paragraphs = () => {
+    const body = peek()?.body ?? "";
+    const lower = body.toLowerCase();
+    const hits = marked().map((w) => lower.indexOf(w.toLowerCase())).filter((x) => x >= 0);
+    const first = hits.length ? Math.min(...hits) : 0;
+    const from = first > 600 ? body.lastIndexOf("\n\n", first) + 2 : 0;
+    const out = body
+      .slice(from, from + 2400)
       .split(/\n{2,}/)
       .map((x) => x.replace(/^#+\s+/, "").trim())
       .filter(Boolean)
       .slice(0, 8);
+    return from > 0 ? ["…", ...out] : out;
+  };
 
   /** A note named in an answer, `[[Title]]`: click it to open it. */
   async function openCited(title: string) {
@@ -225,12 +252,26 @@ export default function CommandBar(p: {
   const choose = (r: Row | undefined) => {
     if (!r) return;
     if (r.kind === "ask") return void ask();
+    if (r.kind === "new") return void makeNote(r.title, r.folder);
     // Read before closing: the bar's owner may hand a different onOpen while it is open (a note beside).
     const open = p.onOpen;
     p.onClose();
-    if (r.kind === "note") open(r.n.id);
-    else r.c.run();
+    if (r.kind === "note") {
+      jumpTo(r.n.id, marked());
+      open(r.n.id);
+    } else r.c.run();
   };
+
+  async function makeNote(title: string, folder: string) {
+    const open = p.onOpen;
+    try {
+      const n = await (await api()).createNote(folder, title, "", []);
+      p.onClose();
+      open(n.id);
+    } catch (e) {
+      say(errText(e), { error: true });
+    }
+  }
 
   async function saveAnswer() {
     const a = answer();
@@ -261,6 +302,14 @@ export default function CommandBar(p: {
       e.stopPropagation();
       return setFollowing(true);
     }
+    // A plain word that could be a filter ("today", "pinned") becomes one on Tab.
+    if (e.key === "Tab" && !answer() && filters().offers.length) {
+      e.preventDefault();
+      e.stopPropagation();
+      setQ(acceptOffer(q()));
+      input.value = q();
+      return setI(0);
+    }
     if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) setI((i() + 1) % Math.max(1, n));
     else if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p" && !p.notesOnly)) setI((i() + n - 1) % Math.max(1, n));
     else if (e.key === "Enter" && answer() && answer() !== "loading" && e.ctrlKey) void saveAnswer();
@@ -290,6 +339,13 @@ export default function CommandBar(p: {
             }}
             onKeyDown={key}
           />
+          <Show when={!answer() && filters().offers[0]}>
+            {(o) => (
+              <button class="filter-offer small nowrap" onMouseDown={(e) => (e.preventDefault(), setQ(acceptOffer(q())), (input.value = q()))}>
+                <kbd>Tab</kbd> {o().label}
+              </button>
+            )}
+          </Show>
           <Show when={!p.notesOnly && answer() && answer() !== "loading"}>
             <span class="muted small nowrap">
               <kbd>Tab</kbd> ask again
@@ -324,6 +380,12 @@ export default function CommandBar(p: {
                         <span class="row-icon spark">✦</span>
                         <span class="row-label">Ask your notes: “{q().trim()}”</span>
                         <span class="row-sub">{p.aiReady ? "Claude answers from your notes" : "add a key in Settings first"}</span>
+                      </>
+                    ) : r.kind === "new" ? (
+                      <>
+                        <span class="row-icon">+</span>
+                        <span class="row-label">New note “{r.title}”</span>
+                        <span class="row-sub">{r.folder ? `in ${folderName(r.folder)}` : "add @collection to file it"}</span>
                       </>
                     ) : r.kind === "note" ? (
                       <>

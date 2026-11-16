@@ -38,6 +38,7 @@ export const SHORTCUTS: Shortcut[] = [
   { id: "settings", label: "Settings", group: "Anywhere", keys: both("Ctrl+,"), editable: true },
   { id: "shortcuts", label: "All shortcuts", group: "Anywhere", keys: both("Ctrl+/"), editable: true },
   { id: "ai", label: "Ask Claude about the text", group: "Writing", keys: both("Ctrl+J"), editable: true },
+  { id: "findHere", label: "Find and replace in the note", group: "Writing", keys: both("Ctrl+F") },
   { id: "history", label: "History of the note", group: "Writing", keys: both("Ctrl+H"), editable: true },
   { id: "move", label: "Move the note to a collection, a note or a day", group: "Writing", keys: both("Ctrl+M"), editable: true },
   { id: "copyMd", label: "Copy as Markdown", group: "Writing", keys: both("Ctrl+Shift+C"), editable: true },

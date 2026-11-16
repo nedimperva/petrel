@@ -45,16 +45,32 @@ test("recents move to the front and are capped", () => {
 test("Ctrl K filters come off the words", async () => {
   const { parseFilters, inFolder, noFilters } = await import("../src/palette/filters.ts");
   const now = new Date(2026, 10, 11, 21, 0);
-  const f = parseFilters("in:travel hotel pinned this week has:link", now);
+  const f = parseFilters("in:travel hotel is:pinned when:week has:link", now);
   assert.equal(f.words, "hotel");
   assert.equal(f.folder, "travel");
   assert.equal(f.pinned, true);
   assert.equal(f.since, new Date(2026, 10, 5).getTime());
   assert.deepEqual(f.has, ["link"]);
-  assert.equal(parseFilters("today", now).since, new Date(2026, 10, 11).getTime());
+  assert.equal(parseFilters("when:today", now).since, new Date(2026, 10, 11).getTime());
+  // Plain words stay words, offered as a filter that Tab takes.
+  const plain = parseFilters("week plan", now);
+  assert.ok(noFilters(plain));
+  assert.equal(plain.words, "week plan");
+  assert.equal(plain.offers[0].filter, "when:week");
+  const { acceptOffer } = await import("../src/palette/filters.ts");
+  assert.equal(acceptOffer("week plan"), "when:week plan ");
+  assert.equal(parseFilters(acceptOffer("week plan"), now).since, new Date(2026, 10, 5).getTime());
   assert.equal(parseFilters('in:"Work notes" x', now).folder, "Work notes");
   assert.ok(noFilters(parseFilters("weekend plans", now)));
   assert.equal(parseFilters("weekend plans", now).words, "weekend plans");
   assert.ok(inFolder("Travel/Mostar", "travel") && inFolder("Travel", "trav") && !inFolder("Work", "travel"));
   assert.ok(inFolder("Travel/Mostar", "travel/mostar") && !inFolder("Travel/Kotor", "travel/mostar"));
+});
+
+test("case, Bosnian letters and one typo do not matter", () => {
+  assert.ok(score("šta", "Šta ima novo") > 70);
+  assert.ok(score("cevapi", "Ćevapi") > 70);
+  assert.ok(score("djordje", "Đorđe") > 90);
+  assert.ok(score("recpie", "Bread recipe") > 0);
+  assert.equal(score("xyzzy", "Bread recipe"), 0);
 });

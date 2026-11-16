@@ -31,6 +31,7 @@ import { aiPreview, keepPreview, previewOf, setPreview, type Preview } from "./a
 import { currentHeading, outline, type Heading } from "./outline";
 import { EditorView } from "@codemirror/view";
 import { hush } from "./quiet";
+import { takeJump } from "./jump";
 
 export interface NotePageHandle {
   note(): Note | null;
@@ -219,6 +220,12 @@ export default function NotePage(p: Props) {
       measure();
       void loadLinks(n.id);
       editor?.view.focus();
+      // Opened from a search: start where the words are.
+      const found = takeJump(n.id, editor?.text() ?? "");
+      if (found !== null && editor) {
+        editor.view.dispatch({ selection: { anchor: found }, effects: EditorView.scrollIntoView(found, { y: "center" }) });
+        return;
+      }
       // Coming back to today's page starts a new entry under the last one, the time already there. It is not
       // written until something is typed after it.
       if (editor && n.folder === JOURNAL && n.title === today() && n.body.trim()) {

@@ -1628,7 +1628,7 @@ impl Drop for Checkpointer {
     }
 }
 
-fn id_array(ids: &[i64]) -> rusqlite::vtab::array::Array {
+pub(crate) fn id_array(ids: &[i64]) -> rusqlite::vtab::array::Array {
     Rc::new(ids.iter().copied().map(Value::from).collect())
 }
 

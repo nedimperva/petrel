@@ -20,6 +20,7 @@ import { syntaxHighlighting, HighlightStyle } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
 import { insertLink, toggleBold, toggleItalic, toggleList, toggleTask } from "./commands";
 import { taskExtensions } from "./tasks";
+import { findBar } from "./findBar";
 
 export interface EditorHandle {
   view: EditorView;
@@ -163,7 +164,7 @@ export function createEditor(
       syntaxHighlighting(markdownHighlight),
       taskExtensions,
       placeholder(o.placeholder ?? "Start writing. It saves as you type."),
-      search({ top: true }),
+      search({ top: true, createPanel: findBar }),
       // Petrel's own keys first. Alt ↑/↓ (move line), Shift Alt ↓ (duplicate line) and Enter continuing lists
       // come with the defaults and the Markdown language.
       keymap.of([

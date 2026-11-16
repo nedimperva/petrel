@@ -100,7 +100,7 @@ Canvas: https://claude.ai/artifact/Sw6CPjnpGXY6Vz9LnVCQ5d. Out for now: one line
   (`ui.filed`), Space keeps it until the next day (`ui.review.later`), `s` asks Claude. Ends with "Inbox clear."
   and the petrel.
 - **A look per collection**: a colour and a mark, kept in the folder's `.petrel` file so it syncs. `p` pins.
-- **Ctrl K filters**: `in:`, `pinned`, `today`, `this week`, `has:link`, `has:picture`, `has:task`.
+- **Ctrl K filters**: `in:`, `is:pinned`, `when:today`, `when:week`, `has:link`, `has:picture`, `has:task`. The plain words (pinned, today, week, inbox) stay words; the bar offers them as a filter and Tab takes it.
 - **Today's page**: `Ctrl D`, `journal/YYYY-MM-DD.md`, made only when written on. Entries start with the time
   (`21:14 text`); captures filed there get it too, with `_from capture_` under them. The month sits beside the
   text on a wide window.

@@ -28,6 +28,7 @@ use crate::store::{Folder, Store, UndoToken, VERSION_INTERVAL_MS};
 use crate::title;
 
 mod conflicts;
+pub mod fold;
 mod folders;
 pub mod history;
 mod paths;
@@ -840,25 +841,67 @@ impl Store {
         Ok(rows)
     }
 
-    /// `Ctrl P`: notes whose title holds `text`, those starting with it first, then the most recently opened.
+    /// `Ctrl P`, `[[` and Move to: notes whose title (or path) matches `text` the way Ctrl K matches commands,
+    /// with case, accents and one typo forgiven (`fold`). The best match first, then the most recently opened.
     pub fn find_notes(&self, text: &str, limit: usize) -> Result<Vec<NoteSummary>> {
-        let t = text.trim().to_lowercase().replace(['%', '_'], "");
+        if text.trim().is_empty() {
+            let mut stmt = self.conn.prepare_cached(
+                "SELECT id, path, folder, title, preview, tags, pinned, modified_at FROM notes \
+                 ORDER BY accessed_at DESC, modified_at DESC LIMIT ?1",
+            )?;
+            let rows = stmt.query_map(params![limit as i64], summary)?.collect::<rusqlite::Result<_>>()?;
+            return Ok(rows);
+        }
+        let all: Vec<(i64, String, String)> = {
+            let mut stmt = self.conn.prepare_cached(
+                "SELECT id, title, path FROM notes ORDER BY accessed_at DESC, modified_at DESC",
+            )?;
+            let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        let q = fold::fold(text.trim());
+        let mut hits: Vec<(f64, usize, i64)> = all
+            .iter()
+            .enumerate()
+            .filter_map(|(i, (id, title, path))| {
+                let t = fold::score(text, title);
+                // A path holds the folder: "travel rome" finds Travel/Rome.md, but below any title match.
+                let p = if t == 0.0 && fold::fold(path).contains(&q) { 5.0 } else { 0.0 };
+                let s = t.max(p);
+                (s > 0.0).then_some((s, i, *id))
+            })
+            .collect();
+        // Best first; equal scores keep the order of last opened.
+        hits.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+        // Letters merely found in order are a last resort: only when nothing better matched.
+        if hits.first().is_some_and(|h| h.0 >= 25.0) {
+            hits.retain(|h| h.0 >= 25.0 || h.0 == 5.0);
+        }
+        hits.truncate(limit);
+        let ids: Vec<i64> = hits.iter().map(|h| h.2).collect();
         let mut stmt = self.conn.prepare_cached(
-            "SELECT id, path, folder, title, preview, tags, pinned, modified_at FROM notes \
-             WHERE ?1 = '' OR lower(title) LIKE '%' || ?1 || '%' OR lower(path) LIKE '%' || ?1 || '%' \
-             ORDER BY (lower(title) LIKE ?1 || '%') DESC, accessed_at DESC, modified_at DESC LIMIT ?2",
+            "SELECT id, path, folder, title, preview, tags, pinned, modified_at FROM notes WHERE id IN rarray(?1)",
         )?;
-        let rows = stmt.query_map(params![t, limit as i64], summary)?.collect::<rusqlite::Result<_>>()?;
-        Ok(rows)
+        let found: Vec<NoteSummary> = stmt
+            .query_map(params![crate::store::id_array(&ids)], summary)?
+            .collect::<rusqlite::Result<_>>()?;
+        let mut out = Vec::with_capacity(found.len());
+        for id in ids {
+            if let Some(n) = found.iter().find(|n| n.id == id) {
+                out.push(n.clone());
+            }
+        }
+        Ok(out)
     }
 
-    /// Search the text of notes (the same box syntax as drafts' words, without filters).
+    /// Search the text of notes (the same box syntax as drafts' words, without filters), best match first:
+    /// bm25, with a word in the title worth four in the text.
     pub fn search_notes(&self, text: &str, limit: usize) -> Result<Vec<NoteSummary>> {
         let Some(q) = fts_words(text) else { return Ok(Vec::new()) };
         let mut stmt = self.conn.prepare_cached(
             "SELECT n.id, n.path, n.folder, n.title, n.preview, n.tags, n.pinned, n.modified_at \
              FROM notes_fts f JOIN notes n ON n.id = f.rowid WHERE notes_fts MATCH ?1 \
-             ORDER BY n.modified_at DESC LIMIT ?2",
+             ORDER BY bm25(notes_fts, 1.0, 4.0), n.modified_at DESC LIMIT ?2",
         )?;
         let rows = stmt.query_map(params![q, limit as i64], summary)?.collect::<rusqlite::Result<_>>()?;
         Ok(rows)
@@ -2228,7 +2271,14 @@ fn fts_words(text: &str) -> Option<String> {
     let words: Vec<String> = text
         .split(|c: char| !c.is_alphanumeric())
         .filter(|w| !w.is_empty())
-        .map(|w| format!("\"{w}\"*"))
+        .map(|w| {
+            let ways: Vec<String> = fold::spellings(w).iter().map(|s| format!("\"{s}\"*")).collect();
+            if ways.len() == 1 {
+                ways[0].clone()
+            } else {
+                format!("({})", ways.join(" OR "))
+            }
+        })
         .collect();
     (!words.is_empty()).then(|| words.join(" AND "))
 }
@@ -2301,6 +2351,24 @@ mod tests {
         let d = std::env::temp_dir().join(format!("petrel-notes-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    #[test]
+    fn bosnian_titles_and_text_are_found() {
+        let dir = tmp();
+        let mut s = store_in(&dir);
+        let a = s.create_note("", "Šta ima novo", "vijesti\n", &[]).unwrap();
+        let b = s.create_note("", "Ćevapi", "kod Đorđa u Baščaršiji\n", &[]).unwrap();
+        let c = s.create_note("", "Bread recipe", "flour, water, the word cevapi in passing\n", &[]).unwrap();
+        assert_eq!(s.find_notes("šta", 5).unwrap()[0].id, a.id);
+        assert_eq!(s.find_notes("sta", 5).unwrap()[0].id, a.id);
+        assert_eq!(s.find_notes("cevapi", 5).unwrap()[0].id, b.id);
+        assert_eq!(s.find_notes("recpie", 5).unwrap()[0].id, c.id);
+        let ids = |v: Vec<NoteSummary>| v.into_iter().map(|n| n.id).collect::<Vec<_>>();
+        assert_eq!(ids(s.search_notes("djordja", 5).unwrap()), vec![b.id]);
+        assert_eq!(ids(s.search_notes("Đorđa", 5).unwrap()), vec![b.id]);
+        // The title weighs more than a word in passing.
+        assert_eq!(ids(s.search_notes("cevapi", 5).unwrap()), vec![b.id, c.id]);
     }
 
     #[test]

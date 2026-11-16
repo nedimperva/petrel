@@ -16,6 +16,7 @@ import { loadUsed, type Used } from "./collection/lastUsed";
 import { faces, loadFaces } from "./library/Mark";
 import { rest, whenOpened } from "./warm";
 import { toCopy } from "./library/faces";
+import { fold } from "./palette/match";
 
 export default function Picker() {
   let input!: HTMLInputElement;
@@ -31,14 +32,19 @@ export default function Picker() {
     return { all: all.filter((n) => n.folder !== "inbox"), counts };
   });
   const [last] = createResource(lastVersions);
+  // Words further down a long prompt or snippet: the engine searches the whole text, the list adds those.
+  const [inText] = createResource(q, async (text) =>
+    text.trim() ? new Set((await (await api()).searchNotes(text, 80).catch(() => [])).map((n) => n.id)) : new Set<number>(),
+  );
 
   const rows = () => {
     const d = data();
     if (!d) return [];
-    const words = q().toLowerCase().split(/\s+/).filter(Boolean);
+    const words = fold(q()).split(/\s+/).filter(Boolean);
+    const deep = inText.latest ?? new Set<number>();
     const h = here();
     const score = (n: NoteSummary) => {
-      const t = n.title.toLowerCase();
+      const t = fold(n.title);
       // What was copied with this app in front comes first; then the most copied anywhere.
       let s = (h[n.path] ?? 0) * 1000 + (d.counts[n.path] ?? 0);
       // Collections (folders) before loose notes: the picker is mostly for prompts and snippets.
@@ -47,7 +53,7 @@ export default function Picker() {
       return s;
     };
     const hits = d.all
-      .filter((n) => words.every((w) => (n.title + " " + n.folder + " " + n.preview).toLowerCase().includes(w)))
+      .filter((n) => deep.has(n.id) || words.every((w) => fold(n.title + " " + n.folder + " " + n.preview).includes(w)))
       .sort((a, b) => score(b) - score(a) || b.modifiedAt - a.modifiedAt);
     const copyable = hits.filter((n) => toCopy(n.folder, faces()));
     // Notes (pages) only when asked for by name: the list is for what you copy.
