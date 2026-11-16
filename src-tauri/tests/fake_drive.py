@@ -21,7 +21,8 @@ def new_id():
 
 def meta(i):
     f = files[i]
-    out = {"id": i, "name": f["name"], "parents": f["parents"], "mimeType": f["mimeType"]}
+    # Ids count up, so the id's number orders them by when they were made.
+    out = {"id": i, "name": f["name"], "parents": f["parents"], "mimeType": f["mimeType"], "createdTime": i[2:].zfill(8)}
     if f["mimeType"] != FOLDER:
         out["md5Checksum"] = hashlib.md5(f["data"]).hexdigest()
     return out
@@ -59,7 +60,8 @@ class H(BaseHTTPRequestHandler):
             live = [i for i, f in files.items() if not f["trashed"]]
             m = re.search(r"name = '([^']+)'", qs)
             if m:
-                live = [i for i in live if files[i]["name"] == m.group(1) and "root" in files[i]["parents"]]
+                parent = re.search(r"'([^']+)' in parents", qs)
+                live = [i for i in live if files[i]["name"] == m.group(1) and parent.group(1) in files[i]["parents"]]
             return self.send(200, {"files": [meta(i) for i in live]})
         m = re.match(r"/drive/v3/files/([^/]+)$", u.path)
         if m and q.get("alt") == "media":
@@ -70,6 +72,13 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         u = urllib.parse.urlparse(self.path)
         raw = self.body()
+        if u.path == "/drive/v3/files/twin":
+            # For the test only: an extra folder, as an earlier Petrel made them.
+            m = json.loads(raw)
+            i = new_id()
+            files[i] = {"name": m["name"], "parents": m["parents"], "mimeType": FOLDER, "data": b"", "trashed": False}
+            changes.append(i)
+            return self.send(200, {"id": i})
         if u.path == "/drive/v3/files":
             m = json.loads(raw)
             i = new_id()
@@ -89,6 +98,7 @@ class H(BaseHTTPRequestHandler):
 
     def do_PATCH(self):
         u = urllib.parse.urlparse(self.path)
+        q = dict(urllib.parse.parse_qsl(u.query))
         raw = self.body()
         m = re.match(r"/upload/drive/v3/files/([^/]+)$", u.path)
         if m:
@@ -97,6 +107,11 @@ class H(BaseHTTPRequestHandler):
             changes.append(m.group(1))
             return self.send(200, {"id": m.group(1), "md5Checksum": hashlib.md5(raw).hexdigest()})
         m = re.match(r"/drive/v3/files/([^/]+)$", u.path)
+        if m and "addParents" in q:
+            f = files[m.group(1)]
+            f["parents"] = [q["addParents"] if p == q["removeParents"] else p for p in f["parents"]]
+            changes.append(m.group(1))
+            return self.send(200, {"id": m.group(1)})
         if m:
             files[m.group(1)]["trashed"] = json.loads(raw).get("trashed", False)
             changes.append(m.group(1))

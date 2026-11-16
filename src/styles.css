@@ -2062,6 +2062,11 @@ kbd {
   white-space: nowrap;
 }
 
+/* Closing: the text is put back and filed out of sight. */
+.capture.leaving > * {
+  visibility: hidden;
+}
+
 /* The line at the top: the capture it adds to, or the entry on today's page it goes after. */
 .cap-top {
   display: flex;

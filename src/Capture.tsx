@@ -146,6 +146,7 @@ export default function Capture() {
   /** The last entry on today's page, shown at the top while the capture goes there. */
   const [todayLast, setTodayLast] = createSignal<string | null>(null);
   const [help, setHelp] = createSignal(false);
+  const [leaving, setLeaving] = createSignal(false);
   let closing = false;
   let folders: string[] = [];
 
@@ -271,7 +272,12 @@ export default function Capture() {
     const old = earlier();
     if (old === null || !editor) return;
     if (editor.text().slice(end()).trim()) return;
-    if (editor.text() !== old) editor.view.dispatch({ changes: { from: 0, to: editor.view.state.doc.length, insert: old } });
+    if (editor.text() === old) return;
+    // Only the tail is put back when the old text is untouched, so it stays folded away while the window closes.
+    const e = end();
+    const doc = editor.view.state.doc;
+    const keep = doc.sliceString(0, e) === old.slice(0, e);
+    editor.view.dispatch({ changes: keep ? { from: e, to: doc.length, insert: old.slice(e) } : { from: 0, to: doc.length, insert: old } });
   }
 
   /** Ctrl Enter while adding to the last capture: the new text becomes a capture of its own. */
@@ -296,6 +302,8 @@ export default function Capture() {
   async function done() {
     if (closing) return;
     closing = true;
+    // The text is put back and filed while the window closes: none of that needs to be seen.
+    setLeaving(true);
     const s = await api();
     dropEmptyTail();
     await routeFromText().catch((e) => console.error(e));
@@ -305,6 +313,7 @@ export default function Capture() {
       const path = await s.rescueText(text).catch(() => null);
       if (!path) {
         closing = false;
+        setLeaving(false);
         return setMsg(`Not saved: ${saver.error() ?? "unknown error"}`);
       }
     }
@@ -338,7 +347,7 @@ export default function Capture() {
     } else if (matches(e, "capToday")) {
       e.preventDefault();
       e.stopPropagation();
-      toggleToday();
+      void toggleToday();
     } else if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && earlier() !== null) {
       e.preventDefault();
       e.stopPropagation();
@@ -360,8 +369,10 @@ export default function Capture() {
     return t?.kind === "day" && (!t.date || t.date === today());
   };
 
-  /** Ctrl D: today's page, or back to the inbox. */
-  function toggleToday() {
+  /** Ctrl D: today's page, or back to the inbox. While adding to the last capture, the new words go on their
+   * own: the last capture stays in the inbox as it was. */
+  async function toggleToday() {
+    if (earlier() !== null) await separate();
     if (target()?.kind === "day" && goesToday()) {
       setTarget(null);
       setTargetHome("");
@@ -466,7 +477,7 @@ export default function Capture() {
 
   return (
     // No window frame: the empty parts of the panel drag the window (Tauri reads data-tauri-drag-region).
-    <div class="capture" data-tauri-drag-region>
+    <div class="capture" classList={{ leaving: leaving() }} data-tauri-drag-region>
       <Show
         when={earlier() !== null}
         fallback={

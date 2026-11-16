@@ -119,6 +119,22 @@ impl Drive {
         }
         let (parent, name) = path.rsplit_once('/').unwrap_or(("", path));
         let parent_id = self.folder(parent)?;
+        // The cache only knows what the last full list saw, and a sync with nothing new on Drive skips that list:
+        // ask Drive before making one, or every new file in `inbox/` makes another `inbox`.
+        let q = format!(
+            "name = '{}' and mimeType = '{FOLDER}' and '{}' in parents and trashed = false",
+            quote(name),
+            quote(&parent_id)
+        );
+        let v = self.get_json(&format!(
+            "{}/files?q={}&orderBy=createdTime&fields=files(id)&spaces=drive",
+            api(),
+            enc(&q)
+        ))?;
+        if let Some(id) = v["files"].as_array().and_then(|a| a.first()).and_then(|f| f["id"].as_str()) {
+            self.folders.insert(path.to_string(), id.to_string());
+            return Ok(id.to_string());
+        }
         let v = self.send_json(
             "POST",
             &format!("{}/files?fields=id", api()),
@@ -128,6 +144,114 @@ impl Drive {
         self.folders.insert(path.to_string(), id.clone());
         Ok(id)
     }
+
+    /// Every file Petrel made (drive.file) with its path under the Petrel folder, and the folders that are there
+    /// twice: (the one kept, an extra one, the extra one's children).
+    fn list_once(&mut self) -> Result<(Vec<RemoteFile>, Vec<(String, String, Vec<String>)>)> {
+        struct Item {
+            name: String,
+            parent: Option<String>,
+            folder: bool,
+            md5: String,
+            created: String,
+        }
+        let mut items: HashMap<String, Item> = HashMap::new();
+        let mut page: Option<String> = None;
+        loop {
+            let mut url = format!(
+                "{API}/files?q={}&pageSize=1000&spaces=drive&fields=nextPageToken,files(id,name,parents,mimeType,md5Checksum,createdTime)",
+                enc("trashed = false"),
+                API = api()
+            );
+            if let Some(p) = &page {
+                url.push_str(&format!("&pageToken={}", enc(p)));
+            }
+            let v = self.get_json(&url)?;
+            for f in v["files"].as_array().into_iter().flatten() {
+                let Some(id) = f["id"].as_str() else { continue };
+                items.insert(
+                    id.to_string(),
+                    Item {
+                        name: f["name"].as_str().unwrap_or("").to_string(),
+                        parent: f["parents"]
+                            .as_array()
+                            .and_then(|p| p.first())
+                            .and_then(|p| p.as_str())
+                            .map(str::to_string),
+                        folder: f["mimeType"] == FOLDER,
+                        md5: f["md5Checksum"].as_str().unwrap_or("").to_string(),
+                        created: f["createdTime"].as_str().unwrap_or("").to_string(),
+                    },
+                );
+            }
+            match v["nextPageToken"].as_str() {
+                Some(p) => page = Some(p.to_string()),
+                None => break,
+            }
+        }
+        // The path of an item under the Petrel folder; None when it is somewhere else.
+        let path_of = |id: &str| -> Option<String> {
+            let mut parts = Vec::new();
+            let mut at = id.to_string();
+            for _ in 0..64 {
+                if at == self.root {
+                    parts.reverse();
+                    return Some(parts.join("/"));
+                }
+                let item = items.get(&at)?;
+                parts.push(item.name.clone());
+                at = item.parent.clone()?;
+            }
+            None
+        };
+        // Folders by path, oldest first: the oldest is the one kept.
+        let mut by_path: HashMap<String, Vec<(&str, &str)>> = HashMap::new();
+        let mut out = Vec::new();
+        for (id, item) in &items {
+            let Some(path) = path_of(id) else { continue };
+            if item.folder {
+                by_path.entry(path).or_default().push((item.created.as_str(), id.as_str()));
+            } else if !path.is_empty() {
+                out.push(RemoteFile { id: id.clone(), path, md5: item.md5.clone() });
+            }
+        }
+        let mut folders = HashMap::new();
+        folders.insert(String::new(), self.root.clone());
+        let mut twins = Vec::new();
+        for (path, mut ids) in by_path {
+            ids.sort();
+            let keep = ids[0].1.to_string();
+            for (_, extra) in &ids[1..] {
+                let children = items
+                    .iter()
+                    .filter(|(_, i)| i.parent.as_deref() == Some(*extra))
+                    .map(|(c, _)| c.clone())
+                    .collect();
+                twins.push((keep.clone(), extra.to_string(), children));
+            }
+            folders.insert(path, keep);
+        }
+        self.folders = folders;
+        Ok((out, twins))
+    }
+
+    /// Moves what is in `extra` into `keep`, a folder of the same name and place, and trashes `extra`.
+    fn fold_folder(&mut self, keep: &str, extra: &str, children: &[String]) -> Result<()> {
+        for c in children {
+            self.send_json(
+                "PATCH",
+                &format!("{}/files/{c}?addParents={}&removeParents={}&fields=id", api(), enc(keep), enc(extra)),
+                &json!({}),
+            )?;
+        }
+        self.send_json("PATCH", &format!("{}/files/{extra}?fields=id", api()), &json!({ "trashed": true }))?;
+        Ok(())
+    }
+}
+
+/// A value inside a Drive query: `'` and `\` escaped.
+fn quote(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('\'', "\\'")
 }
 
 impl Remote for Drive {
@@ -158,74 +282,18 @@ impl Remote for Drive {
     }
 
     fn list(&mut self) -> Result<Vec<RemoteFile>> {
-        // Every file Petrel made (drive.file), then paths worked out from their parents.
-        struct Item {
-            name: String,
-            parent: Option<String>,
-            folder: bool,
-            md5: String,
-        }
-        let mut items: HashMap<String, Item> = HashMap::new();
-        let mut page: Option<String> = None;
-        loop {
-            let mut url = format!(
-                "{API}/files?q={}&pageSize=1000&spaces=drive&fields=nextPageToken,files(id,name,parents,mimeType,md5Checksum)",
-                enc("trashed = false"),
-                API = api()
-            );
-            if let Some(p) = &page {
-                url.push_str(&format!("&pageToken={}", enc(p)));
+        // Folders made twice (an earlier Petrel did that) are put back together, then listed again. A few rounds
+        // cover folders inside them that were made twice too.
+        for _ in 0..4 {
+            let (files, twins) = self.list_once()?;
+            if twins.is_empty() {
+                return Ok(files);
             }
-            let v = self.get_json(&url)?;
-            for f in v["files"].as_array().into_iter().flatten() {
-                let Some(id) = f["id"].as_str() else { continue };
-                items.insert(
-                    id.to_string(),
-                    Item {
-                        name: f["name"].as_str().unwrap_or("").to_string(),
-                        parent: f["parents"]
-                            .as_array()
-                            .and_then(|p| p.first())
-                            .and_then(|p| p.as_str())
-                            .map(str::to_string),
-                        folder: f["mimeType"] == FOLDER,
-                        md5: f["md5Checksum"].as_str().unwrap_or("").to_string(),
-                    },
-                );
-            }
-            match v["nextPageToken"].as_str() {
-                Some(p) => page = Some(p.to_string()),
-                None => break,
+            for (keep, extra, children) in twins {
+                self.fold_folder(&keep, &extra, &children)?;
             }
         }
-        // The path of an item under the Petrel folder; None when it is somewhere else.
-        let path_of = |id: &str| -> Option<String> {
-            let mut parts = Vec::new();
-            let mut at = id.to_string();
-            for _ in 0..64 {
-                if at == self.root {
-                    parts.reverse();
-                    return Some(parts.join("/"));
-                }
-                let item = items.get(&at)?;
-                parts.push(item.name.clone());
-                at = item.parent.clone()?;
-            }
-            None
-        };
-        let mut folders = HashMap::new();
-        folders.insert(String::new(), self.root.clone());
-        let mut out = Vec::new();
-        for (id, item) in &items {
-            let Some(path) = path_of(id) else { continue };
-            if item.folder {
-                folders.insert(path, id.clone());
-            } else if !path.is_empty() {
-                out.push(RemoteFile { id: id.clone(), path, md5: item.md5.clone() });
-            }
-        }
-        self.folders = folders;
-        Ok(out)
+        Ok(self.list_once()?.0)
     }
 
     fn download(&mut self, id: &str) -> Result<Vec<u8>> {
@@ -390,6 +458,27 @@ mod tests {
         // Quiet now: the change list says nothing new... after A's own look.
         let r = sync(&a, &mut da, &mut sa, "s").unwrap();
         assert_eq!(r, Default::default());
+        // A new file in a folder Drive has, on a sync that does not list (nothing new there): the folder is
+        // found, not made again.
+        std::fs::write(a.join("Travel/Split.md"), "sea\n").unwrap();
+        let mut da = Drive::new(|| Ok("t".into()), root.clone(), sa.cursor.clone());
+        let r = sync(&a, &mut da, &mut sa, "s").unwrap();
+        assert_eq!(r.uploaded, 1, "{r:?}");
+        assert!(da.list_once().unwrap().1.is_empty(), "Travel made twice");
+        // Folders an earlier Petrel made twice come back together, with what was in them.
+        let twin = |d: &mut Drive, name: &str, parent: &str| {
+            d.send_json("POST", &format!("{}/files/twin", api()), &json!({ "name": name, "parents": [parent] })).unwrap()["id"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        let extra = twin(&mut da, "Travel", &root);
+        twin(&mut da, "Inner", &extra);
+        assert_eq!(da.list_once().unwrap().1.len(), 1);
+        let files = da.list().unwrap();
+        assert!(da.list_once().unwrap().1.is_empty());
+        assert!(da.folders.contains_key("Travel/Inner"), "{:?}", da.folders);
+        assert!(files.iter().any(|f| f.path == "Travel/Split.md"));
         assert_eq!(Drive::new(|| Ok("t".into()), String::new(), None).account().unwrap(), "you@example.com");
     }
 }
