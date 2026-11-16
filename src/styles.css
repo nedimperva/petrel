@@ -2912,18 +2912,73 @@ button.cap-top-text:hover {
 .page {
   container-type: inline-size;
 }
-/* Below the text when the window is narrow (or a note is open beside): the same margin, at the end of the page. */
+/* Narrow (or a note open beside): the margin waits at the right edge as a rail of short lines, one per heading,
+   and opens over the text while the pointer is on it. */
+.margin-dock {
+  position: absolute;
+  top: var(--s-7);
+  right: 0;
+  bottom: 48px;
+  z-index: 5;
+  width: 32px;
+}
+.margin-dock:not(:has(.note-margin > *)) {
+  display: none;
+}
+.margin-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 7px;
+  padding: 6px 10px 0 0;
+  transition: opacity var(--d-base) var(--ease);
+}
+.rail-dash {
+  display: block;
+  width: 14px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--line-strong);
+}
+.rail-dash.on {
+  background: var(--ink-2);
+}
+.margin-dock:hover .margin-rail,
+.margin-dock:focus-within .margin-rail {
+  opacity: 0;
+}
 .note-margin {
+  position: absolute;
+  top: 0;
+  right: 8px;
   display: flex;
   flex-direction: column;
   gap: var(--s-5);
-  width: 100%;
-  max-width: var(--editor-max);
+  width: 280px;
+  max-height: 100%;
   box-sizing: border-box;
-  margin: 0 auto;
-  padding: var(--s-5) var(--s-5) var(--s-6);
-  border-top: 1px solid var(--line);
-  transition: opacity var(--d-slow) var(--ease);
+  padding: var(--s-4);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg, 10px);
+  box-shadow: var(--shadow-lg);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(6px);
+  transition:
+    opacity var(--d-base) var(--ease),
+    transform var(--d-base) var(--ease);
+}
+.margin-dock:hover .note-margin,
+.margin-dock:focus-within .note-margin {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
 }
 .note-margin:not(:has(> *)) {
   display: none;
@@ -2931,44 +2986,50 @@ button.cap-top-text:hover {
 .note-margin .day-month {
   max-width: 300px;
 }
-/* Beside the text only when the text keeps a good width next to it; below that the text comes first. */
+/* Beside the text only when the text keeps a good width next to it. */
 @container (min-width: 960px) {
   .page:not(.beside-open) .page-main {
     padding-right: var(--margin-w);
   }
-  .note-margin:not(.below) {
+  .page:not(.beside-open) .margin-dock {
+    display: contents;
+  }
+  .page:not(.beside-open) .margin-rail {
+    display: none;
+  }
+  .page:not(.beside-open) .note-margin {
     position: absolute;
     top: var(--s-7);
-    /* 8 px of room each side for the rows' hover, which reach 8 px past the text: without it they made the
-       margin scroll sideways. */
+    /* 8 px of room each side for the rows' hover, which reach 8 px past the text. */
     right: calc(var(--s-5) - 8px);
     bottom: 48px;
     width: calc(var(--margin-w) - var(--s-5) - var(--s-3) + 16px);
-    max-width: none;
-    margin: 0;
+    max-height: none;
     padding: 0 8px;
+    background: none;
     border: 0;
-    overflow-x: hidden;
-    overflow-y: auto;
-    overscroll-behavior: contain;
+    border-radius: 0;
+    box-shadow: none;
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
     /* Thin, and only shown while the pointer is over the margin. */
-    scrollbar-width: thin;
     scrollbar-color: transparent transparent;
     gap: var(--s-6);
   }
-  .note-margin:not(.below):hover {
+  .page:not(.beside-open) .note-margin:hover {
     scrollbar-color: var(--line-strong) transparent;
   }
-  .note-margin:not(.below) .day-month {
+  .page:not(.beside-open) .note-margin .day-month {
     max-width: none;
+  }
+  .page:not(.beside-open) .note-margin.quiet:not(:hover) {
+    opacity: 0.25;
   }
 }
 .page {
   /* 320 px on a wide page; on a laptop it gives up a little to keep the text wide enough. */
   --margin-w: clamp(240px, 27cqi, 320px);
-}
-.note-margin.quiet:not(:hover) {
-  opacity: 0.25;
 }
 .note-margin h4 {
   margin: 0 0 var(--s-2);

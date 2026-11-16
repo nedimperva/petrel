@@ -856,7 +856,17 @@ export default function NotePage(p: Props) {
           />
           <div class="writer" ref={host} />
         </div>
-        <aside class="note-margin" classList={{ quiet: typingNow(), below: !!p.besideOpen }} aria-label="About this note">
+        {/* On a narrow page the margin waits at the right edge as a rail of short lines, one per heading (the one you
+            are in is darker); hovering it opens the margin over the text. A wide page shows the margin as it is. */}
+        <div class="margin-dock">
+        <div class="margin-rail" aria-hidden="true">
+          <Show when={!dayPage() && heads().length} fallback={<For each={[0, 1, 2]}>{() => <span class="rail-dash" />}</For>}>
+            <For each={heads().slice(0, 24)}>
+              {(h, i) => <span class="rail-dash" classList={{ on: i() === here() }} style={{ width: `${Math.max(6, 18 - (h.level - minLevel()) * 5)}px` }} />}
+            </For>
+          </Show>
+        </div>
+        <aside class="note-margin" classList={{ quiet: typingNow() }} aria-label="About this note">
           <Show when={dayPage()}>
             {(d) => (
               <section class="day-month" aria-label="This month">
@@ -1023,6 +1033,7 @@ export default function NotePage(p: Props) {
             </button>
           </Show>
         </aside>
+        </div>
       </div>
       <footer class="page-foot">
         <span>{dayPage() ? "Journal" : folderName(note()?.folder ?? p.folder)}</span>
