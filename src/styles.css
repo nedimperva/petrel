@@ -4913,3 +4913,20 @@ button.cap-top-text:hover {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Quiet marks: a quote is a bar, a bullet a dot, a rule a line. */
+.cm-quote-line {
+  border-left: 3px solid var(--line-strong);
+  padding-left: 12px !important;
+  color: var(--ink-2);
+}
+.cm-bullet {
+  color: var(--faint);
+}
+.cm-rule {
+  display: inline-block;
+  width: 100%;
+  height: 1px;
+  vertical-align: middle;
+  background: var(--line-strong);
+}

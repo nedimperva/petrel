@@ -1,8 +1,10 @@
 // How Markdown looks while you write it. The file stays plain Markdown; only the drawing changes.
 //
-// - Quiet marks (Settings › Writing): `#`, `**`, `_`, `~~`, inline backticks, a link's `[ ](address)` and a note
-//   link's `[[ ]]` are hidden on every line but the ones the cursor or selection is on, so bold reads as bold and
-//   a link as its words. Move onto the line and the marks are back to edit.
+// - Quiet marks (Settings › Writing): on every line but the ones the cursor or selection is on, `#`, `**`, `_`,
+//   `~~`, inline backticks, a link's `[ ](address)`, a picture's `![ ](address)`, `<` `>` around an address, a note
+//   link's `[[ ]]`, a quote's `>` (drawn as a bar instead), a code fence's backticks and the `\` before an escaped
+//   character are hidden; a list's `-` is a bullet and `---` a rule. Bold reads as bold and a link as its words.
+//   Move onto the line and the marks are back to edit. Tasks are drawn by tasks.ts.
 // - Code blocks sit on a soft panel with a Copy button on their first line (useful in Snippets).
 // - Table columns line up: each cell is padded to its column's width, in a fixed-width font.
 //
@@ -13,6 +15,35 @@ import type { EditorState, Range } from "@codemirror/state";
 import { Decoration, type DecorationSet, type EditorView, ViewPlugin, type ViewUpdate, WidgetType } from "@codemirror/view";
 
 const hide = Decoration.replace({});
+
+class Bullet extends WidgetType {
+  eq() {
+    return true;
+  }
+  toDOM() {
+    const s = document.createElement("span");
+    s.className = "cm-bullet";
+    s.textContent = "•";
+    return s;
+  }
+}
+
+class Rule extends WidgetType {
+  eq() {
+    return true;
+  }
+  toDOM() {
+    const s = document.createElement("span");
+    s.className = "cm-rule";
+    return s;
+  }
+}
+
+const bullet = Decoration.replace({ widget: new Bullet() });
+const rule = Decoration.replace({ widget: new Rule() });
+const quoteLine = Decoration.line({ class: "cm-quote-line" });
+/** A list item that is a task: tasks.ts draws its box, so its `-` is left alone. */
+const TASK = /^\s*[-*+] \[( |x|X)\]/;
 
 /** Line numbers the selection touches: their marks stay. */
 function activeLines(state: EditorState): Set<number> {
@@ -35,8 +66,47 @@ function quietRanges(view: EditorView): Range<Decoration>[] {
       from,
       to,
       enter(n) {
+        // A quote's bar is drawn on all its lines, the one being edited too, so the text does not jump.
+        if (n.name === "Blockquote") {
+          const a = state.doc.lineAt(n.from).number;
+          const b = state.doc.lineAt(n.to).number;
+          for (let l = a; l <= b; l++) out.push(quoteLine.range(state.doc.line(l).from));
+        }
         if (onKept(n.from)) return;
         switch (n.name) {
+          case "QuoteMark": {
+            const after = state.doc.sliceString(n.to, n.to + 1) === " " ? n.to + 1 : n.to;
+            out.push(hide.range(n.from, after));
+            return;
+          }
+          case "ListMark": {
+            const line = state.doc.lineAt(n.from);
+            if (n.node.parent?.parent?.name !== "BulletList" || TASK.test(line.text)) return;
+            out.push(bullet.range(n.from, n.to));
+            return;
+          }
+          case "HorizontalRule":
+            out.push(rule.range(n.from, n.to));
+            return false;
+          case "Escape":
+            out.push(hide.range(n.from, n.from + 1));
+            return;
+          case "CodeMark":
+            // A code fence's backticks; the panel shows it is code. The language name after them stays.
+            if (n.node.parent?.name === "FencedCode") out.push(hide.range(n.from, n.to));
+            return;
+          case "Autolink": {
+            const marks = n.node.getChildren("LinkMark");
+            if (marks.length === 2) out.push(hide.range(marks[0].from, marks[0].to), hide.range(marks[1].from, marks[1].to));
+            return false;
+          }
+          case "Image": {
+            // `![words](address)`: only the words show.
+            const marks = n.node.getChildren("LinkMark");
+            if (!n.node.getChild("URL") || marks.length < 3) return false;
+            out.push(hide.range(n.from, marks[0].to), hide.range(marks[1].from, n.to));
+            return false;
+          }
           case "HeaderMark": {
             // `## ` goes with its space; the closing `#`s of a heading too.
             const after = state.doc.sliceString(n.to, n.to + 1) === " " ? n.to + 1 : n.to;
