@@ -811,7 +811,7 @@ export default function NotePage(p: Props) {
   const synced = () => /google drive|googledrive|my drive|onedrive|dropbox|syncthing/i.test(p.root);
 
   return (
-    <div class="page" classList={{ "day-page": !!dayPage() }}>
+    <div class="page" classList={{ "day-page": !!dayPage(), "beside-open": !!p.besideOpen }}>
       <div class="page-main">
         <div class="sheet">
           <Show when={dayPage()}>
@@ -856,63 +856,7 @@ export default function NotePage(p: Props) {
           />
           <div class="writer" ref={host} />
         </div>
-        <Show when={hasLinks()}>
-          <div class="page-links">
-            <Show when={links().linked.length}>
-              <h4>Linked from</h4>
-              <For each={links().linked}>
-                {(b) => (
-                  <button class="link-row" onClick={() => p.onOpen(b.id)}>
-                    <span class="link-title">{b.title}</span>
-                    <span class="link-line">{b.line.replace(/\[\[|\]\]/g, "")}</span>
-                  </button>
-                )}
-              </For>
-            </Show>
-            <Show when={links().mentioned.length}>
-              <h4>Mentioned in</h4>
-              <For each={links().mentioned}>
-                {(b) => (
-                  <button class="link-row" onClick={() => p.onOpen(b.id)}>
-                    <span class="link-title">{b.title}</span>
-                    <span class="link-line">{b.line}</span>
-                  </button>
-                )}
-              </For>
-            </Show>
-            <Show when={!related() && similar().length}>
-              <h4>Shares words with</h4>
-              <For each={similar()}>
-                {(n) => (
-                  <button class="link-row" onClick={() => p.onOpen(n.id)}>
-                    <span class="link-title">{n.folder === "inbox" ? n.preview.split("\n")[0] || n.title : n.title}</span>
-                    <span class="link-line">{folderName(n.folder)}</span>
-                  </button>
-                )}
-              </For>
-            </Show>
-            <Show when={related()}>
-              <h4>
-                <span class="spark">✦</span> Related
-              </h4>
-              <Show when={Array.isArray(related())} fallback={<p class="ai-thinking">Claude is looking through your notes…</p>}>
-                <Show when={(related() as AiRelated[]).length} fallback={<p class="muted small">Nothing closely related.</p>}>
-                  <For each={related() as AiRelated[]}>
-                    {(r) => (
-                      <button class="link-row" onClick={() => p.onOpen(r.id)}>
-                        <span class="link-title">{r.title}</span>
-                        <span class="link-line">{r.why}</span>
-                      </button>
-                    )}
-                  </For>
-                </Show>
-              </Show>
-            </Show>
-          </div>
-        </Show>
-      </div>
-      <Show when={!p.besideOpen}>
-        <aside class="note-margin" classList={{ quiet: typingNow() }} aria-label="About this note">
+        <aside class="note-margin" classList={{ quiet: typingNow(), below: !!p.besideOpen }} aria-label="About this note">
           <Show when={dayPage()}>
             {(d) => (
               <section class="day-month" aria-label="This month">
@@ -1079,7 +1023,7 @@ export default function NotePage(p: Props) {
             </button>
           </Show>
         </aside>
-      </Show>
+      </div>
       <footer class="page-foot">
         <span>{dayPage() ? "Journal" : folderName(note()?.folder ?? p.folder)}</span>
         <Show when={words()}>

@@ -46,14 +46,17 @@ export function ToastView() {
 /** The one-line key footer every screen ends with: `[keys, what]` pairs, in the same look everywhere. A false
  * entry is left out, so a screen can list keys that only apply now. */
 export function KeyHints(p: { hints: ([string, string] | false | null | undefined)[] }) {
+  // One line only: on a narrow window the hints at the end wrap out of sight (see .key-hints) instead of crowding.
   return (
-    <For each={p.hints.filter((h): h is [string, string] => !!h)}>
-      {([keys, what]) => (
-        <span class="key-hint">
-          <Kbd keys={keys} /> {what}
-        </span>
-      )}
-    </For>
+    <span class="key-hints">
+      <For each={p.hints.filter((h): h is [string, string] => !!h)}>
+        {([keys, what]) => (
+          <span class="key-hint">
+            <Kbd keys={keys} /> {what}
+          </span>
+        )}
+      </For>
+    </span>
   );
 }
 
