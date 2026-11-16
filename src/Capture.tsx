@@ -5,13 +5,19 @@
 // place from a list. Esc saves and closes. An empty capture leaves nothing behind. A pasted picture is saved next
 // to it; pasted HTML comes in as Markdown.
 //
-// Keep going: opened again within two minutes of the last capture, the window shows that capture faded and adds
-// the new text under it, in the same file. Ctrl Enter makes the new text a capture of its own instead.
+// Keep going: opened again within two minutes of the last capture, the window adds the new text under it, in the
+// same file. The old text is folded away behind a line at the top that names it (click it to see it, faded). Ctrl
+// Enter makes the new text a capture of its own instead.
+//
+// Ctrl D sends it to today's page and back to the inbox, as Ctrl D opens today's page in the main window. The line
+// at the top then shows the page's last entry, so you see where the words land.
+//
+// The bar under the text holds only the place and Esc; `?` lists the window's keys.
 
 import { autocompletion, startCompletion, type Completion, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
-import { RangeSetBuilder, StateEffect, StateField, type Extension } from "@codemirror/state";
+import { EditorState, RangeSetBuilder, StateEffect, StateField, type Extension } from "@codemirror/state";
 import { Decoration, EditorView } from "@codemirror/view";
-import { createSignal, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { api, inTauri, type Note } from "./api";
 import { createEditor, type EditorHandle } from "./editor/editor";
 import { cleanPaste } from "./editor/paste";
@@ -26,7 +32,8 @@ import Mark, { loadFaces } from "./library/Mark";
 import { completionTheme } from "./notes/links";
 import { createNoteSaver, type SaveState } from "./notes/saver";
 import { applyPrefs, parsePrefs } from "./settings/prefs";
-import { folderName, KeyHints, say, ToastView } from "./ui";
+import { keyLabel, matches, SHORTCUTS } from "./keys";
+import { folderName, Kbd, say, ToastView } from "./ui";
 import { rest, whenOpened } from "./warm";
 
 /** Opening the window again within this long adds to the last capture. */
@@ -66,6 +73,45 @@ const earlierDeco = EditorView.decorations.compute([earlierEnd], (s) => {
   return end > 0 ? Decoration.set([faded.range(0, end)]) : Decoration.none;
 });
 
+/** Whether the last capture's text is folded away (it is, until the line at the top is clicked). */
+const setFoldEffect = StateEffect.define<boolean>();
+const earlierFolded = StateField.define<boolean>({
+  create: () => true,
+  update(v, tr) {
+    for (const e of tr.effects) if (e.is(setFoldEffect)) return e.value;
+    return v;
+  },
+});
+/** Where the folded part ends: the old text and the blank line after it, so the cursor starts on a clean line. */
+function foldEnd(s: EditorState): number {
+  const end = s.field(earlierEnd, false) ?? 0;
+  if (!end || !s.field(earlierFolded, false)) return 0;
+  const line = s.doc.lineAt(end);
+  if (line.number < s.doc.lines) {
+    const next = s.doc.line(line.number + 1);
+    if (!next.text.trim() && next.number < s.doc.lines) return next.to;
+  }
+  return line.to;
+}
+const folded = Decoration.replace({ block: true });
+const foldSet = (s: EditorState) => {
+  const to = foldEnd(s);
+  return to > 0 ? Decoration.set([folded.range(0, to)]) : Decoration.none;
+};
+const earlierFold: Extension = [
+  earlierFolded,
+  EditorView.decorations.compute([earlierEnd, earlierFolded], foldSet),
+  EditorView.atomicRanges.of((v) => foldSet(v.state)),
+  // Folded text can't be seen, so typing, deleting and pasting must not reach it (Backspace at the start would).
+  EditorState.transactionFilter.of((tr) => {
+    if (!tr.docChanged || !(tr.isUserEvent("input") || tr.isUserEvent("delete") || tr.isUserEvent("move"))) return tr;
+    const to = foldEnd(tr.startState);
+    let touches = false;
+    tr.changes.iterChangedRanges((a) => (touches ||= to > 0 && a <= to));
+    return touches ? [] : tr;
+  }),
+];
+
 export default function Capture() {
   let host!: HTMLDivElement;
   let editor: EditorHandle | undefined;
@@ -82,6 +128,10 @@ export default function Capture() {
   const [msg, setMsg] = createSignal<string | null>(null);
   /** The last capture's text when this window is adding to it. */
   const [earlier, setEarlier] = createSignal<string | null>(null);
+  const [earlierShown, setEarlierShown] = createSignal(false);
+  /** The last entry on today's page, shown at the top while the capture goes there. */
+  const [todayLast, setTodayLast] = createSignal<string | null>(null);
+  const [help, setHelp] = createSignal(false);
   let closing = false;
   let folders: string[] = [];
 
@@ -223,6 +273,7 @@ export default function Capture() {
     saver.load(null);
     setNote(null);
     setEarlier(null);
+    setEarlierShown(false);
     editor.load(tail, tail.length);
     if (tail) saver.changed();
     say("A new capture. The last one is kept as it was.");
@@ -266,7 +317,15 @@ export default function Capture() {
     if (choosing()) return;
     // The suggestion list takes Esc, Enter and Tab while it is open.
     if (document.querySelector(".cm-tooltip-autocomplete")) return;
-    if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && earlier() !== null) {
+    if (help() && e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      setHelp(false);
+    } else if (matches(e, "capToday")) {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleToday();
+    } else if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && earlier() !== null) {
       e.preventDefault();
       e.stopPropagation();
       void separate();
@@ -282,6 +341,41 @@ export default function Capture() {
     }
   };
 
+  const goesToday = () => {
+    const t = target() ?? implied();
+    return t?.kind === "day" && (!t.date || t.date === today());
+  };
+
+  /** Ctrl D: today's page, or back to the inbox. */
+  function toggleToday() {
+    if (target()?.kind === "day" && goesToday()) {
+      setTarget(null);
+      setTargetHome("");
+    } else {
+      setTarget({ kind: "day", date: today() });
+      setTargetHome("journal");
+    }
+    editor?.view.focus();
+  }
+
+  /** The last line of today's page with words in it, `07:02 coffee` as written. */
+  async function readToday() {
+    const n = await (await api()).dayNote(today()).catch(() => null);
+    const lines = (n?.body ?? "").split("\n").map((l) => l.trim()).filter((l) => /[\p{L}\p{N}]/u.test(l) && l !== "_from capture_" && !l.startsWith("#"));
+    setTodayLast(lines.length ? lines[lines.length - 1] : "");
+  }
+
+  // `@today` typed does the same as Ctrl D: the top line shows where on the page it lands.
+  createEffect(() => {
+    if (goesToday()) void readToday();
+  });
+
+  function showEarlier(on: boolean) {
+    setEarlierShown(on);
+    editor?.view.dispatch({ effects: setFoldEffect.of(!on) });
+    editor?.view.focus();
+  }
+
   /** The last capture, if it was left in the inbox less than two minutes ago. */
   async function lastCapture(settings: Record<string, string>): Promise<Note | null> {
     const [id, at] = (settings[LAST] ?? "").split(":").map(Number);
@@ -295,6 +389,7 @@ export default function Capture() {
     const extra: Extension = [
       earlierEnd,
       earlierDeco,
+      earlierFold,
       quoteCard,
       pictureExtensions(() => "inbox"),
       cleanPaste(() => say("Pasted as Markdown. Ctrl Z for plain text.")),
@@ -358,10 +453,43 @@ export default function Capture() {
   return (
     // No window frame: the empty parts of the panel drag the window (Tauri reads data-tauri-drag-region).
     <div class="capture" data-tauri-drag-region>
+      <Show
+        when={earlier() !== null}
+        fallback={
+          <Show when={goesToday() && todayLast() !== null}>
+            <div class="cap-top" data-tauri-drag-region>
+              <Mark folder="journal" size={12} />
+              <span data-tauri-drag-region>{todayLast() ? "Today, after" : "Today's page, the first entry"}</span>
+              <Show when={todayLast()}>
+                <span class="cap-top-text" data-tauri-drag-region>
+                  {todayLast()}
+                </span>
+              </Show>
+              <span class="grow" data-tauri-drag-region />
+              <Kbd keys={keyLabel("capToday")} />
+              <span data-tauri-drag-region>inbox</span>
+            </div>
+          </Show>
+        }
+      >
+        <div class="cap-top" data-tauri-drag-region>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 4v7a4 4 0 0 0 4 4h12" />
+            <path d="m15 10 5 5-5 5" />
+          </svg>
+          <span data-tauri-drag-region>Adding to</span>
+          <button class="cap-top-text" title={earlierShown() ? "Fold it away" : "Show it"} aria-expanded={earlierShown()} onClick={() => showEarlier(!earlierShown())}>
+            {titleLine(earlier() ?? "")}
+          </button>
+          <span class="grow" data-tauri-drag-region />
+          <Kbd keys={keyLabel("capNew")} />
+          <span data-tauri-drag-region>start fresh</span>
+        </div>
+      </Show>
       <div class="capture-text-host" ref={host} />
       <footer class="capture-foot" data-tauri-drag-region>
         <span class="cap-place" classList={{ on: !!(target() ?? implied()), implied: !target() && !!implied() }}>
-          <button class="chip" classList={{ on: !!(target() ?? implied()) }} onClick={() => setChoosing(true)} title="Choose a place (Ctrl K)">
+          <button class="chip" classList={{ on: !!(target() ?? implied()) }} onClick={() => setChoosing(true)} title={`Choose a place (${keyLabel("capChoose")})`}>
             <Mark folder={targetFolder(target() ?? implied(), targetHome())} size={12} />
             {target()?.kind === "note" ? "Add to " : ""}
             {targetLabel(target() ?? implied())}
@@ -381,16 +509,6 @@ export default function Capture() {
             </button>
           </Show>
         </span>
-        <Show when={target() ?? implied()} fallback={<KeyHints hints={[["@", "where"], ["Ctrl K", "choose"], earlier() !== null && ["Ctrl Enter", "a new one"]]} />}>
-          <span class="muted" data-tauri-drag-region>
-            <kbd>Esc</kbd> files it here
-          </span>
-        </Show>
-        <Show when={earlier() !== null}>
-          <span class="muted" data-tauri-drag-region>
-            adding to the last capture
-          </span>
-        </Show>
         <Show when={quoted()}>
           <span class="cap-quote-chip">
             with the quote
@@ -402,13 +520,28 @@ export default function Capture() {
           </span>
         </Show>
         <span class="grow" data-tauri-drag-region />
-        <Show when={msg()} fallback={<span class="muted">{saveLabel()}</span>}>
+        <Show when={msg()} fallback={<Show when={saveLabel()}><span class={`save-dot ${save()}`} role="status" aria-label={saveLabel()} title={saveLabel()} /></Show>}>
           <span class="bad">{msg()}</span>
         </Show>
-        <button class="btn small" onClick={() => void done()}>
-          Done <kbd>Esc</kbd>
+        <button class="cap-esc" aria-label="Done" title="Done: save and close" onClick={() => void done()}>
+          <kbd>{keyLabel("capDone")}</kbd>
+        </button>
+        <button class="cap-help" aria-label="Keys" title="Keys" aria-expanded={help()} onClick={() => setHelp(!help())}>
+          ?
         </button>
       </footer>
+      <Show when={help()}>
+        <div class="cap-help-pop" role="dialog" aria-label="Keys in this window">
+          <For each={SHORTCUTS.filter((k) => k.group === "Capture window")}>
+            {(k) => (
+              <div class="cap-help-row">
+                <Kbd keys={keyLabel(k.id)} />
+                <span>{k.label}</span>
+              </div>
+            )}
+          </For>
+        </div>
+      </Show>
       <Show when={choosing()}>
         <Destination
           onPick={(t) => {
