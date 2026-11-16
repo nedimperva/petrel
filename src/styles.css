@@ -2939,15 +2939,25 @@ button.cap-top-text:hover {
   .note-margin:not(.below) {
     position: absolute;
     top: var(--s-7);
-    right: var(--s-5);
+    /* 8 px of room each side for the rows' hover, which reach 8 px past the text: without it they made the
+       margin scroll sideways. */
+    right: calc(var(--s-5) - 8px);
     bottom: 48px;
-    width: calc(var(--margin-w) - var(--s-5) - var(--s-3));
+    width: calc(var(--margin-w) - var(--s-5) - var(--s-3) + 16px);
     max-width: none;
     margin: 0;
-    padding: 0;
+    padding: 0 8px;
     border: 0;
-    overflow: auto;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    /* Thin, and only shown while the pointer is over the margin. */
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
     gap: var(--s-6);
+  }
+  .note-margin:not(.below):hover {
+    scrollbar-color: var(--line-strong) transparent;
   }
   .note-margin:not(.below) .day-month {
     max-width: none;
@@ -2975,12 +2985,16 @@ button.cap-top-text:hover {
 .note-margin .outline-row {
   padding-top: 4px;
   padding-bottom: 4px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .note-margin .link-row {
   flex-direction: column;
   align-items: stretch;
   gap: 2px;
   width: calc(100% + 16px);
+  min-width: 0;
 }
 .note-margin .link-line {
   overflow: hidden;
