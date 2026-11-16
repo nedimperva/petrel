@@ -365,6 +365,9 @@ export default function NotePage(p: Props) {
       if (!pv) return;
       const lead = (task === "continue" || task === "summarize") && pv.from > 0 && doc.sliceString(pv.from - 1, pv.from) !== "\n" ? "\n\n" : "";
       v.dispatch({ effects: setPreview.of({ ...pv, text: lead + out, usage: usageLine(usage) }) });
+      // Back to the text, so Enter and Esc go to the suggestion; not when the person is typing somewhere else.
+      const at = document.activeElement;
+      if (!at || at === document.body || !(at instanceof HTMLInputElement || at instanceof HTMLTextAreaElement)) v.focus();
     } catch (e) {
       if (mine !== seq) return;
       if (task === "explain") return setExplain(null), say(errText(e), { error: true });
@@ -387,6 +390,7 @@ export default function NotePage(p: Props) {
     keep() {
       const pv = previewOf(view().state);
       if (pv?.text != null) keepPreview(view());
+      view().focus();
     },
     drop() {
       seq++;
@@ -746,6 +750,22 @@ export default function NotePage(p: Props) {
   });
 
   const onKey = (e: KeyboardEvent) => {
+    // An AI suggestion answers Enter, Esc and R wherever the focus went while Claude wrote it (the menu that
+    // started it is gone by then, so the keys used to land nowhere). Inside the editor its own keymap does it.
+    const pv = editor && previewOf(view().state);
+    const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
+    if (pv && !typing && !view().contentDOM.contains(e.target as Node) && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      const ready = pv.text != null && !pv.error;
+      const done = pv.text != null || !!pv.error;
+      const act =
+        e.key === "Enter" && ready ? actions.keep : e.key === "Escape" ? actions.drop : e.key.toLowerCase() === "r" && done ? actions.retry : null;
+      if (act) {
+        e.preventDefault();
+        e.stopPropagation();
+        act();
+        return view().focus();
+      }
+    }
     if (explain() && e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();

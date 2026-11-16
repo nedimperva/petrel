@@ -1,7 +1,7 @@
 // Settings › Sync: Google Drive, built in. Three steps the first time (a Google Cloud client of your own, sign in,
 // on), then one card: the account, on or paused, when it last synced, and Sync now. The work is in Rust
 // (src-tauri/src/sync.rs); this page only sets it up and shows the status.
-import { createResource, createSignal, For, Show } from "solid-js";
+import { createEffect, createSignal, For, on, Show } from "solid-js";
 import { api, errText, type SyncLogLine } from "../api";
 import { setSyncStatus, syncLine, syncStatus } from "../sync";
 import { ago, say } from "../ui";
@@ -18,7 +18,9 @@ const WHAT: Record<string, string> = {
 
 export default function SyncSection(p: { onOpen?(id: number): void }) {
   // What sync did lately, read again whenever the status changes (a sync finished).
-  const [log] = createResource(() => syncStatus()?.lastAt ?? 0, async () => (await api()).syncLog().catch(() => [] as SyncLogLine[]));
+  // A signal, not a resource: Settings sits in App's <Suspense>, which a resource would suspend (a flash).
+  const [log, setLog] = createSignal<SyncLogLine[]>([]);
+  createEffect(on(() => syncStatus()?.lastAt ?? 0, async () => setLog(await (await api()).syncLog().catch(() => [] as SyncLogLine[]))));
   async function open(line: SyncLogLine) {
     if (!line.path.endsWith(".md") || line.what.startsWith("to the trash")) return;
     const r = await (await api()).resolveLink(line.path.replace(/\.md$/, "")).catch(() => null);

@@ -2,7 +2,7 @@
 // Enter puts it back where it was and opens it. "Empty" deletes only what went more than thirty days ago, and asks
 // once more first: it is the one place Petrel deletes a note for good.
 
-import { createMemo, createResource, createSignal, For, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, on, onMount, Show } from "solid-js";
 import { api, errText, type TrashItem } from "../api";
 import { ago, folderName, KeyHints, say } from "../ui";
 
@@ -34,9 +34,18 @@ export default function Trash(p: { onClose(): void; onOpen(id: number): void; on
   });
   const sel = () => shown()[i()];
   const old = () => (items() ?? []).filter((t) => t.at < Date.now() - OLD_DAYS * 864e5).length;
-  const [peek] = createResource(
-    () => sel()?.name,
-    async (name) => (await api()).trashPeek(name).catch(() => ""),
+  // A signal, not a resource: a resource read here would suspend App's <Suspense> and the whole page would
+  // flash on every move. The old preview stays until the new one has come.
+  const [peek, setPeek] = createSignal("");
+  createEffect(
+    on(
+      () => sel()?.name,
+      async (name) => {
+        if (!name) return setPeek("");
+        const text = await (await api()).trashPeek(name).catch(() => "");
+        if (sel()?.name === name) setPeek(text);
+      },
+    ),
   );
   const where = (t: TrashItem) => {
     const dir = t.from.includes("/") ? t.from.slice(0, t.from.lastIndexOf("/")) : "";
@@ -83,7 +92,7 @@ export default function Trash(p: { onClose(): void; onOpen(id: number): void; on
 
   return (
     <div class="scrim top" onMouseDown={(e) => e.target === e.currentTarget && p.onClose()}>
-      <div class="palette trash" classList={{ previewing: !!sel() }} role="dialog" aria-label="Trash">
+      <div class="palette trash" classList={{ previewing: items() === null || !!sel() }} role="dialog" aria-label="Trash">
         <div class="palette-field">
           <span class="spark">⌫</span>
           <input class="palette-input" ref={input} placeholder="The trash. Type to narrow…" value={q()} onInput={(e) => (setQ(e.currentTarget.value), setI(0))} onKeyDown={key} />
@@ -115,7 +124,7 @@ export default function Trash(p: { onClose(): void; onOpen(id: number): void; on
                   {t().from} · trashed {ago(t().at)}
                 </p>
                 <h2 class="peek-title">{t().title}</h2>
-                <For each={(peek() ?? "").split(/\n{2,}/).slice(0, 30)}>{(para) => <p class="peek-text">{para}</p>}</For>
+                <For each={peek().split(/\n{2,}/).slice(0, 30)}>{(para) => <p class="peek-text">{para}</p>}</For>
               </article>
             )}
           </Show>
