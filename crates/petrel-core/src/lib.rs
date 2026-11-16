@@ -9,6 +9,7 @@
 pub mod attachments;
 pub mod gen;
 pub mod links;
+pub mod merge;
 pub mod notes;
 pub mod query;
 pub mod retention;

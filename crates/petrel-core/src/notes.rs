@@ -34,9 +34,11 @@ pub mod history;
 pub mod passages;
 mod paths;
 mod tasks;
+pub mod trash;
 
 pub use conflicts::Conflict;
 pub use tasks::OpenTask;
+pub use trash::TrashItem;
 
 /// The setting that holds the notes folder.
 pub const ROOT_SETTING: &str = "notes.root";
@@ -1199,6 +1201,7 @@ impl Store {
             n += 1;
         }
         rename_with_retry(&abs(root, rel), &target)?;
+        trash::note_place(root, &target.file_name().unwrap_or_default().to_string_lossy(), rel);
         self.conn.execute("DELETE FROM notes WHERE path = ?1", params![rel])?;
         Ok(target)
     }
@@ -2753,7 +2756,7 @@ mod tests {
         assert_eq!(s.peek(d.id).unwrap().folder, Folder::Inbox);
         assert!(s.promotion(d.id).unwrap().is_none());
         assert!(!dir.join("Projects/Notes in Petrel.md").exists());
-        assert!(std::fs::read_dir(dir.join(TRASH_DIR)).unwrap().count() == 1, "undo trashes, never deletes");
+        assert!(s.trash_items().unwrap().len() == 1, "undo trashes, never deletes");
         assert!(s.peek(linker.id).unwrap().content.contains("[[d:Notes in Petrel]]"));
 
         let journal = s.create_note("", "Journal", "Start.\n", &[]).unwrap();

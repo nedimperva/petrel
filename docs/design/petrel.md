@@ -67,8 +67,10 @@ It is not for sale; it may be open source later.
   pressed) and Delete (`d`). Moving files it into a note (added to the end) or a collection (as its own note).
 - **Sync is built in (2026-11-14).** Settings › Sync keeps the folder and `My Drive/Petrel` the same through the
   Drive API, from Rust, with no sync app or service: each file is compared here, there and as both last had it;
-  one side changed is copied over, both changed keeps both (a conflict copy to settle), changed and deleted keeps
-  it, deleted there goes to `.trash/` here. The history syncs as files in `.history/`. A folder inside Google
+  one side changed is copied over, both changed is merged line by line against the text both last had (kept
+  by md5 in `<data dir>/sync-<hash>.base/`) when the edits do not touch, and otherwise keeps both (a conflict copy to
+  settle), changed and deleted keeps it, deleted there goes to `.trash/` here. Quit waits up to five seconds for a
+  last sync. Each thing done is a line in the sync log (the last fifty, Settings › Sync). The history syncs as files in `.history/`. A folder inside Google
   Drive for desktop is refused: one sync per folder.
 - **Collections are folders.** Notes, Prompts, Snippets, Songs, a topic: any top-level folder except `inbox/`.
   The most copied come first.
@@ -177,6 +179,28 @@ Page: https://claude.ai/artifact/Kan675aYKsn9pvSgDMGRqq. Built: 1, 2, 4–12, 14
   straight to the Messages API, never from the webview. The model can be changed with the `ai.model` setting.
 - **Old drafts are not dropped.** On first start the drafts in the database are written once to `inbox/`
   (Inbox) and `drafts/` (archive). Trash is not exported.
+
+## The review picks (chosen 2026-11-16, PR #14)
+
+From the 60-item review (https://claude.ai/artifact/DwnzLPdrfqZobjj2mWSTwV), built in five batches:
+
+- **Speed (1–11).** The window shows before the index is read; Ctrl K and the library read only what they show;
+  AI replies stream (`petrel-ai` events) and Esc stops them; Drive transfers run four at a time and a rename is a
+  move; between hourly full scans sync reads only the paths the watcher named; versions are thinned like history.
+- **Finding (14–21).** One folding rule for titles in Rust and TS (`notes/fold.rs`, `palette/match.ts`): case,
+  accents, đ and dj, one typo. Words in a note's title weigh four times its text. Ctrl K jumps to the match, offers
+  a filter on Tab, and makes a new note (with `@collection`) when nothing has that title. Ctrl F is Petrel's own bar.
+- **Writing (23, 25–29, 35).** Quiet Markdown (marks hidden off the line being edited), code blocks with Copy,
+  tables that line up, a pasted link over a selection becomes `[words](link)`, a template per page collection
+  (`template:` in `.petrel`), tasks with a day sorted under Overdue, Today, This week, Later, `Ctrl +` and `Ctrl -`.
+- **Picker and AI (37, 45–50).** `Ctrl Enter` in the picker pastes into the app (SendInput; `wtype` or `xdotool`
+  on Linux). Ask sends each note's best passages, cut at headings (`notes/passages.rs`); a filter in Ctrl K sets
+  what a question reads; Ctrl J has "Ask about this note". The margin lists notes that share telling words, from
+  the index, without AI. A line under each AI result says what was sent and about what it cost. Ctrl J remembers
+  your own asks. The notes in a question are cached for follow-ups.
+- **Sync and safety (52–56).** The trash panel (`notes/trash.rs`; where each thing came from is in
+  `.trash/.places`), merging edits that do not touch (`merge.rs`), a last sync on Quit, the sync log, and a line
+  saying Drive carries only the files Petrel made (`drive.file`).
 
 ## Look
 

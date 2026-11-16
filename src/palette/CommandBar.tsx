@@ -145,7 +145,8 @@ export default function CommandBar(p: {
     // No note by that name: make it. `@travel` says where.
     const want = newNote();
     if (want && !isQuestion() && !(notes() ?? []).some((n) => n.title.toLowerCase() === want.title.toLowerCase())) {
-      out.splice(ns.length ? ns.length : 0, 0, { kind: "new", ...want });
+      // After the notes; with no note found, after the commands that match too, so "trash" still runs Trash.
+      out.splice(ns.length ? ns.length : cs.length && q().trim() ? cs.length : 0, 0, { kind: "new", ...want });
     }
     return out;
   };

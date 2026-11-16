@@ -64,6 +64,26 @@ pub fn quit(app: &tauri::AppHandle) {
         log::warn!("quit chosen twice: exiting without waiting for the windows");
         return app.exit(0);
     }
+    // With Drive on, the last edits go before the windows close: the main window saves and says so, and sync
+    // gets up to five seconds. Quit chosen again meanwhile exits at once, as above.
+    if crate::sync::is_on(app) {
+        let _ = app.emit_to("main", "petrel-last-sync", ());
+        let app = app.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            if !crate::sync::last(&app, std::time::Duration::from_secs(5)) {
+                log::warn!("quit: the last sync took longer than five seconds; it runs at the next start");
+            }
+            let again = app.clone();
+            let _ = app.run_on_main_thread(move || close_windows(&again));
+        });
+        return;
+    }
+    close_windows(app);
+}
+
+/// Each window saves its text and closes; the last one to close ends the process.
+fn close_windows(app: &tauri::AppHandle) {
     let windows = app.webview_windows();
     if windows.is_empty() {
         return app.exit(0);

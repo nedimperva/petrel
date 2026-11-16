@@ -14,7 +14,8 @@ shorten, continue or explain your text and answer questions from your notes, but
 - **Sync with Google Drive, built in.** Settings › Sync keeps your folder and `My Drive/Petrel` the same on every
   computer you sign in on, Windows and Linux alike, with no sync app: a save goes up a couple of seconds later,
   changes come down every 30 seconds and when you come back to the window, and offline changes wait. A note changed
-  on two computers keeps both texts; a note's history (`Ctrl H`) syncs too. It needs a Google Cloud client of your
+  on two computers is merged when the edits are in different places and keeps both texts when they clash; a note's
+  history (`Ctrl H`) syncs too. Quit gives sync up to five seconds first, and Settings › Sync lists what it did lately. It needs a Google Cloud client of your
   own (Settings › Sync lists the three steps) and asks only for the files Petrel makes (`drive.file`).
 - **Capture from anywhere.** `Ctrl Alt Space` (or a compositor keybind on Wayland), the tray,
   `petrel --new "text"`, `echo text | petrel --stdin`. Text selected in the app you were in comes along as a quote
@@ -39,7 +40,7 @@ shorten, continue or explain your text and answer questions from your notes, but
   collection) are on `Ctrl J` too. `Ctrl K` then a question asks your notes, and `Tab` asks again. The week, when
   you ask: what you wrote, what is still open, and a few sentences on it. Needs an
   Anthropic API key in Settings, kept in the OS keyring.
-- **Never loses text.** Autosave, versions (`Ctrl H`, kept in the folder as `.history/`), deleted notes go to `.trash/` in the folder, undo with `z`.
+- **Never loses text.** Autosave, versions (`Ctrl H`, kept in the folder as `.history/`), deleted notes go to `.trash/` in the folder, undo with `z`. `Ctrl K` › Trash shows what is there, puts a note back where it was, and empties only what is older than thirty days.
 
 ## Keys
 

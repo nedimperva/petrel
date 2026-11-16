@@ -1,12 +1,30 @@
 // Settings › Sync: Google Drive, built in. Three steps the first time (a Google Cloud client of your own, sign in,
 // on), then one card: the account, on or paused, when it last synced, and Sync now. The work is in Rust
 // (src-tauri/src/sync.rs); this page only sets it up and shows the status.
-import { createSignal, Show } from "solid-js";
-import { api, errText } from "../api";
+import { createResource, createSignal, For, Show } from "solid-js";
+import { api, errText, type SyncLogLine } from "../api";
 import { setSyncStatus, syncLine, syncStatus } from "../sync";
 import { ago, say } from "../ui";
 
-export default function SyncSection() {
+const WHAT: Record<string, string> = {
+  sent: "Sent",
+  received: "Received",
+  moved: "Moved",
+  merged: "Merged both edits",
+  "kept both": "Kept both",
+  "to the trash here": "To the trash here",
+  "to the trash there": "To the trash in Drive",
+};
+
+export default function SyncSection(p: { onOpen?(id: number): void }) {
+  // What sync did lately, read again whenever the status changes (a sync finished).
+  const [log] = createResource(() => syncStatus()?.lastAt ?? 0, async () => (await api()).syncLog().catch(() => [] as SyncLogLine[]));
+  async function open(line: SyncLogLine) {
+    if (!line.path.endsWith(".md") || line.what.startsWith("to the trash")) return;
+    const r = await (await api()).resolveLink(line.path.replace(/\.md$/, "")).catch(() => null);
+    if (r?.kind === "note") p.onOpen?.(r.id);
+    else say("That note is not there any more.");
+  }
   const [id, setId] = createSignal("");
   const [secret, setSecret] = createSignal("");
   const [busy, setBusy] = createSignal<null | "save" | "signin">(null);
@@ -30,8 +48,8 @@ export default function SyncSection() {
       <section class="set-card">
         <p class="set-note">
           Petrel keeps your folder and a <b>Petrel</b> folder in your Google Drive the same, on every computer where
-          you sign in. Notes stay plain Markdown files you can open in Drive. A note changed in two places keeps both
-          versions, and a note's history goes along too. No other service is involved.
+          you sign in. Notes stay plain Markdown files you can open in Drive. A note changed in two places is merged, or
+          keeps both versions when the edits clash, and a note's history goes along too. No other service is involved.
         </p>
       </section>
 
@@ -110,13 +128,38 @@ export default function SyncSection() {
               {st()!.message}
             </p>
           </Show>
+          <p class="muted small set-note">
+            Only files Petrel itself put in Drive come down: a file another app adds to My Drive/Petrel stays in Drive
+            and is not synced. Put it in this folder instead and it goes up.
+          </p>
           <div class="set-row">
-            <span class="muted small grow">A note changed on both computers keeps both; the library shows a card to settle it.</span>
+            <span class="muted small grow">
+              A note changed on both computers is merged when the changes are in different places; when they touch the same lines it keeps both, and the
+              library shows a card to settle it.
+            </span>
             <button class="link small" onClick={() => void run(null, async () => (await api()).syncSignOut(), "Signed out. Your notes stay here and in Drive.")}>
               Sign out
             </button>
           </div>
         </section>
+        <Show when={log()?.length}>
+          <section class="set-card">
+            <h2 class="set-step">What sync did lately</h2>
+            <div class="sync-log">
+              <For each={log()}>
+                {(l) => (
+                  <button class="sync-log-row" disabled={!l.path.endsWith(".md") || l.what.startsWith("to the trash")} onClick={() => void open(l)}>
+                    <span class="sync-log-what" classList={{ bad: l.what === "kept both" }}>
+                      {WHAT[l.what] ?? l.what}
+                    </span>
+                    <span class="sync-log-path">{l.path.replace(/\.md$/, "")}</span>
+                    <span class="muted small nowrap">{ago(l.at)}</span>
+                  </button>
+                )}
+              </For>
+            </div>
+          </section>
+        </Show>
       </Show>
     </>
   );

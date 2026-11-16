@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use petrel_core::sync::{self as engine, State as SyncState};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
 
 use crate::drive::{Drive, Offline};
@@ -55,6 +55,8 @@ enum Nudge {
     Soon(Vec<PathBuf>),
     /// The person asked, or the window came back: look at everything.
     Now,
+    /// Quit: look at everything once more, and say when it is done.
+    Last(Sender<()>),
 }
 
 /// What the next sync must look at here: only the paths the watcher named, or the whole folder.
@@ -62,6 +64,8 @@ enum Nudge {
 struct Pending {
     full: bool,
     paths: std::collections::BTreeSet<PathBuf>,
+    /// Told when this sync is over (Quit waits on it).
+    done: Vec<Sender<()>>,
 }
 
 impl Pending {
@@ -69,6 +73,10 @@ impl Pending {
         match n {
             Nudge::Soon(p) => self.paths.extend(p),
             Nudge::Now => self.full = true,
+            Nudge::Last(tx) => {
+                self.full = true;
+                self.done.push(tx);
+            }
         }
     }
 }
@@ -111,6 +119,44 @@ fn state_file(app: &tauri::AppHandle, root: &Path) -> PathBuf {
     let dir = st.db_path.parent().map(Path::to_path_buf).unwrap_or_default();
     let tag = &engine::md5_hex(root.to_string_lossy().as_bytes())[..12];
     dir.join(format!("sync-{tag}.json"))
+}
+
+/// One line of the sync log: when, what was done, and to which file.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogLine {
+    pub at: i64,
+    pub what: String,
+    pub path: String,
+}
+
+/// Lines the log keeps, newest last.
+const LOG_LINES: usize = 50;
+
+fn log_file(app: &tauri::AppHandle, root: &Path) -> PathBuf {
+    state_file(app, root).with_extension("log.json")
+}
+
+fn read_log(path: &Path) -> Vec<LogLine> {
+    std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+}
+
+/// Adds what a sync did to the log, keeping the last fifty lines.
+fn write_log(app: &tauri::AppHandle, root: &Path, done: &[(String, String)]) {
+    if done.is_empty() {
+        return;
+    }
+    let path = log_file(app, root);
+    let mut lines = read_log(&path);
+    let at = now_ms();
+    lines.extend(done.iter().map(|(what, p)| LogLine { at, what: what.clone(), path: p.clone() }));
+    let skip = lines.len().saturating_sub(LOG_LINES);
+    let lines = &lines[skip..];
+    if let Err(e) =
+        serde_json::to_vec(lines).map_err(anyhow::Error::from).and_then(|b| Ok(std::fs::write(&path, b)?))
+    {
+        log::warn!("writing the sync log: {e:#}");
+    }
 }
 
 pub fn status(app: &tauri::AppHandle) -> Status {
@@ -159,6 +205,19 @@ pub fn nudge_paths(app: &tauri::AppHandle, paths: Vec<PathBuf>) {
     send(app, Nudge::Soon(paths));
 }
 
+/// Whether sync is on, so Quit gives it a last run.
+pub fn is_on(app: &tauri::AppHandle) -> bool {
+    status(app).on
+}
+
+/// One last sync before Quit: waits for it at most `limit`, so a slow network never holds Petrel open.
+/// Returns whether it finished in time.
+pub fn last(app: &tauri::AppHandle, limit: Duration) -> bool {
+    let (tx, rx) = channel();
+    send(app, Nudge::Last(tx));
+    rx.recv_timeout(limit).is_ok()
+}
+
 fn send(app: &tauri::AppHandle, n: Nudge) {
     let sync = app.state::<Sync>();
     let tx = sync.nudge.lock().ok().and_then(|n| n.clone());
@@ -196,9 +255,13 @@ pub fn start(app: &tauri::AppHandle) {
             }
             let shown = app.get_webview_window("main").and_then(|w| w.is_visible().ok()).unwrap_or(false);
             wait = if shown { OPEN_EVERY } else { TRAY_EVERY };
-            let todo = std::mem::take(&mut pending);
+            let mut todo = std::mem::take(&mut pending);
+            let done = std::mem::take(&mut todo.done);
             if let Err(e) = run_once(&app, todo) {
                 log::warn!("sync: {e:#}");
+            }
+            for tx in done {
+                let _ = tx.send(());
             }
         }
     });
@@ -259,6 +322,7 @@ fn run_once(app: &tauri::AppHandle, todo: Pending) -> Result<()> {
                     let _ = app.emit_to("main", "petrel-folder", r);
                 }
             }
+            write_log(app, &root, &report.log);
             let words = describe(&report);
             let failed = report.failed.first().map(|(p, e)| format!("{p}: {e}"));
             if !report.failed.is_empty() {
@@ -335,6 +399,15 @@ fn chrono_stamp() -> String {
 // ---- commands ----------------------------------------------------------------------------------------------
 
 type R<T> = std::result::Result<T, String>;
+
+/// What sync did lately, newest first: the panel behind the sidebar's sync line.
+#[tauri::command]
+pub fn sync_log(app: tauri::AppHandle) -> Vec<LogLine> {
+    let Some(root) = root(&app) else { return Vec::new() };
+    let mut lines = read_log(&log_file(&app, &root));
+    lines.reverse();
+    lines
+}
 
 #[tauri::command]
 pub fn sync_status(app: tauri::AppHandle) -> Status {

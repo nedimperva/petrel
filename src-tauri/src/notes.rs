@@ -110,6 +110,28 @@ pub async fn peek_notes(state: State<'_, AppState>, ids: Vec<i64>) -> R<Vec<Note
     with(&state, |s| Ok(ids.iter().filter_map(|&id| s.peek_note(id).ok()).collect()))
 }
 
+/// The trash, opened (Ctrl K › Trash).
+#[tauri::command]
+pub async fn trash_items(state: State<'_, AppState>) -> R<Vec<petrel_core::notes::TrashItem>> {
+    with(&state, |s| s.trash_items())
+}
+
+#[tauri::command]
+pub async fn trash_peek(state: State<'_, AppState>, name: String) -> R<String> {
+    with(&state, |s| s.trash_peek(&name))
+}
+
+#[tauri::command]
+pub async fn trash_restore(state: State<'_, AppState>, name: String) -> R<Option<i64>> {
+    with(&state, |s| s.trash_restore(&name))
+}
+
+/// Deletes what is older than `days` in the trash, for good: only when the person asks.
+#[tauri::command]
+pub async fn trash_empty(state: State<'_, AppState>, days: i64) -> R<usize> {
+    with(&state, |s| s.trash_empty(days))
+}
+
 /// Notes that share telling words with this one: the margin's list, from the index, no AI.
 #[tauri::command]
 pub async fn similar_notes(state: State<'_, AppState>, id: i64) -> R<Vec<NoteSummary>> {

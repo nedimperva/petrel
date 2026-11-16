@@ -37,6 +37,8 @@ export function fakeApi(): Api {
     autostartError: null,
   };
   const lower = (s: string) => s.trim().toLowerCase();
+  /** `.trash/`: two things, one older than a month, so the panel has something to show. */
+  const trash = new Map<string, { n: Note; at: number }>();
   const pathOf = (folder: string, title: string) => (folder ? `${folder}/${title}.md` : `${title}.md`);
   const wait = <T>(v: T, ms = 0) => new Promise<T>((r) => setTimeout(() => r(v), ms));
   const templates = new Map<string, string>([["Journal", ""]]);
@@ -62,6 +64,9 @@ export function fakeApi(): Api {
     cacheWriteTokens: 0,
   });
   const sync: SyncStatus = { configured: false, clientId: "", signedIn: false, account: "", on: false, state: "off", message: null, lastAt: null, last: null };
+  // `?synced` in the address starts signed in to Drive, to try the sync screens.
+  if (typeof location !== "undefined" && location.search.includes("synced"))
+    Object.assign(sync, { configured: true, signedIn: true, on: true, account: "you@example.com", state: "idle", lastAt: Date.now(), last: "2 files received" });
 
   const add = (folder: string, title: string, body: string, tags: string[] = [], age = 0, pinned = false): Note => {
     const t = Date.now() - age;
@@ -123,6 +128,11 @@ export function fakeApi(): Api {
   add("Songs", "Wish you were here", "Intro: Em G Em G Em A Em A G\n\nC         D/F#\nSo, so you think you can tell\n", [], 90 * DAY);
   add("journal", dayOf(DAY), "08:40 Slow start. First cold morning, coffee on the balcony.\n\n17:05\n- [x] Call the dentist\n- [ ] Send the Mostar dates to Lejla\n", [], DAY);
   add("journal", dayOf(0), "08:12 Want to finish the shelf plan this week.\n", [], 40 * MIN);
+  for (const [title, body, days] of [["Old shopping list", "- milk\n- bread\n", 45], ["Draft reply to Amra", "Thanks, the 20th works.\n", 2]] as const) {
+    const n = add("", title, body, [], days * 864e5);
+    notes.delete(n.id);
+    trash.set(`20261001-0900${days} ${title}.md`, { n, at: Date.now() - days * 864e5 });
+  }
   const faces: Record<string, TopicFace> = { Prompts: { color: "plum", mark: "spark" }, Songs: { color: "rose", mark: "music" } };
   const pictures = new Map<string, Uint8Array>();
   copies["Prompts/Code review.md"] = 14;
@@ -192,6 +202,13 @@ export function fakeApi(): Api {
     pasteIntoFront: (shift) => wait(undefined).then(() => console.info(shift ? "pasted with Ctrl Shift V" : "pasted")),
     // Sync in the browser: a pretend Google account, so Settings › Sync and the sidebar can be worked on.
     syncStatus: () => wait({ ...sync }),
+    syncLog: () =>
+      wait([
+        { at: Date.now() - 60e3, what: "merged", path: "Tern release.md" },
+        { at: Date.now() - 60e3, what: "received", path: "journal/2026-11-16.md" },
+        { at: Date.now() - 3600e3, what: "sent", path: "Prompts/Code review.md" },
+        { at: Date.now() - 3600e3, what: "to the trash here", path: "inbox/milk.md" },
+      ]),
     syncSetup: (clientId) => wait(Object.assign(sync, { clientId, configured: true })).then((x) => ({ ...x })),
     syncSignIn: () => wait(Object.assign(sync, { signedIn: true, on: true, account: "you@example.com", state: "idle", lastAt: Date.now(), last: "12 files sent" }), 600).then((x) => ({ ...x })),
     syncSignOut: () => wait(Object.assign(sync, { signedIn: false, on: false, account: "", state: "off" })).then((x) => ({ ...x })),
@@ -316,7 +333,26 @@ export function fakeApi(): Api {
     trashNote: async (id) => {
       const n = get(id);
       notes.delete(id);
-      return token(() => notes.set(n.id, n));
+      const name = `${new Date().toISOString().slice(0, 19).replace(/[-:]/g, "").replace("T", "-")} ${n.title}.md`;
+      trash.set(name, { n, at: Date.now() });
+      return token(() => (trash.delete(name), notes.set(n.id, n)));
+    },
+    trashItems: async () =>
+      [...trash.entries()]
+        .map(([name, t]) => ({ name, title: t.n.title, from: t.n.path, at: t.at, folder: false }))
+        .sort((a, b) => b.at - a.at),
+    trashPeek: async (name) => trash.get(name)?.n.body.slice(0, 4000) ?? "",
+    trashRestore: async (name) => {
+      const t = trash.get(name);
+      if (!t) throw new Error(`${name} is no longer in the trash`);
+      trash.delete(name);
+      notes.set(t.n.id, t.n);
+      return t.n.id;
+    },
+    trashEmpty: async (days) => {
+      let n = 0;
+      for (const [name, t] of trash) if (t.at < Date.now() - days * 864e5) (trash.delete(name), n++);
+      return n;
     },
     undo: async (t) => {
       const u = undos.get(t);

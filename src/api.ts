@@ -111,6 +111,14 @@ export interface SyncStatus {
   last: string | null;
 }
 
+/** One thing sync did, for the log in Settings › Sync. */
+export interface SyncLogLine {
+  at: number;
+  /** `sent`, `received`, `moved`, `merged`, `kept both`, `to the trash here`, `to the trash there`. */
+  what: string;
+  path: string;
+}
+
 export interface NoteQuery {
   folder?: string | null;
   pinned?: boolean | null;
@@ -158,6 +166,15 @@ export interface SidebarCounts {
 }
 
 /** What one AI call used. */
+export interface TrashItem {
+  name: string;
+  title: string;
+  /** The path it had, relative to the notes folder. */
+  from: string;
+  at: number;
+  folder: boolean;
+}
+
 export interface AiUsage {
   model: string;
   inputTokens: number;
@@ -266,6 +283,8 @@ export interface AppEvents {
   quit(): void;
   /** The picker's "Open in Petrel". */
   openNote(id: number): void;
+  /** Quit with Drive on: save now, and say the last changes are going to Drive. */
+  lastSync?(): void;
   /** A capture was made in its window: lists are out of date. */
   changed(): void;
   /** The window came back to the front: the folder may have changed (Drive, another app). */
@@ -324,6 +343,13 @@ export interface Api {
   pinNote(id: number, pinned: boolean): Promise<Note>;
   setNoteTags(id: number, tags: string[]): Promise<Note>;
   trashNote(id: number): Promise<UndoToken>;
+  /** What is in `.trash/`, newest first. */
+  trashItems(): Promise<TrashItem[]>;
+  trashPeek(name: string): Promise<string>;
+  /** Puts it back where it was; the note's id, or null for a collection. */
+  trashRestore(name: string): Promise<number | null>;
+  /** Deletes what went to the trash more than `days` days ago, for good. */
+  trashEmpty(days: number): Promise<number>;
   undo(token: string): Promise<number>;
   noteVersions(id: number): Promise<NoteVersion[]>;
   noteVersionText(versionId: number): Promise<string>;
@@ -379,6 +405,8 @@ export interface Api {
   aiCancel(id: string): Promise<void>;
 
   syncStatus(): Promise<SyncStatus>;
+  /** The last fifty things sync did, newest first. */
+  syncLog(): Promise<SyncLogLine[]>;
   syncSetup(clientId: string, clientSecret: string): Promise<SyncStatus>;
   /** Opens Google's sign-in in the browser and waits for it. */
   syncSignIn(): Promise<SyncStatus>;
@@ -439,6 +467,7 @@ async function tauriApi(): Promise<Api> {
       const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
       const win = getCurrentWebviewWindow();
       await win.listen("petrel-quit", () => events.quit());
+      if (events.lastSync) await win.listen("petrel-last-sync", () => events.lastSync!());
       await win.listen<number>("petrel-open-note", (e) => events.openNote(e.payload));
       await win.listen("petrel-changed", () => events.changed());
       await win.onFocusChanged(({ payload }) => payload && events.focus());
@@ -465,6 +494,10 @@ async function tauriApi(): Promise<Api> {
     pinNote: (id, pinned) => invoke("pin_note", { id, pinned }),
     setNoteTags: (id, tags) => invoke("set_note_tags", { id, tags }),
     trashNote: (id) => invoke("trash_note", { id }),
+    trashItems: () => invoke("trash_items"),
+    trashPeek: (name) => invoke("trash_peek", { name }),
+    trashRestore: (name) => invoke("trash_restore", { name }),
+    trashEmpty: (days) => invoke("trash_empty", { days }),
     undo: (token) => invoke("undo_note", { token }),
     noteVersions: (id) => invoke("note_versions", { id }),
     noteVersionText: (versionId) => invoke("note_version_text", { versionId }),
@@ -507,6 +540,7 @@ async function tauriApi(): Promise<Api> {
     setAiModels: (model, fastModel) => invoke("set_ai_models", { model, fastModel }),
     aiCancel: (id) => invoke("ai_cancel", { id }),
     syncStatus: () => invoke("sync_status"),
+    syncLog: () => invoke("sync_log"),
     syncSetup: (clientId, clientSecret) => invoke("sync_setup", { clientId, clientSecret }),
     syncSignIn: () => invoke("sync_sign_in"),
     syncSignOut: () => invoke("sync_sign_out"),

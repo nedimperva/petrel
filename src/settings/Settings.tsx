@@ -64,7 +64,7 @@ const PAPER_SAY: Record<string, string> = {
   clock: "Paper, Linen, then Night",
 };
 
-export default function Settings(p: { section?: Section | "all"; onClose(): void; onRoot(root: string): void; onAi(s: AiStatus): void }) {
+export default function Settings(p: { section?: Section | "all"; onClose(): void; onRoot(root: string): void; onAi(s: AiStatus): void; onOpen?(id: number): void }) {
   const [at, setAt] = createSignal<Section>(p.section && p.section !== "all" ? p.section : "general");
   const [info, { refetch: refetchInfo }] = createResource(async () => (await api()).notesInfo());
   const [app] = createResource(async () => (await api()).appInfo());
@@ -421,7 +421,7 @@ export default function Settings(p: { section?: Section | "all"; onClose(): void
         </Show>
 
         <Show when={at() === "sync"}>
-          <SyncSection />
+          <SyncSection onOpen={p.onOpen} />
         </Show>
 
         <Show when={at() === "ai"}>

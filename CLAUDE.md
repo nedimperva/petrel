@@ -5,7 +5,17 @@ Markdown files in one folder; a Rust engine (`crates/petrel-core`) indexes them 
 (`src-tauri`) adds windows, tray, hotkeys and AI, and a SolidJS UI (`src`) draws it. The README covers setup and
 keys; `docs/design/petrel.md` is the design; this file covers state and decisions that aren't visible from the code.
 
-## Where things stand (2026-11-11, night)
+## Where things stand (2026-11-16)
+
+- **Review picks (owner asked 2026-11-16, list https://claude.ai/artifact/DwnzLPdrfqZobjj2mWSTwV), branch
+  `claude/project-thread-gquwlx`, PR #14, one commit per batch:** items 1–11, 14–21, 23, 25–29, 35, 37, 45–50 and
+  52–56; summary in `docs/design/petrel.md` › The review picks. New places: `src/editor/marks.ts` (quiet Markdown,
+  code, tables), `src/editor/findBar.ts`, `notes/fold.rs` and `notes/passages.rs`, `notes/trash.rs`, `merge.rs`
+  (three-way line merge used by sync, bases in `<data dir>/sync-<hash>.base/`), `src-tauri/src/paste.rs`,
+  `src/ai/usage.ts` (prices per million tokens, update when they change), `src/ai/asks.ts` (`ui.asks`),
+  `src/palette/Trash.tsx`. The sync log is `<data dir>/sync-<hash>.log.json`. Tried in a browser against the fake
+  store (`?synced` starts it signed in) and the Windows build type-checks (`cargo check --target
+  x86_64-pc-windows-gnu`); not tried: paste into a real app, the last sync on Quit, a merge against real Drive.
 
 - **Polish and Drive sync (owner asked 2026-11-14, page https://claude.ai/artifact/HTT8hZAXAQUPnkBXeDwzJW), branch
   `claude/project-thread-8gux00`:** all 12 polish items: the capture window and the picker are warm (`src-tauri/src/

@@ -35,6 +35,7 @@ const Versions = lazy(() => import("./versions/Versions"));
 
 const Week = lazy(() => import("./journal/Week"));
 const Tasks = lazy(() => import("./palette/Tasks"));
+const Trash = lazy(() => import("./palette/Trash"));
 
 type View =
   | { kind: "library"; tab: string; review?: boolean }
@@ -148,7 +149,8 @@ export default function App() {
   // A panel opened from Ctrl K goes back to it on Esc; one closed because a note was opened from it does not.
   let barClosedAt = 0;
   let lastGo = 0;
-  const panels = { tasks: false, week: false, history: false };
+  const panels = { tasks: false, week: false, history: false, trash: false };
+  const [trashOpen, setTrash] = createSignal(false);
   const openPanel = (which: keyof typeof panels, set: (on: boolean) => void) => {
     panels[which] = Date.now() - barClosedAt < 400;
     set(true);
@@ -336,6 +338,7 @@ export default function App() {
         void (page ? page.flush() : Promise.resolve(true)).then(() => setTasks(true));
       },
     },
+    { id: "trash", label: "Trash: put back a deleted note, or empty the old ones", run: () => openPanel("trash", setTrash) },
     { id: "copy", label: "Copy", when: onNote, run: () => void copy("plain") },
     { id: "copy-md", label: "Copy as Markdown", get keys() { return keyLabel("copyMd"); }, when: onNote, run: () => void copy("markdown") },
     { id: "copy-html", label: "Copy formatted (for mail and docs)", when: onNote, run: () => void copy("html") },
@@ -395,7 +398,7 @@ export default function App() {
     }
   }
 
-  const overlay = () => !!(bar() || settings() || history() || moving() || week() || tasks() || keysOpen());
+  const overlay = () => !!(bar() || settings() || history() || moving() || week() || tasks() || trashOpen() || keysOpen());
 
   // Ctrl Tab and Ctrl \ come before the editor, which would indent or type them.
   const earlyKey = (e: KeyboardEvent) => {
@@ -517,6 +520,10 @@ export default function App() {
         await s.closeWindow();
       },
       openNote: (id) => void openNote(id),
+      lastSync: () => {
+        void page?.flush();
+        say("Sending the last changes to Drive before closing…");
+      },
       focus: () => {
         void rescan();
         // Back at the window: see what changed on the other computer.
@@ -687,6 +694,7 @@ export default function App() {
             onClose={() => setSettings(false)}
             onRoot={(r) => (setRoot(r), setRev(rev() + 1))}
             onAi={setAi}
+            onOpen={(id) => (setSettings(false), void openNote(id))}
           />
         </Show>
         <Show when={tasks()}>
@@ -697,6 +705,9 @@ export default function App() {
               if (current()?.id === id) void page?.refresh();
             }}
           />
+        </Show>
+        <Show when={trashOpen()}>
+          <Trash onClose={() => closePanel("trash", setTrash)} onOpen={(id) => void openNote(id)} onChanged={() => setRev(rev() + 1)} />
         </Show>
         <Show when={week()}>
           <Week

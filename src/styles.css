@@ -4862,3 +4862,54 @@ button.cap-top-text:hover {
 .carried-text.overdue {
   color: var(--bad);
 }
+
+/* The trash panel: "Empty" turns red when it asks once more. */
+.btn.danger {
+  background: var(--bad-soft);
+  border-color: var(--bad);
+  color: var(--bad);
+}
+.palette.trash .picker-foot {
+  gap: var(--s-2);
+}
+
+/* Settings › Sync: what sync did lately, one quiet row each. */
+.sync-log {
+  display: flex;
+  flex-direction: column;
+  padding: 0 var(--s-2) var(--s-2);
+  max-height: 320px;
+  overflow: auto;
+}
+.sync-log-row {
+  display: grid;
+  grid-template-columns: 150px 1fr auto;
+  gap: var(--s-3);
+  align-items: baseline;
+  padding: 5px var(--s-2);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-md);
+  text-align: left;
+  cursor: pointer;
+}
+.sync-log-row:hover:not(:disabled) {
+  background: var(--hover);
+}
+.sync-log-row:disabled {
+  cursor: default;
+}
+.sync-log-what {
+  color: var(--ink-2);
+}
+.sync-log-what.bad {
+  color: var(--bad);
+}
+.sync-log-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
