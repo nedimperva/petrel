@@ -240,7 +240,12 @@ impl Drive {
         for c in children {
             self.send_json(
                 "PATCH",
-                &format!("{}/files/{c}?addParents={}&removeParents={}&fields=id", api(), enc(keep), enc(extra)),
+                &format!(
+                    "{}/files/{c}?addParents={}&removeParents={}&fields=id",
+                    api(),
+                    enc(keep),
+                    enc(extra)
+                ),
                 &json!({}),
             )?;
         }
@@ -467,7 +472,12 @@ mod tests {
         assert!(da.list_once().unwrap().1.is_empty(), "Travel made twice");
         // Folders an earlier Petrel made twice come back together, with what was in them.
         let twin = |d: &mut Drive, name: &str, parent: &str| {
-            d.send_json("POST", &format!("{}/files/twin", api()), &json!({ "name": name, "parents": [parent] })).unwrap()["id"]
+            d.send_json(
+                "POST",
+                &format!("{}/files/twin", api()),
+                &json!({ "name": name, "parents": [parent] }),
+            )
+            .unwrap()["id"]
                 .as_str()
                 .unwrap()
                 .to_string()
