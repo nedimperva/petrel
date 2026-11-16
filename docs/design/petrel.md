@@ -118,8 +118,13 @@ Page: https://claude.ai/artifact/Kan675aYKsn9pvSgDMGRqq. Built: 1, 2, 4–12, 14
   capture on that day's page, under the time; offered as you type beside the folders. A weekday is the next one,
   not today; a date more than a month gone is next year's. A collection named like a day wins, except over
   `@today` (`dayWord` in `src/journal/days.ts`).
-- **Keep going.** The capture window opened again within two minutes of the last capture shows it faded and adds
-  the new text under it, in the same file (`ui.capture.last`). `Ctrl Enter` makes the new text its own capture.
+- **Keep going.** The capture window opened again within two minutes of the last capture adds the new text under
+  it, in the same file (`ui.capture.last`). The old text is folded behind a line at the top, "Adding after" and its
+  last line (click it to see it all, faded). On a day's page, a task typed or made after the time (`07:14 [] `,
+  Ctrl Shift X) puts the time on its own line above the task, since a task only counts at the start of a line. `Ctrl Enter` makes the new text its own capture.
+- **Today from capture.** `Ctrl D` in the capture window sends it to today's page and back to the inbox, as
+  `Ctrl D` opens today's page in the main window. The line at the top shows the page's last entry.
+- **A quiet bar.** Under the text: the place, a dot for saved, `Esc`, and `?` for the window's keys. Nothing else.
 - **Paste that stays clean.** Pasted HTML becomes Markdown: headings, lists, links (http, https, mailto), bold,
   italic, code, quotes; the rest is dropped to its words. Parsed with `DOMParser` (inert, nothing runs or loads),
   inserted as text only. The plain text goes in first, so `Ctrl Z` gives it back (`src/editor/paste.ts`).

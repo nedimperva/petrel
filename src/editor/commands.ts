@@ -22,15 +22,29 @@ function selectedLines(view: EditorView) {
 
 const LIST = /^(\s*)([-*+]|\d+[.)])\s+/;
 const TASK = /^(\s*)([-*+]|\d+[.)])\s+\[([ xX])\]\s+/;
+/** A day's page entry: `07:14 ` and words. */
+const STAMPED = /^(\d{1,2}:\d{2}) +(?=\S)/;
 
 /** `- [ ]` ↔ `- [x]`; a plain list item or line becomes an open task. */
 export const toggleTask: Command = (view) => {
   const changes: ChangeSpec[] = [];
+  let moved = false;
   for (const line of selectedLines(view)) {
     const task = TASK.exec(line.text);
     if (task) {
       const at = line.from + task[0].indexOf("[") + 1;
       changes.push({ from: at, to: at + 1, insert: task[3] === " " ? "x" : " " });
+      continue;
+    }
+    // A line on a day's page starts with its time (`07:14 call the bank`). A task must start its line to be one,
+    // so the time goes on a line of its own above it, the way a filed capture is written.
+    const stamp = STAMPED.exec(line.text);
+    if (stamp) {
+      const rest = line.text.slice(stamp[0].length);
+      const list = LIST.exec(rest);
+      const insert = `${stamp[1]}\n${list ? `${list[0]}[ ] ${rest.slice(list[0].length)}` : `- [ ] ${rest}`}`;
+      changes.push({ from: line.from, to: line.to, insert });
+      moved = true;
       continue;
     }
     const list = LIST.exec(line.text);
@@ -41,7 +55,11 @@ export const toggleTask: Command = (view) => {
       changes.push({ from: line.from + indent, insert: "- [ ] " });
     }
   }
-  view.dispatch({ changes, userEvent: "input" });
+  const set = view.state.changes(changes);
+  // A time moved to its own line: keep the cursor at the end of the task, where the words were.
+  const head = view.state.selection.main.head;
+  const selection = moved && view.state.selection.ranges.length === 1 ? { anchor: set.mapPos(view.state.doc.lineAt(head).to, 1) } : undefined;
+  view.dispatch({ changes: set, selection, userEvent: "input" });
   return true;
 };
 

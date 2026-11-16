@@ -56,7 +56,7 @@ shorten, continue or explain your text and answer questions from your notes, but
 | Inbox review | `1`–`6` file · `/` somewhere else · `Space` keep for later · `e` edit · `d` delete · `s` suggest a home · `z` undo · `Esc` stop |
 | An opened card | `Enter` copy (fill the blanks first) · `Tab` next blank · `Alt ←` `Alt →` other versions · `↑` earlier answers · `1`–`9` pick a choice · `e` edit · in the inbox: `m` move · `s` suggest a home · `1`–`3` pick one · `d` delete |
 | To settle (a card in the inbox) | `1` keep the note · `2` keep the other text · `3` or `b` keep both · `Esc` later |
-| Capture window | `@topic`, `@today`, `@fri`, `@nov20` or `@Note` says where it goes · `Ctrl K` choose from a list · `Esc` done (an empty capture is dropped) · `Ctrl Enter` done, or a new capture when adding to the last one |
+| Capture window | `@topic`, `@today`, `@fri`, `@nov20` or `@Note` says where it goes · `Ctrl K` choose from a list · `Ctrl D` today's page or the inbox · `?` the keys · `Esc` done (an empty capture is dropped) · `Ctrl Enter` done, or a new capture when adding to the last one |
 | Quick picker | type to find (things to copy; matching notes after them) · `Enter` copy and close · `Alt ←` `Alt →` other versions · `Tab` next blank · `Ctrl O` open in Petrel |
 
 The design: [docs/design/petrel.md](docs/design/petrel.md). Notes rules: [docs/design/notes.md](docs/design/notes.md).

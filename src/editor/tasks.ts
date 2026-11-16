@@ -75,11 +75,20 @@ const draw = ViewPlugin.fromClass(
   { decorations: (v) => v.decorations },
 );
 
-/** `[] ` (or `- [] `) at the start of a line becomes an open task. */
+/** `[] ` (or `- [] `) at the start of a line, or after a day page's time, becomes an open task. */
 const typeTask = EditorView.inputHandler.of((view, from, to, text) => {
   if (text !== " " || from !== to) return false;
   const line = view.state.doc.lineAt(from);
-  const m = /^(\s*)(?:[-*+] )?\[\]$/.exec(line.text.slice(0, from - line.from));
+  const before = line.text.slice(0, from - line.from);
+  // On a day's page the line starts with its time (`07:14 [] `): the time goes on its own line above the task,
+  // since a task only counts at the start of a line.
+  const stamped = /^(\d{1,2}:\d{2}) +(?:[-*+] )?\[ ?\]$/.exec(before);
+  if (stamped) {
+    const insert = `${stamped[1]}\n- [ ] `;
+    view.dispatch({ changes: { from: line.from, to, insert }, selection: { anchor: line.from + insert.length }, userEvent: "input" });
+    return true;
+  }
+  const m = /^(\s*)(?:[-*+] )?\[\]$/.exec(before);
   if (!m) return false;
   const start = line.from + m[1].length;
   view.dispatch({ changes: { from: start, to, insert: "- [ ] " }, selection: { anchor: start + 6 }, userEvent: "input" });

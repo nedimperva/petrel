@@ -1372,6 +1372,7 @@ kbd {
 
 /* No window frame: the panel is the window, and Windows 11 rounds its corners and draws its shadow. */
 .capture {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -2059,6 +2060,103 @@ kbd {
   color: var(--accent-ink);
   font-size: var(--t-xs);
   white-space: nowrap;
+}
+
+/* Closing: the text is put back and filed out of sight. */
+.capture.leaving > * {
+  visibility: hidden;
+}
+
+/* The line at the top: the capture it adds to, or the entry on today's page it goes after. */
+.cap-top {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  height: 34px;
+  flex: none;
+  padding: 0 var(--s-4);
+  background: var(--sunk);
+  color: var(--muted);
+  font-size: var(--t-sm);
+  white-space: nowrap;
+}
+.cap-top-text {
+  min-width: 0;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-write);
+  font-style: italic;
+  font-size: var(--t-md);
+  color: var(--ink-2);
+}
+button.cap-top-text:hover {
+  color: var(--ink);
+  text-decoration: underline dotted;
+}
+
+/* The bar: the place, a dot for saved, Esc, and `?` for the keys. */
+.save-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--ok);
+}
+.save-dot.dirty,
+.save-dot.saving {
+  background: var(--faint);
+}
+.save-dot.error {
+  background: var(--bad);
+}
+.cap-esc {
+  display: inline-grid;
+  place-items: center;
+  height: 24px;
+  padding: 0 2px;
+  border-radius: var(--r-sm);
+}
+.cap-esc:hover kbd {
+  color: var(--ink);
+  border-color: var(--muted);
+}
+.cap-help {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: var(--t-xs);
+  font-weight: 500;
+}
+.cap-help:hover,
+.cap-help[aria-expanded="true"] {
+  background: var(--hover);
+  color: var(--ink);
+}
+.cap-help-pop {
+  position: absolute;
+  right: var(--s-3);
+  bottom: 46px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--s-3);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow);
+  font-size: var(--t-sm);
+  color: var(--ink-2);
+  z-index: 5;
+}
+.cap-help-row {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  align-items: center;
+  gap: var(--s-2);
 }
 
 /* Keep going: the last capture, faded above the new text. */

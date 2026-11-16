@@ -56,6 +56,7 @@ export const SHORTCUTS: Shortcut[] = [
   { id: "libUndo", label: "Undo the last change", group: "Library", keys: both("z") },
   { id: "capWhere", label: "Say where it goes: @recipes, @fri, @Note", group: "Capture window", keys: both("@") },
   { id: "capChoose", label: "Choose a place from a list", group: "Capture window", keys: both("Ctrl+K") },
+  { id: "capToday", label: "Today's page, or back to the inbox", group: "Capture window", keys: both("Ctrl+D") },
   { id: "capDone", label: "Done", group: "Capture window", keys: both("Esc") },
   { id: "capNew", label: "A new capture, when adding to the last", group: "Capture window", keys: both("Ctrl+Enter") },
   { id: "pickCopy", label: "Copy and close", group: "Quick picker", keys: both("Enter") },

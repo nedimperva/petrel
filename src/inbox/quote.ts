@@ -35,3 +35,18 @@ function hostOf(url: string): string {
     return url;
   }
 }
+
+/** The last line with words in it, where new text added to a capture follows: a quote's `> `, a list marker and a
+ * task's box taken off; the line naming where a quote came from is skipped. A long line shows its end. */
+export function lastLine(text: string): string {
+  const lines = text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => !/^>\s*— /.test(l) && l !== "_from capture_")
+    .map((l) => l.replace(/^>\s?/, "").replace(/^([-*+]|\d+[.)])\s+(\[[ xX]\]\s+)?/, ""))
+    .filter((l) => /[\p{L}\p{N}]/u.test(l));
+  const last = lines.length ? lines[lines.length - 1] : titleLine(text);
+  if (last.length <= 64) return last;
+  const tail = last.slice(-64);
+  return `…${tail.slice(tail.indexOf(" ") + 1)}`;
+}
