@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
+use petrel_core::notes::passages::passages;
 use petrel_core::notes::Note;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -535,6 +536,7 @@ pub async fn ai_ask(
     question: String,
     earlier: Option<Vec<Exchange>>,
     notes: Option<Vec<i64>>,
+    within: Option<Vec<i64>>,
     stream_id: Option<String>,
 ) -> R<Answer> {
     let question = question.trim().to_string();
@@ -549,9 +551,16 @@ pub async fn ai_ask(
         let store = state.store.lock().map_err(|_| "store lock poisoned".to_string())?;
         match notes.filter(|ids| !ids.is_empty()) {
             Some(ids) => ids.iter().take(ASK_NOTES).filter_map(|&id| store.peek_note(id).ok()).collect(),
-            None => store.notes_about(&question, ASK_NOTES).map_err(|e| format!("{e:#}"))?,
+            None => match within {
+                Some(ids) => store.notes_about_within(&question, &ids, ASK_NOTES),
+                None => store.notes_about(&question, ASK_NOTES),
+            }
+            .map_err(|e| format!("{e:#}"))?,
         }
     };
+    // The passages are picked by the first question of the exchange, so a follow-up sends the same text and
+    // the cache holds.
+    let reading = earlier.first().map(|e| e.question.clone()).unwrap_or_else(|| question.clone());
     blocking(move || {
         if notes.is_empty() {
             return Ok(Answer {
@@ -568,7 +577,7 @@ pub async fn ai_ask(
                 i + 1,
                 n.title.replace('"', "'"),
                 n.folder,
-                head(&n.body, NOTE_CHARS / 2)
+                passages(&n.body, &reading, NOTE_CHARS / 2)
             );
         }
         let mut user = String::new();

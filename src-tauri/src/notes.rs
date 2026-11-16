@@ -110,6 +110,12 @@ pub async fn peek_notes(state: State<'_, AppState>, ids: Vec<i64>) -> R<Vec<Note
     with(&state, |s| Ok(ids.iter().filter_map(|&id| s.peek_note(id).ok()).collect()))
 }
 
+/// Notes that share telling words with this one: the margin's list, from the index, no AI.
+#[tauri::command]
+pub async fn similar_notes(state: State<'_, AppState>, id: i64) -> R<Vec<NoteSummary>> {
+    with(&state, |s| s.similar_notes(id, 5))
+}
+
 #[tauri::command]
 pub async fn note_folders(state: State<'_, AppState>) -> R<Vec<NoteFolder>> {
     with(&state, |s| s.note_folders())

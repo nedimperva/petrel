@@ -189,6 +189,7 @@ export function fakeApi(): Api {
     openCapture: () => wait(undefined).then(() => void window.open("/?capture", "_blank", "width=560,height=320")),
     openPicker: () => wait(undefined).then(() => void window.open("/?picker", "_blank", "width=620,height=440")),
     closePicker: () => wait(undefined).then(() => console.info("picker closed")),
+    pasteIntoFront: (shift) => wait(undefined).then(() => console.info(shift ? "pasted with Ctrl Shift V" : "pasted")),
     // Sync in the browser: a pretend Google account, so Settings › Sync and the sidebar can be worked on.
     syncStatus: () => wait({ ...sync }),
     syncSetup: (clientId) => wait(Object.assign(sync, { clientId, configured: true })).then((x) => ({ ...x })),
@@ -536,8 +537,8 @@ export function fakeApi(): Api {
       const reply = await fakeStream(out[task] ?? t, live);
       return { text: reply, usage: fakeUsage(text.length, reply.length) };
     },
-    aiAsk: async (q, _earlier, ids, live) => {
-      const found = ids?.length ? ids.map(get) : about(q, 3);
+    aiAsk: async (q, _earlier, ids, live, within) => {
+      const found = ids?.length ? ids.map(get) : within ? [...about(q, 50).filter((n) => within.includes(n.id)), ...within.map(get)].filter((n, i, a) => a.indexOf(n) === i).slice(0, 3) : about(q, 3);
       const answer = found.length
         ? `From your notes: **${found[0].title}** is the closest. ${found[0].body.replace(/^#.*\n/, "").trim().split("\n")[0]}`
         : "Nothing in your notes seems to be about that.";
@@ -575,6 +576,13 @@ export function fakeApi(): Api {
           .map((n) => ({ id: n.id, title: n.title, folder: n.folder, why: "shares the topic" })),
         900,
       );
+    },
+    similarNotes: async (id) => {
+      const me = get(id);
+      return about(me.title + " " + me.body, 8)
+        .filter((n) => n.id !== id)
+        .slice(0, 4)
+        .map(summary);
     },
   };
   return self;

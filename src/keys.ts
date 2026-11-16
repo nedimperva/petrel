@@ -62,6 +62,7 @@ export const SHORTCUTS: Shortcut[] = [
   { id: "capDone", label: "Done", group: "Capture window", keys: both("Esc") },
   { id: "capNew", label: "A new capture, when adding to the last", group: "Capture window", keys: both("Ctrl+Enter") },
   { id: "pickCopy", label: "Copy and close", group: "Quick picker", keys: both("Enter") },
+  { id: "pickPaste", label: "Copy and paste into the app (Shift for a terminal)", group: "Quick picker", keys: both("Ctrl+Enter") },
   { id: "pickVersion", label: "Other versions", group: "Quick picker", keys: both("Alt+← / Alt+→") },
   { id: "pickOpen", label: "Open in Petrel", group: "Quick picker", keys: both("Ctrl+O") },
   { id: "doIt", label: "Do it", group: "Lists and menus", keys: both("Enter") },

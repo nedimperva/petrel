@@ -31,6 +31,7 @@ mod conflicts;
 pub mod fold;
 mod folders;
 pub mod history;
+pub mod passages;
 mod paths;
 mod tasks;
 
@@ -925,6 +926,68 @@ impl Store {
             .query_map(params![words.join(" OR "), limit as i64], |r| r.get(0))?
             .collect::<rusqlite::Result<_>>()?;
         ids.into_iter().map(|id| self.peek_note(id)).collect()
+    }
+
+    /// The notes most about a question among `within` only (a filter in Ctrl K), best first. When the words
+    /// match fewer than `limit`, the rest of `within` follows in its order, so a question about a small
+    /// collection reads all of it.
+    pub fn notes_about_within(&self, question: &str, within: &[i64], limit: usize) -> Result<Vec<Note>> {
+        let set: HashSet<i64> = within.iter().copied().collect();
+        let mut ids: Vec<i64> = self
+            .notes_about(question, 400)?
+            .into_iter()
+            .map(|n| n.id)
+            .filter(|id| set.contains(id))
+            .take(limit)
+            .collect();
+        for &id in within {
+            if ids.len() >= limit {
+                break;
+            }
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+        ids.into_iter().map(|id| self.peek_note(id)).collect()
+    }
+
+    /// Notes that share the most telling words with this one, without AI: the note's most frequent words (its
+    /// title's count double), matched in the index, and kept only when a note has at least three of them.
+    pub fn similar_notes(&self, id: i64, limit: usize) -> Result<Vec<NoteSummary>> {
+        let note = self.peek_note(id)?;
+        let mut counts: HashMap<String, usize> = HashMap::new();
+        for w in passages::key_words(&note.title) {
+            *counts.entry(w).or_default() += 2;
+        }
+        for w in fold::fold(&note.body).split(|c: char| !c.is_alphanumeric()) {
+            if w.chars().count() > 3 && !STOP.contains(&w) && !w.chars().all(|c| c.is_ascii_digit()) {
+                *counts.entry(w.to_string()).or_default() += 1;
+            }
+        }
+        let mut words: Vec<(String, usize)> = counts.into_iter().collect();
+        words.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        let words: Vec<String> = words.into_iter().take(16).map(|(w, _)| w).collect();
+        if words.len() < 3 {
+            return Ok(Vec::new());
+        }
+        let q = words.iter().map(|w| format!("\"{w}\"*")).collect::<Vec<_>>().join(" OR ");
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT n.id, n.path, n.folder, n.title, n.preview, n.tags, n.pinned, n.modified_at, n.content \
+             FROM notes_fts f JOIN notes n ON n.id = f.rowid WHERE notes_fts MATCH ?1 AND n.id != ?2 \
+             ORDER BY bm25(notes_fts, 1.0, 4.0) LIMIT 24",
+        )?;
+        let rows: Vec<(NoteSummary, String)> = stmt
+            .query_map(params![q, id], |r| Ok((summary(r)?, r.get::<_, String>(8)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(rows
+            .into_iter()
+            .filter(|(n, body)| {
+                let text = fold::fold(&format!("{} {body}", n.title));
+                words.iter().filter(|w| text.contains(w.as_str())).count() >= 3
+            })
+            .map(|(n, _)| n)
+            .take(limit)
+            .collect())
     }
 
     /// The folders that hold notes, and the folders above them, in tree order.
@@ -2324,7 +2387,7 @@ fn summary(r: &rusqlite::Row) -> rusqlite::Result<NoteSummary> {
 }
 
 /// Words too common to help find a note.
-const STOP: &[&str] = &[
+pub(crate) const STOP: &[&str] = &[
     "the", "and", "for", "are", "was", "what", "when", "where", "which", "who", "how", "why", "with", "that",
     "this", "have", "has", "had", "did", "does", "you", "your", "about", "from", "there", "their", "can",
     "could", "would", "should", "will", "into", "any", "all", "but", "not", "notes", "note", "my",
@@ -2451,6 +2514,23 @@ mod tests {
         assert_eq!(ids(s.search_notes("Đorđa", 5).unwrap()), vec![b.id]);
         // The title weighs more than a word in passing.
         assert_eq!(ids(s.search_notes("cevapi", 5).unwrap()), vec![b.id, c.id]);
+    }
+
+    #[test]
+    fn similar_notes_share_telling_words() {
+        let dir = tmp();
+        let mut s = store_in(&dir);
+        let a = s
+            .create_note("", "Sourdough bread", "starter flour water salt starter overnight proof\n", &[])
+            .unwrap();
+        let b = s
+            .create_note("", "Bread log", "fed the starter, more flour and water, salt last\n", &[])
+            .unwrap();
+        let _c = s.create_note("", "Trip", "flour shop near the station\n", &[]).unwrap();
+        let near: Vec<i64> = s.similar_notes(a.id, 5).unwrap().into_iter().map(|n| n.id).collect();
+        assert_eq!(near, vec![b.id]);
+        let within = s.notes_about_within("starter", &[_c.id, b.id], 8).unwrap();
+        assert_eq!(within.iter().map(|n| n.id).collect::<Vec<_>>(), vec![b.id, _c.id]);
     }
 
     #[test]

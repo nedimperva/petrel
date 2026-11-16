@@ -84,9 +84,20 @@ export default function Picker() {
   const [vi, setVi] = createSignal(0);
   const version = () => versions()[vi() % Math.max(1, versions().length)];
 
+  /** Ctrl Enter: after the copy, paste into the app in front too (Ctrl Shift Enter pastes with Ctrl Shift V). */
+  let pasting: "" | "plain" | "shift" = "";
+
   async function copy(n: NoteSummary, text: string) {
     if (!(await copyFilled(n, text, ctx()?.app ?? null))) return;
     if (version()) void keepVersion(n.path, version()!.name);
+    if (pasting) {
+      const shift = pasting === "shift";
+      pasting = "";
+      closed = true;
+      rest();
+      // The picker is hidden by now, so a failure can only be logged; the text is on the clipboard either way.
+      return void (await api()).pasteIntoFront(shift).catch((e) => console.warn("paste", e));
+    }
     await close();
   }
 
@@ -104,7 +115,10 @@ export default function Picker() {
     else if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p")) (setI((i() + n - 1) % Math.max(1, n)), setVi(0));
     else if (e.altKey && (e.key === "ArrowRight" || e.key === "ArrowLeft") && versions().length > 1)
       setVi((vi() + (e.key === "ArrowLeft" ? versions().length - 1 : 1)) % versions().length);
-    else if (e.key === "Enter") void pick(rows()[i()]);
+    else if (e.key === "Enter") {
+      pasting = e.ctrlKey ? (e.shiftKey ? "shift" : "plain") : "";
+      void pick(rows()[i()]);
+    }
     else if (e.ctrlKey && e.key.toLowerCase() === "o") {
       const r = rows()[i()];
       if (r) await (await api()).showNoteInMain(r.id);
@@ -214,7 +228,7 @@ export default function Picker() {
           </Show>
         </div>
         <footer class="picker-foot">
-          <KeyHints hints={[["Enter", "copy and close"], versions().length > 1 && ["Alt ← →", "version"], ["Ctrl O", "open in Petrel"]]} />
+          <KeyHints hints={[["Enter", "copy and close"], ["Ctrl Enter", "paste it"], versions().length > 1 && ["Alt ← →", "version"], ["Ctrl O", "open in Petrel"]]} />
           <span class="grow" />
           <KeyHints hints={[["Esc", "close"]]} />
         </footer>

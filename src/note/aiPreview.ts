@@ -14,6 +14,8 @@ export interface Preview {
   label: string;
   /** What has arrived so far, while Claude is still writing. */
   partial?: string;
+  /** What the call cost, once it is done (ai/usage.ts). */
+  usage?: string;
 }
 
 export const setPreview = StateEffect.define<Preview | null>();
@@ -32,7 +34,7 @@ class Suggestion extends WidgetType {
     super();
   }
   eq(o: Suggestion) {
-    return o.p.text === this.p.text && o.p.error === this.p.error && o.p.label === this.p.label && o.p.partial === this.p.partial;
+    return o.p.text === this.p.text && o.p.error === this.p.error && o.p.label === this.p.label && o.p.partial === this.p.partial && o.p.usage === this.p.usage;
   }
   toDOM() {
     const box = document.createElement("div");
@@ -71,6 +73,12 @@ class Suggestion extends WidgetType {
     note.className = "ai-suggest-note";
     note.textContent = "Your text is kept in History first.";
     bar.append(note);
+    if (this.p.usage) {
+      const cost = document.createElement("span");
+      cost.className = "ai-usage";
+      cost.textContent = this.p.usage;
+      bar.append(cost);
+    }
     box.append(bar);
     return box;
   }

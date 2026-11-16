@@ -9,6 +9,7 @@ mod drive;
 mod google;
 mod hypr;
 mod notes;
+mod paste;
 mod sync;
 mod tray;
 mod warm;
@@ -449,6 +450,7 @@ fn main() {
             commands::capture_context,
             commands::open_picker_window,
             commands::close_picker,
+            paste::paste_into_front,
             warm::window_ready,
             sync::sync_status,
             sync::sync_setup,
@@ -475,6 +477,7 @@ fn main() {
             notes::take_task,
             notes::set_collection_template,
             notes::peek_notes,
+            notes::similar_notes,
             notes::open_note,
             notes::peek_note,
             notes::create_note,

@@ -283,6 +283,8 @@ export interface Api {
   openCapture(): Promise<void>;
   openPicker(): Promise<void>;
   closePicker(): Promise<void>;
+  /** Hides the picker and presses Ctrl V (or Ctrl Shift V) in the app that was in front. */
+  pasteIntoFront(shift: boolean): Promise<void>;
   /** A warm window (capture, picker) is loaded and waiting; true means it was already asked for. */
   windowReady(): Promise<boolean>;
   /** Calls back when a waiting warm window is asked for. */
@@ -392,9 +394,12 @@ export interface Api {
     noteId?: number;
   }, live?: AiLive): Promise<{ text: string; usage: AiUsage }>;
   /** With `earlier` and `notes`, a follow-up: the same notes, the talk so far. */
-  aiAsk(question: string, earlier?: AiExchange[], notes?: number[], live?: AiLive): Promise<AiAnswer>;
+  /** `within`: only these notes may be read (a filter in Ctrl K). */
+  aiAsk(question: string, earlier?: AiExchange[], notes?: number[], live?: AiLive, within?: number[]): Promise<AiAnswer>;
   aiSuggestHome(noteId: number): Promise<AiSuggestion[]>;
   aiRelated(noteId: number): Promise<AiRelated[]>;
+  /** Notes that share telling words with this one, from the index (no AI). */
+  similarNotes(id: number): Promise<NoteSummary[]>;
   /** A few sentences on the notes changed between two moments. */
   aiWeek(from: number, to: number): Promise<string>;
 }
@@ -412,6 +417,7 @@ async function tauriApi(): Promise<Api> {
     openCapture: () => invoke("open_capture_window"),
     openPicker: () => invoke("open_picker_window"),
     closePicker: () => invoke("close_picker"),
+    pasteIntoFront: (shift) => invoke("paste_into_front", { shift }),
     windowReady: () => invoke("window_ready"),
     onOpenWindow: async (run) => {
       const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
@@ -511,10 +517,11 @@ async function tauriApi(): Promise<Api> {
       await listen<SyncStatus>("petrel-sync", (e) => run(e.payload));
     },
     aiWrite: (o, live) => streamed(live, () => invoke("ai_write", { ...o, streamId: live?.id ?? null })),
-    aiAsk: (question, earlier, notes, live) =>
-      streamed(live, () => invoke("ai_ask", { question, earlier: earlier ?? null, notes: notes ?? null, streamId: live?.id ?? null })),
+    aiAsk: (question, earlier, notes, live, within) =>
+      streamed(live, () => invoke("ai_ask", { question, earlier: earlier ?? null, notes: notes ?? null, within: within ?? null, streamId: live?.id ?? null })),
     aiSuggestHome: (noteId) => invoke("ai_suggest_home", { noteId }),
     aiRelated: (noteId) => invoke("ai_related", { noteId }),
+    similarNotes: (id) => invoke("similar_notes", { id }),
     aiWeek: (from, to) => invoke("ai_week", { from, to }),
   };
 }

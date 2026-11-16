@@ -11,6 +11,7 @@ import { ago, folderName, Kbd, say } from "../ui";
 import { acceptOffer, inFolder, keep, noFilters, parseFilters } from "./filters";
 import { rank } from "./match";
 import { jumpTo } from "../note/jump";
+import { usageLine } from "../ai/usage";
 
 export interface Command {
   id: string;
@@ -26,6 +27,9 @@ const escapeRe = (w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 type Row = { kind: "ask" } | { kind: "note"; n: NoteSummary } | { kind: "command"; c: Command } | { kind: "new"; title: string; folder: string };
 
 /** An answer still being written, without the `Sources:` line it ends with. */
+/** Words that read as a question: they end in `?` or start like one. */
+const asks = (t: string) => /\?\s*$/.test(t) || /^(what|how|why|when|where|who|which|do|did|does|is|are|can|should|summari[sz]e|list|find)\b/i.test(t.trim());
+
 const unsourced = (t: string) => t.replace(/\n\s*\**Sources:[\s\S]*$/, "");
 
 export default function CommandBar(p: {
@@ -35,14 +39,23 @@ export default function CommandBar(p: {
   /** The notes written on last, newest first: the list before anything is typed. */
   recent?: number[];
   aiReady: boolean;
+  /** Questions about this note alone ("Ask about this note" in Ctrl J): no search, only the Ask row. */
+  about?: { id: number; title: string };
+  /** A question to ask at once, when the bar opens. */
+  ask?: string;
   onOpen(id: number): void;
   onAiSetup(): void;
   onClose(): void;
 }) {
   let input!: HTMLInputElement;
   // Focused at once, so the first letters typed after Ctrl K are not lost.
-  onMount(() => input.focus());
-  const [q, setQ] = createSignal("");
+  onMount(() => {
+    input.focus();
+    if (p.ask?.trim()) void ask();
+  });
+  const [q, setQ] = createSignal(p.ask ?? "");
+  /** Every note the filters let through, not only the ones listed: what a question with filters reads. */
+  const [within, setWithin] = createSignal<number[]>([]);
   const [i, setI] = createSignal(0);
   const [answer, setAnswer] = createSignal<AiAnswer | "loading" | null>(null);
   /** The answer as it is written. */
@@ -60,6 +73,7 @@ export default function CommandBar(p: {
   const [moreLoading, setMoreLoading] = createSignal(false);
   const filters = () => parseFilters(q());
   const [notes] = createResource(q, async (text) => {
+    if (p.about) return [];
     const s = await api();
     const f = parseFilters(text);
     if (noFilters(f)) {
@@ -80,7 +94,8 @@ export default function CommandBar(p: {
     }
     // With filters, look wider and narrow after.
     let found: NoteSummary[];
-    if (f.words) {
+    // A question with filters lists every note the filters let through: the question is asked of them all.
+    if (f.words && !asks(f.words)) {
       const [byTitle, byWords] = await Promise.all([s.findNotes(f.words, 200), s.searchNotes(f.words, 200)]);
       const seen = new Set(byTitle.map((n) => n.id));
       found = [...byTitle, ...byWords.filter((n) => !seen.has(n.id))];
@@ -91,6 +106,7 @@ export default function CommandBar(p: {
       const ok = new Set(await s.notesHaving(h));
       found = found.filter((n) => ok.has(n.id));
     }
+    setWithin(found.map((n) => n.id));
     return found.slice(0, 30);
   });
 
@@ -112,10 +128,14 @@ export default function CommandBar(p: {
     const live = p.commands.filter((c) => !c.when || c.when());
     return q().trim() ? rank(q(), live, (c) => c.label) : live.slice(0, 9);
   };
-  const isQuestion = () => noFilters(filters()) && (/\?\s*$/.test(q()) || /^(what|how|why|when|where|who|which|do|did|does|is|are|can|should|summari[sz]e|list|find)\b/i.test(q().trim()));
+  /** The words asked, without the filters: `in:travel what did I pack?` asks "what did I pack?" of travel. */
+  const question = () => (noFilters(filters()) ? q().trim() : filters().words);
+  const isQuestion = () =>
+    !!p.about || asks(question());
 
   const rows = (): Row[] => {
     const out: Row[] = [];
+    if (p.about) return q().trim() ? [{ kind: "ask" }] : [];
     const ns = (notes() ?? []).map((n) => ({ kind: "note", n }) as Row);
     const cs = commands().map((c) => ({ kind: "command", c }) as Row);
     if (q().trim() && !p.notesOnly && isQuestion()) out.push({ kind: "ask" });
@@ -180,13 +200,13 @@ export default function CommandBar(p: {
   }
 
   async function ask() {
-    const question = q().trim();
-    if (!question) return;
+    const asking = question();
+    if (!asking) return;
     if (!p.aiReady) {
       p.onClose();
       return p.onAiSetup();
     }
-    setAsked(question);
+    setAsked(asking);
     setThread([]);
     setFollowing(false);
     setAnswer("loading");
@@ -194,7 +214,9 @@ export default function CommandBar(p: {
     running = live.id;
     setPartial("");
     try {
-      setAnswer(await (await api()).aiAsk(question, undefined, undefined, live));
+      const only = p.about ? [p.about.id] : undefined;
+      const among = !p.about && !noFilters(filters()) ? within() : undefined;
+      setAnswer(await (await api()).aiAsk(asking, undefined, only, live, among));
     } catch (e) {
       setAnswer(null);
       if (running === live.id) say(errText(e), { error: true });
@@ -328,7 +350,7 @@ export default function CommandBar(p: {
           <input
             class="palette-input"
             ref={input}
-            placeholder={p.placeholder ?? (p.notesOnly ? "Find a note…" : "Search, run a command, or ask your notes a question…")}
+            placeholder={p.placeholder ?? (p.about ? `Ask about ${p.about.title}…` : p.notesOnly ? "Find a note…" : "Search, run a command, or ask your notes a question…")}
             value={q()}
             onInput={(e) => {
               setQ(e.currentTarget.value);
@@ -378,8 +400,12 @@ export default function CommandBar(p: {
                     {r.kind === "ask" ? (
                       <>
                         <span class="row-icon spark">✦</span>
-                        <span class="row-label">Ask your notes: “{q().trim()}”</span>
-                        <span class="row-sub">{p.aiReady ? "Claude answers from your notes" : "add a key in Settings first"}</span>
+                        <span class="row-label">
+                          {p.about ? "Ask about this note" : noFilters(filters()) ? "Ask your notes" : "Ask these notes"}: “{question()}”
+                        </span>
+                        <span class="row-sub">
+                          {!p.aiReady ? "add a key in Settings first" : p.about ? `Claude answers from ${p.about.title}` : noFilters(filters()) ? "Claude answers from your notes" : `Claude reads only the ${within().length} found`}
+                        </span>
                       </>
                     ) : r.kind === "new" ? (
                       <>
@@ -509,6 +535,9 @@ export default function CommandBar(p: {
                           )}
                         </For>
                       </div>
+                    </Show>
+                    <Show when={a.usage}>
+                      <p class="ai-usage">{usageLine(a.usage)}</p>
                     </Show>
                     <div class="row end">
                       <Show when={a.sources.length}>

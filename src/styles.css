@@ -999,6 +999,15 @@ kbd {
   color: var(--faint);
   font-size: var(--t-xs);
 }
+/* What the call cost: quiet, after everything else. */
+.ai-usage {
+  color: var(--faint);
+  font-size: var(--t-xs);
+  font-variant-numeric: tabular-nums;
+}
+.ai-suggest-bar .ai-usage {
+  margin-left: 10px;
+}
 .ai-thinking {
   color: var(--muted) !important;
   background: none !important;

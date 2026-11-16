@@ -32,6 +32,8 @@ import { currentHeading, outline, type Heading } from "./outline";
 import { EditorView } from "@codemirror/view";
 import { hush } from "./quiet";
 import { takeJump } from "./jump";
+import { usageLine } from "../ai/usage";
+import { addAsk, ASKS_KEY, parseAsks } from "../ai/asks";
 
 export interface NotePageHandle {
   note(): Note | null;
@@ -67,6 +69,8 @@ interface Props {
   onNoteId?(id: number | null): void;
   /** Open a note on the right (Shift Enter on a link). */
   onBeside?(id: number): void;
+  /** Opens Ctrl K for questions about this note alone, asking `ask` at once when given. */
+  onAsk?(about: { id: number; title: string; ask?: string }): void;
   /** A note is open beside: the margin is taken. */
   besideOpen?: boolean;
   /** A line in the footer for a moment ("Updated from Drive"). */
@@ -114,11 +118,18 @@ export default function NotePage(p: Props) {
   const [related, setRelated] = createSignal<AiRelated[] | "loading" | null>(null);
   // The one AI menu (Ctrl J, or `/` on an empty line). `whole`: nothing was selected when it opened.
   const [menu, setMenu] = createSignal<{ x: number; y: number; i: number; q: string; whole: boolean; from: number; to: number; head: number } | null>(null);
-  const [explain, setExplain] = createSignal<{ x: number; y: number; text: string | null; at: number; partial?: string } | null>(null);
+  const [explain, setExplain] = createSignal<{ x: number; y: number; text: string | null; at: number; partial?: string; usage?: string } | null>(null);
   // The last AI request, for Try again.
   let last: { task: AiTask; from: number; to: number; instruction?: string; label?: string } | null = null;
   // Ctrl J's own prompts: the Prompts collection, the most copied first.
   const [prompts, setPrompts] = createSignal<NoteSummary[]>([]);
+  /** What was typed into Ctrl J before, newest first. */
+  const [asks, setAsks] = createSignal<string[]>([]);
+  const rememberAsk = async (q: string) => {
+    const next = addAsk(asks(), q);
+    setAsks(next);
+    await (await api()).setUiSetting(ASKS_KEY, JSON.stringify(next)).catch(() => {});
+  };
   const [filling, setFilling] = createSignal<{ title: string; text: string; from: number; to: number; selected: string } | null>(null);
   let seq = 0;
   /** The AI reply being written now, to stop it on Esc. */
@@ -209,7 +220,16 @@ export default function NotePage(p: Props) {
     }
   }
 
-  const loadLinks = async (id: number) => setLinks(await (await api()).backlinks(id).catch(() => ({ linked: [], mentioned: [] })));
+  const loadLinks = async (id: number) => {
+    const s = await api();
+    const [l, near] = await Promise.all([s.backlinks(id).catch(() => ({ linked: [], mentioned: [] })), s.similarNotes(id).catch(() => [])]);
+    setLinks(l);
+    // Notes already listed as linking here are not repeated as similar.
+    const shown = new Set([...l.linked, ...l.mentioned].map((b) => b.id));
+    setSimilar(near.filter((n) => !shown.has(n.id)));
+  };
+  /** Notes that share telling words with this one, from the index: no AI, no key. */
+  const [similar, setSimilar] = createSignal<NoteSummary[]>([]);
 
   const keepPlace = () => {
     const n = note();
@@ -339,13 +359,12 @@ export default function NotePage(p: Props) {
     try {
       const { text: out, usage } = await (await api()).aiWrite({ task, text, context: doc.toString(), instruction, noteId: note()?.id }, live);
       if (mine !== seq) return;
-      void usage;
-      if (task === "explain") return setExplain((e) => e && { ...e, text: out });
+      if (task === "explain") return setExplain((e) => e && { ...e, text: out, usage: usageLine(usage) });
       if (task === "title") return proposeTitle(out);
       const pv = previewOf(v.state);
       if (!pv) return;
       const lead = (task === "continue" || task === "summarize") && pv.from > 0 && doc.sliceString(pv.from - 1, pv.from) !== "\n" ? "\n\n" : "";
-      v.dispatch({ effects: setPreview.of({ ...pv, text: lead + out }) });
+      v.dispatch({ effects: setPreview.of({ ...pv, text: lead + out, usage: usageLine(usage) }) });
     } catch (e) {
       if (mine !== seq) return;
       if (task === "explain") return setExplain(null), say(errText(e), { error: true });
@@ -423,6 +442,7 @@ export default function NotePage(p: Props) {
 
   async function loadPrompts() {
     const s = await api();
+    void s.uiSettings().then((u) => setAsks(parseAsks(u[ASKS_KEY])), () => {});
     const [all, counts] = await Promise.all([s.listNotes({ limit: 2000 }), s.copyCounts()]);
     setPrompts(
       all
@@ -511,18 +531,33 @@ export default function NotePage(p: Props) {
     out.push({ label: "Continue from here", hint: "from the cursor", group: "Write", icon: "continue", go: () => void run("continue", m.head, m.head) });
     out.push({ label: "Summarize the note", hint: "the text above the cursor", group: "Write", icon: "summarize", go: () => void run("summarize", m.head, m.head) });
     out.push({ label: "Suggest a title", hint: "renames it if you keep it", group: "Write", icon: "title", go: () => void run("title", 0, len) });
+    const about = note();
+    if (about) out.push({ label: "Ask about this note", hint: "a question, answered from it", group: "Write", icon: "explain", go: () => askAbout() });
     const promptRange = m.whole ? { from: 0, to: len } : { from: m.from, to: m.to };
     for (const n of prompts())
       out.push({ label: n.title, hint: m.whole ? "the whole note" : "the selection", group: "Your prompts", icon: "prompt", go: () => void runPrompt(n, promptRange) });
-    const q = m.q.trim();
-    if (!q) return out;
-    const found = rank(q, out, (x) => x.label);
     const target = has ? { from: m.from, to: m.to } : { from: 0, to: len };
-    return [
-      ...found,
-      { label: `Ask: “${q}”`, hint: has ? "rewrite it this way" : "rewrite the note this way", icon: "ask", go: () => void run("custom", target.from, target.to, q) },
-    ];
+    for (const a of asks())
+      out.push({ label: a, hint: has ? "the selection" : "the whole note", group: "Asked before", icon: "ask", go: () => void (rememberAsk(a), run("custom", target.from, target.to, a)) });
+    const q = m.q.trim();
+    if (!q) return out.filter((x) => x.group !== "Asked before" || asks().indexOf(x.label) < 3);
+    const found = rank(q, out, (x) => x.label);
+    const asked = /\?\s*$/.test(q) && note();
+    const rewrite: MenuItem = { label: `Ask: “${q}”`, hint: has ? "rewrite it this way" : "rewrite the note this way", icon: "ask", go: () => void (rememberAsk(q), run("custom", target.from, target.to, q)) };
+    const question: MenuItem = { label: `Ask about this note: “${q}”`, hint: "answered from it", icon: "explain", go: () => askAbout(q) };
+    // A question mark means a question, so it comes before the rewrite.
+    const both = !note() ? [rewrite] : asked ? [question, rewrite] : [rewrite, question];
+    return [...found.filter((x) => x.label !== "Ask about this note"), ...both];
   };
+
+  /** "Ask about this note": the question goes to Ctrl K, which answers from this note alone. */
+  async function askAbout(q?: string) {
+    const n = note();
+    if (!n) return;
+    if (!p.aiReady) return p.onAiSetup();
+    await saver.flush();
+    p.onAsk?.({ id: n.id, title: n.title, ask: q });
+  }
 
   const menuKey = (e: KeyboardEvent) => {
     const m = menu();
@@ -577,7 +612,7 @@ export default function NotePage(p: Props) {
     measureTimer = setTimeout(measure, 400);
   };
   onCleanup(() => clearTimeout(measureTimer));
-  const hasLinks = () => !!(links().linked.length || links().mentioned.length || related());
+  const hasLinks = () => !!(links().linked.length || links().mentioned.length || related() || similar().length);
   const minLevel = () => Math.min(...heads().map((h) => h.level));
   const jump = (from: number) => {
     const v = view();
@@ -825,6 +860,17 @@ export default function NotePage(p: Props) {
                 )}
               </For>
             </Show>
+            <Show when={!related() && similar().length}>
+              <h4>Shares words with</h4>
+              <For each={similar()}>
+                {(n) => (
+                  <button class="link-row" onClick={() => p.onOpen(n.id)}>
+                    <span class="link-title">{n.folder === "inbox" ? n.preview.split("\n")[0] || n.title : n.title}</span>
+                    <span class="link-line">{folderName(n.folder)}</span>
+                  </button>
+                )}
+              </For>
+            </Show>
             <Show when={related()}>
               <h4>
                 <span class="spark">✦</span> Related
@@ -977,6 +1023,17 @@ export default function NotePage(p: Props) {
                 )}
               </For>
             </Show>
+            <Show when={!related() && similar().length}>
+              <h4>Shares words with</h4>
+              <For each={similar()}>
+                {(n) => (
+                  <button class="link-row" onClick={() => p.onOpen(n.id)}>
+                    <span class="link-title">{n.folder === "inbox" ? n.preview.split("\n")[0] || n.title : n.title}</span>
+                    <span class="link-line">{folderName(n.folder)}</span>
+                  </button>
+                )}
+              </For>
+            </Show>
             <Show when={related()}>
               <h4>
                 <span class="spark">✦</span> Related
@@ -1117,6 +1174,9 @@ export default function NotePage(p: Props) {
                 Close <kbd>Esc</kbd>
               </button>
             </div>
+            <Show when={x().usage}>
+              <p class="ai-usage">{x().usage}</p>
+            </Show>
           </div>
         )}
       </Show>

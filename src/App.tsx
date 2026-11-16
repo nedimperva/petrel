@@ -73,7 +73,9 @@ export default function App() {
   const [view, setView] = createSignal<View>({ kind: "note", id: null, folder: NEW_FOLDER });
   const [title, setTitle] = createSignal("");
   const [tab, setTab] = createSignal("all");
-  const [bar, setBar] = createSignal<"all" | "notes" | "beside" | null>(null);
+  const [bar, setBar] = createSignal<"all" | "notes" | "beside" | "about" | null>(null);
+  /** "Ask about this note" from Ctrl J: the note, and the question if one was typed there. */
+  const [asking, setAsking] = createSignal<{ id: number; title: string; ask?: string } | null>(null);
   const [beside, setBeside] = createSignal<number | null>(null);
   // The sidebar: shown unless hidden with Ctrl 0 (ui.sidebar); docked on a wide window, over the page on a narrow one.
   const [sideOn, setSideOn] = createSignal(true);
@@ -617,6 +619,7 @@ export default function App() {
                 onDay={(d) => void openDay(d)}
                 onNoteId={(id) => (seen(id), setNoteFolder(page?.note()?.folder ?? null))}
                 onBeside={(id) => void openBeside(id)}
+                onAsk={(about) => (setAsking(about), setBar("about"))}
                 besideOpen={beside() !== null}
                 notice={notice()}
                 ref={(h) => (page = h)}
@@ -663,6 +666,8 @@ export default function App() {
           placeholder={bar() === "beside" ? "Open a note beside this one…" : undefined}
           recent={others()}
           aiReady={ai().ready}
+          about={bar() === "about" ? (asking() ?? undefined) : undefined}
+          ask={bar() === "about" ? asking()?.ask : undefined}
           onOpen={bar() === "beside" ? (id) => void openBeside(id) : openNote}
           onAiSetup={() => setSettings("ai")}
           onClose={() => {
