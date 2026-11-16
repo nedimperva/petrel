@@ -92,3 +92,10 @@ test("kept for later comes back the next day", async () => {
   assert.equal(laterOf(l, new Date(2026, 10, 12, 0, 1).getTime()).size, 0);
   assert.deepEqual(parseLater("[1]"), {});
 });
+
+test("adding to a capture shows its last line", async () => {
+  const { lastLine } = await import("../src/inbox/quote.ts");
+  assert.equal(lastLine("first thought\n\nsecond thought\n- [ ] call the bank\n"), "call the bank");
+  assert.equal(lastLine("> a quote\n> — Some page · Firefox\n"), "a quote");
+  assert.match(lastLine(`${"word ".repeat(30)}the end`), /^….*the end$/);
+});

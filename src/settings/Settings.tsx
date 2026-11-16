@@ -9,7 +9,7 @@ import { keyChips } from "../Shortcuts";
 import { Kbd, say } from "../ui";
 import { tick } from "../joy/sound";
 import { canUpdate, checkForUpdate } from "../updates";
-import { applyPrefs, FONTS, prefs, setPrefs, SIZES, storedValue, THEMES, type Prefs } from "./prefs";
+import { applyPrefs, FONTS, KEEP_GOING, prefs, setPrefs, SIZES, storedValue, THEMES, type Prefs } from "./prefs";
 import SyncSection from "./SyncSection";
 
 export { typesCharacter };
@@ -334,11 +334,22 @@ export default function Settings(p: { section?: Section | "all"; onClose(): void
               on={prefs().captureSelection}
               onChange={(on) => void pref("captureSelection", on)}
             />
+            <Row label="Add to the last capture" hint="Opened again within this long after a capture left in the inbox, the window adds to it. Ctrl Enter there starts a new one.">
+              <div class="seg">
+                <For each={KEEP_GOING}>
+                  {(m) => (
+                    <button classList={{ on: prefs().keepGoing === m }} onClick={() => pref("keepGoing", m)}>
+                      {m === 0 ? "Never" : `${m} min`}
+                    </button>
+                  )}
+                </For>
+              </div>
+            </Row>
           </section>
           <section class="set-card">
             <p class="set-note">
               In the capture window, <kbd>@</kbd> says where it goes: <code>@recipes</code> a collection, <code>@today</code> or <code>@fri</code> a day's page, <code>@Groceries</code> the end of a note. A list
-              offers places as you type after the <kbd>@</kbd>; <kbd>Ctrl K</kbd> there picks one from a list. Opened again within two minutes, the window adds to the last capture.
+              offers places as you type after the <kbd>@</kbd>; <kbd>Ctrl K</kbd> there picks one from a list. <kbd>Ctrl D</kbd> sends it to today's page and back.
             </p>
             <p class="muted small set-note">The keys that open the capture window and the picker are under Keys.</p>
           </section>

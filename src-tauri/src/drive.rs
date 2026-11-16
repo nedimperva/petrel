@@ -35,6 +35,9 @@ pub const FOLDER_NAME: &str = "Petrel";
 /// Reading a file at most this big (the engine skips larger ones).
 const READ_LIMIT: u64 = 64 * 1024 * 1024;
 
+/// A folder made twice: (the one kept, an extra one, the extra one's children).
+type Twin = (String, String, Vec<String>);
+
 pub struct Drive {
     token: Box<dyn FnMut() -> Result<String> + Send>,
     agent: ureq::Agent,
@@ -147,7 +150,7 @@ impl Drive {
 
     /// Every file Petrel made (drive.file) with its path under the Petrel folder, and the folders that are there
     /// twice: (the one kept, an extra one, the extra one's children).
-    fn list_once(&mut self) -> Result<(Vec<RemoteFile>, Vec<(String, String, Vec<String>)>)> {
+    fn list_once(&mut self) -> Result<(Vec<RemoteFile>, Vec<Twin>)> {
         struct Item {
             name: String,
             parent: Option<String>,

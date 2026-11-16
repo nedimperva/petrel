@@ -25,7 +25,7 @@ import { cleanPaste } from "./editor/paste";
 import { pictureExtensions } from "./editor/pictures";
 import Destination, { targetFolder, targetLabel, type Target } from "./inbox/Destination";
 import { fileCapture } from "./inbox/file";
-import { quoteBlock, titleLine } from "./inbox/quote";
+import { lastLine, quoteBlock, titleLine } from "./inbox/quote";
 import { titleFrom } from "./copy";
 import { pickRoute, strip, tokens, typingToken } from "./inbox/route";
 import { dayOptions, dayTitle, dayWord, today } from "./journal/days";
@@ -37,27 +37,12 @@ import { keyLabel, matches, SHORTCUTS } from "./keys";
 import { folderName, Kbd, say, ToastView } from "./ui";
 import { rest, whenOpened } from "./warm";
 
-/** Opening the window again within this long adds to the last capture. */
-const KEEP_GOING_MS = 2 * 60 * 1000;
 const LAST = "ui.capture.last";
 
 /** Top folders a capture can be filed in by name. */
 async function places(): Promise<string[]> {
   const fs = await (await api()).noteFolders();
   return fs.map((f) => f.path).filter((f) => !f.includes("/") && f !== "inbox" && f !== "journal" && !f.startsWith("."));
-}
-
-/** The last line with words in it, where the new text will follow: a quote's `> ` and a task's box taken off. */
-function lastLine(text: string): string {
-  const lines = text
-    .split("\n")
-    .map((l) => l.trim().replace(/^>\s?/, "").replace(/^([-*+]|\d+[.)])\s+(\[[ xX]\]\s+)?/, ""))
-    .filter((l) => /[\p{L}\p{N}]/u.test(l) && l !== "_from capture_");
-  const last = lines.length ? lines[lines.length - 1] : titleLine(text);
-  // A long line shows its end, the words the new text follows.
-  if (last.length <= 64) return last;
-  const tail = last.slice(-64);
-  return `…${tail.slice(tail.indexOf(" ") + 1)}`;
 }
 
 /** Where the last capture's text ends; it is drawn faded and follows edits made before it. */
@@ -401,10 +386,12 @@ export default function Capture() {
     editor?.view.focus();
   }
 
-  /** The last capture, if it was left in the inbox less than two minutes ago. */
+  /** The last capture, if it was left in the inbox recently enough (two minutes unless Settings says). */
   async function lastCapture(settings: Record<string, string>): Promise<Note | null> {
     const [id, at] = (settings[LAST] ?? "").split(":").map(Number);
-    if (!id || !(Date.now() - at < KEEP_GOING_MS)) return null;
+    // Settings › Capture says how long; 0 never adds.
+    const keep = parsePrefs(settings).keepGoing * 60 * 1000;
+    if (!id || !(Date.now() - at < keep)) return null;
     const n = await (await api()).peekNote(id).catch(() => null);
     return n && n.folder === "inbox" && n.body.trim() ? n : null;
   }

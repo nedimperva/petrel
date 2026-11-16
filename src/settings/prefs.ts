@@ -26,6 +26,8 @@ export interface Prefs {
   updates: boolean;
   /** Bring the text selected in the app you were in into a capture (the Rust side reads this key too). */
   captureSelection: boolean;
+  /** Minutes after a capture in which opening the window again adds to it; 0 never does. */
+  keepGoing: number;
 }
 
 export const DEFAULTS: Prefs = {
@@ -38,10 +40,12 @@ export const DEFAULTS: Prefs = {
   petrel: true,
   sound: false,
   captureSelection: true,
+  keepGoing: 2,
   updates: true,
 };
 
 export const SIZES = [15, 16, 17, 18, 19, 20, 22];
+export const KEEP_GOING = [0, 1, 2, 5, 10, 30];
 export const THEMES: { id: Theme; label: string }[] = [
   { id: "system", label: "System" },
   { id: "light", label: "Paper" },
@@ -67,6 +71,7 @@ const KEYS: Record<keyof Prefs, string> = {
   petrel: "ui.petrel",
   sound: "ui.sound",
   captureSelection: "ui.capture_selection",
+  keepGoing: "ui.capture.keep_minutes",
   updates: "ui.updates",
 };
 
@@ -89,6 +94,7 @@ export function parsePrefs(m: Record<string, string>): Prefs {
     sound: flag(m[KEYS.sound], DEFAULTS.sound),
     captureSelection: flag(m[KEYS.captureSelection], DEFAULTS.captureSelection),
     updates: flag(m[KEYS.updates], DEFAULTS.updates),
+    keepGoing: KEEP_GOING.includes(Number(m[KEYS.keepGoing])) && m[KEYS.keepGoing] !== "" ? Number(m[KEYS.keepGoing]) : DEFAULTS.keepGoing,
   };
 }
 
