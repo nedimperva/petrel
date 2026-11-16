@@ -6,13 +6,17 @@
 //! A rewrite never lands on its own: the UI shows it in place and the person keeps or drops it, and the note's
 //! current text is kept as a version first (`snapshot_note`).
 
+use std::collections::HashMap;
+use std::io::BufRead;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
 use petrel_core::notes::Note;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 
 use crate::AppState;
 
@@ -27,6 +31,9 @@ const API_VERSION: &str = "2026-10-21";
 const FALLBACK_BETA: &str = "server-side-fallback-2026-07-01";
 const MODEL: &str = "claude-opus-5-5";
 const MODEL_SETTING: &str = "ai.model";
+/// Small jobs (a title, tidying, a list, where a capture goes) go to a faster, cheaper model.
+const FAST_MODEL: &str = "claude-haiku-5-5";
+const FAST_MODEL_SETTING: &str = "ai.model_fast";
 /// How much of a note goes to the model, at most. Long notes are cut at a line, from the end.
 const NOTE_CHARS: usize = 12_000;
 
@@ -89,6 +96,11 @@ impl Task {
         }
     }
 
+    /// The small mechanical jobs, which the fast model does as well and sooner.
+    fn is_small(self) -> bool {
+        matches!(self, Task::Tidy | Task::List | Task::Checklist | Task::Shorten | Task::Title)
+    }
+
     /// Rewrites want speed; reading and answering is given more thought.
     fn effort(self) -> &'static str {
         match self {
@@ -123,17 +135,28 @@ fn api_key() -> Result<Option<String>> {
 pub struct AiStatus {
     ready: bool,
     model: String,
+    fast_model: String,
     /// Why the key can't be read (no keyring running, say).
     error: Option<String>,
 }
 
-fn model(state: &AppState) -> String {
+fn setting_or(state: &AppState, key: &str, default: &str) -> String {
     state
         .store
         .lock()
         .ok()
-        .and_then(|s| s.setting(MODEL_SETTING).ok().flatten())
-        .unwrap_or_else(|| MODEL.into())
+        .and_then(|s| s.setting(key).ok().flatten())
+        .map(|m| m.trim().to_string())
+        .filter(|m| !m.is_empty())
+        .unwrap_or_else(|| default.into())
+}
+
+fn model(state: &AppState) -> String {
+    setting_or(state, MODEL_SETTING, MODEL)
+}
+
+fn fast_model(state: &AppState) -> String {
+    setting_or(state, FAST_MODEL_SETTING, FAST_MODEL)
 }
 
 #[tauri::command]
@@ -142,7 +165,7 @@ pub fn ai_status(state: State<AppState>) -> AiStatus {
         Ok(k) => (k.is_some(), None),
         Err(e) => (false, Some(format!("{e:#}"))),
     };
-    AiStatus { ready, model: model(&state), error }
+    AiStatus { ready, model: model(&state), fast_model: fast_model(&state), error }
 }
 
 /// Stores the key in the OS keyring (`None` or empty removes it). It is never written to the database or a file.
@@ -165,33 +188,151 @@ pub fn set_ai_key(state: State<AppState>, key: Option<String>) -> R<AiStatus> {
     Ok(ai_status(state))
 }
 
-/// One Messages call. Returns the reply's text.
-fn complete(model: &str, effort: &str, system: &str, user: &str, max_tokens: u32) -> Result<String> {
+/// The two models (Settings › AI): the one for writing and answering, the fast one for small jobs. Empty puts
+/// the default back.
+#[tauri::command]
+pub fn set_ai_models(state: State<AppState>, model: String, fast_model: String) -> R<AiStatus> {
+    for m in [&model, &fast_model] {
+        let m = m.trim();
+        if !m.is_empty() && (!m.starts_with("claude-") || m.len() > 64 || m.contains(char::is_whitespace)) {
+            return Err(format!("{m} does not look like a Claude model name (they start with claude-)"));
+        }
+    }
+    {
+        let store = state.store.lock().map_err(|_| "store lock poisoned".to_string())?;
+        store.set_setting(MODEL_SETTING, model.trim()).map_err(|e| format!("{e:#}"))?;
+        store.set_setting(FAST_MODEL_SETTING, fast_model.trim()).map_err(|e| format!("{e:#}"))?;
+    }
+    Ok(ai_status(state))
+}
+
+/// One agent for every call, so the connection to the API is kept between asks.
+fn agent() -> ureq::Agent {
+    static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
+    AGENT
+        .get_or_init(|| {
+            ureq::Agent::config_builder()
+                .http_status_as_error(false)
+                .timeout_connect(Some(Duration::from_secs(20)))
+                // A streamed reply sends something every few seconds; a long silence means the line is gone.
+                .timeout_recv_body(Some(Duration::from_secs(600)))
+                .build()
+                .into()
+        })
+        .clone()
+}
+
+/// What a call used, for the line under an answer.
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Usage {
+    model: String,
+    input_tokens: u64,
+    output_tokens: u64,
+    cache_read_tokens: u64,
+    cache_write_tokens: u64,
+}
+
+impl Usage {
+    fn add(&mut self, u: &Value) {
+        let n = |k: &str| u[k].as_u64();
+        if let Some(v) = n("input_tokens") {
+            self.input_tokens = v;
+        }
+        if let Some(v) = n("output_tokens") {
+            self.output_tokens = v;
+        }
+        if let Some(v) = n("cache_read_input_tokens") {
+            self.cache_read_tokens = v;
+        }
+        if let Some(v) = n("cache_creation_input_tokens") {
+            self.cache_write_tokens = v;
+        }
+    }
+}
+
+/// A reply shown as it is written: each piece of text goes to the window as `petrel-ai` with this id, and
+/// `ai_cancel` with the id stops it.
+struct Live {
+    app: tauri::AppHandle,
+    id: String,
+    cancel: Arc<AtomicBool>,
+}
+
+#[derive(Clone, Serialize)]
+struct Piece<'a> {
+    id: &'a str,
+    text: &'a str,
+}
+
+fn running() -> &'static Mutex<HashMap<String, Arc<AtomicBool>>> {
+    static RUNNING: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
+    RUNNING.get_or_init(Default::default)
+}
+
+impl Live {
+    fn new(app: &tauri::AppHandle, id: Option<String>) -> Option<Live> {
+        let id = id.filter(|i| !i.is_empty())?;
+        let cancel = Arc::new(AtomicBool::new(false));
+        if let Ok(mut r) = running().lock() {
+            r.insert(id.clone(), cancel.clone());
+        }
+        Some(Live { app: app.clone(), id, cancel })
+    }
+}
+
+impl Drop for Live {
+    fn drop(&mut self) {
+        if let Ok(mut r) = running().lock() {
+            r.remove(&self.id);
+        }
+    }
+}
+
+/// Stops a reply that is being written. The connection is dropped, so the model stops too.
+#[tauri::command]
+pub fn ai_cancel(id: String) {
+    if let Some(c) = running().lock().ok().and_then(|r| r.get(&id).cloned()) {
+        c.store(true, Ordering::Relaxed);
+    }
+}
+
+/// One Messages call, streamed. `content` is the user turn: a string, or blocks (so a long part that repeats
+/// can be cached). Returns the reply's text and what it used.
+fn complete(
+    model: &str,
+    effort: &str,
+    system: &str,
+    content: Value,
+    max_tokens: u32,
+    live: Option<&Live>,
+) -> Result<(String, Usage)> {
     let key = api_key()?.context("add a Claude API key in Settings (Ctrl ,) to use AI")?;
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .http_status_as_error(false)
-        .timeout_global(Some(Duration::from_secs(180)))
-        .build()
-        .into();
-    let body = json!({
+    let mut body = json!({
         "model": model,
         "max_tokens": max_tokens,
         "system": system,
         "output_config": { "effort": effort },
-        "fallbacks": "default",
-        "messages": [{ "role": "user", "content": user }],
+        "stream": true,
+        "messages": [{ "role": "user", "content": content }],
     });
-    let mut resp = agent
+    // Haiku has no server-side fallback and refuses the field.
+    let fallback = !model.contains("haiku");
+    if fallback {
+        body["fallbacks"] = json!("default");
+    }
+    let mut req = agent()
         .post(API_URL)
         .header("x-api-key", &key)
         .header("anthropic-version", API_VERSION)
-        .header("anthropic-beta", FALLBACK_BETA)
-        .header("content-type", "application/json")
-        .send_json(&body)
-        .map_err(|e| anyhow!("cannot reach the Claude API: {e}"))?;
+        .header("content-type", "application/json");
+    if fallback {
+        req = req.header("anthropic-beta", FALLBACK_BETA);
+    }
+    let mut resp = req.send_json(&body).map_err(|e| anyhow!("cannot reach the Claude API: {e}"))?;
     let status = resp.status().as_u16();
-    let v: Value = resp.body_mut().read_json().map_err(|e| anyhow!("reading the reply: {e}"))?;
     if status != 200 {
+        let v: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
         let msg = v["error"]["message"].as_str().unwrap_or("no message");
         bail!(match status {
             401 => "the Claude API key was refused; check it in Settings".to_string(),
@@ -200,28 +341,55 @@ fn complete(model: &str, effort: &str, system: &str, user: &str, max_tokens: u32
             _ => format!("the Claude API said {status}: {msg}"),
         });
     }
-    if v["stop_reason"] == "refusal" {
+    let mut usage = Usage { model: model.to_string(), ..Usage::default() };
+    let mut text = String::new();
+    let mut stop = String::new();
+    let reader = std::io::BufReader::new(resp.body_mut().as_reader());
+    for line in reader.lines() {
+        if live.is_some_and(|l| l.cancel.load(Ordering::Relaxed)) {
+            bail!("stopped");
+        }
+        let line = line.map_err(|e| anyhow!("reading the reply: {e}"))?;
+        let Some(data) = line.strip_prefix("data:") else { continue };
+        let Ok(v) = serde_json::from_str::<Value>(data.trim()) else { continue };
+        match v["type"].as_str().unwrap_or("") {
+            "message_start" => usage.add(&v["message"]["usage"]),
+            "content_block_delta" if v["delta"]["type"] == "text_delta" => {
+                let piece = v["delta"]["text"].as_str().unwrap_or("");
+                text.push_str(piece);
+                if let Some(l) = live {
+                    let _ = l.app.emit("petrel-ai", Piece { id: &l.id, text: piece });
+                }
+            }
+            "message_delta" => {
+                usage.add(&v["usage"]);
+                if let Some(r) = v["delta"]["stop_reason"].as_str() {
+                    stop = r.to_string();
+                }
+            }
+            "error" => {
+                let msg = v["error"]["message"].as_str().unwrap_or("no message");
+                bail!(if v["error"]["type"] == "overloaded_error" {
+                    "the Claude API is overloaded; try again in a moment".to_string()
+                } else {
+                    format!("the Claude API stopped: {msg}")
+                });
+            }
+            "message_stop" => break,
+            _ => {}
+        }
+    }
+    if stop == "refusal" {
         bail!("Claude declined this one");
     }
-    let text: String = v["content"]
-        .as_array()
-        .map(|blocks| {
-            blocks
-                .iter()
-                .filter(|b| b["type"] == "text")
-                .filter_map(|b| b["text"].as_str())
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default()
-        .join("");
-    if v["stop_reason"] == "max_tokens" {
+    if stop == "max_tokens" {
         log::warn!("AI reply cut at max_tokens");
     }
     let text = strip_fence(text.trim()).to_string();
     if text.is_empty() {
         bail!("Claude sent back nothing");
     }
-    Ok(text)
+    Ok((text, usage))
 }
 
 /// A reply wrapped in one ```markdown fence, despite being asked not to.
@@ -273,12 +441,14 @@ pub async fn ai_write(
     context: Option<String>,
     instruction: Option<String>,
     note_id: Option<i64>,
-) -> R<String> {
+    stream_id: Option<String>,
+) -> R<Written> {
     if text.trim().is_empty() {
         return Err("there is no text to work on".into());
     }
     let state = app.state::<AppState>();
-    let model = model(&state);
+    let model = if task.is_small() { fast_model(&state) } else { model(&state) };
+    let live = Live::new(&app, stream_id);
     // A rewrite may replace text: keep what the note is now, whether or not the person keeps the result.
     if let (Some(id), false) = (note_id, matches!(task, Task::Explain | Task::Title)) {
         let mut store = state.store.lock().map_err(|_| "store lock poisoned".to_string())?;
@@ -300,9 +470,17 @@ pub async fn ai_write(
             let i = instruction.filter(|i| !i.trim().is_empty()).context("the prompt is empty")?;
             user += &format!("\n\n<prompt>\n{}\n</prompt>", head(&i, NOTE_CHARS));
         }
-        complete(&model, task.effort(), SYSTEM, &user, 8_000)
+        let (text, usage) = complete(&model, task.effort(), SYSTEM, json!(user), 8_000, live.as_ref())?;
+        Ok(Written { text, usage })
     })
     .await
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Written {
+    text: String,
+    usage: Usage,
 }
 
 #[derive(Serialize)]
@@ -332,6 +510,7 @@ pub struct Answer {
     sources: Vec<Source>,
     /// Every note the answer was given from, for a question that follows it.
     read: Vec<i64>,
+    usage: Option<Usage>,
 }
 
 /// A question already asked in this exchange, and its answer.
@@ -356,6 +535,7 @@ pub async fn ai_ask(
     question: String,
     earlier: Option<Vec<Exchange>>,
     notes: Option<Vec<i64>>,
+    stream_id: Option<String>,
 ) -> R<Answer> {
     let question = question.trim().to_string();
     if question.is_empty() {
@@ -363,6 +543,7 @@ pub async fn ai_ask(
     }
     let state = app.state::<AppState>();
     let model = model(&state);
+    let live = Live::new(&app, stream_id);
     let earlier = earlier.unwrap_or_default();
     let notes = {
         let store = state.store.lock().map_err(|_| "store lock poisoned".to_string())?;
@@ -377,11 +558,12 @@ pub async fn ai_ask(
                 answer: "Nothing in your notes seems to be about that.".into(),
                 sources: Vec::new(),
                 read: Vec::new(),
+                usage: None,
             });
         }
-        let mut user = String::from("Here are the notes that matched best:\n\n");
+        let mut shown = String::from("Here are the notes that matched best:\n\n");
         for (i, n) in notes.iter().enumerate() {
-            user += &format!(
+            shown += &format!(
                 "<note n=\"{}\" title=\"{}\" folder=\"{}\">\n{}\n</note>\n\n",
                 i + 1,
                 n.title.replace('"', "'"),
@@ -389,6 +571,7 @@ pub async fn ai_ask(
                 head(&n.body, NOTE_CHARS / 2)
             );
         }
+        let mut user = String::new();
         let skip = earlier.len().saturating_sub(EARLIER_MAX);
         for e in earlier.iter().skip(skip) {
             user += &format!(
@@ -406,7 +589,13 @@ pub async fn ai_ask(
              brackets, like `[2]`. End with a last line `Sources: ` and the numbers of the notes you used, \
              like `Sources: 2, 5`."
         );
-        let reply = complete(&model, "medium", SYSTEM, &user, 8_000)?;
+        // The notes come first and stay the same through a follow-up, so they are marked for the cache: a
+        // second question on them is read at a tenth of the price.
+        let content = json!([
+            { "type": "text", "text": shown, "cache_control": { "type": "ephemeral" } },
+            { "type": "text", "text": user },
+        ]);
+        let (reply, usage) = complete(&model, "medium", SYSTEM, content, 8_000, live.as_ref())?;
         let (answer, used) = split_sources(&reply, notes.len());
         let titles: Vec<&str> = notes.iter().map(|n| n.title.as_str()).collect();
         let answer = cite(&answer, &titles);
@@ -416,7 +605,7 @@ pub async fn ai_ask(
             used.iter().map(|&i| Source::from(&notes[i])).collect()
         };
         let read = notes.iter().map(|n| n.id).collect();
-        Ok(Answer { answer, sources, read })
+        Ok(Answer { answer, sources, read, usage: Some(usage) })
     })
     .await
 }
@@ -499,7 +688,7 @@ pub struct Suggestion {
 #[tauri::command]
 pub async fn ai_suggest_home(app: tauri::AppHandle, note_id: i64) -> R<Vec<Suggestion>> {
     let state = app.state::<AppState>();
-    let model = model(&state);
+    let model = fast_model(&state);
     let (capture, candidates, folders) = {
         let store = state.store.lock().map_err(|_| "store lock poisoned".to_string())?;
         let capture = store.peek_note(note_id).map_err(|e| format!("{e:#}"))?;
@@ -535,7 +724,7 @@ pub async fn ai_suggest_home(app: tauri::AppHandle, note_id: i64) -> R<Vec<Sugge
             Each item is {\"kind\": \"merge\", \"noteId\": <id>, \"why\": \"...\"} to add it to a listed note, or \
             {\"kind\": \"move\", \"folder\": \"<an existing folder, or a short new one>\", \"title\": \"<a title \
             for it as its own note>\", \"why\": \"...\"}. `why` is at most ten words.";
-        let reply = complete(&model, "low", SYSTEM, &user, 2_000)?;
+        let (reply, _) = complete(&model, "low", SYSTEM, json!(user), 2_000, None)?;
         Ok(parse_suggestions(&reply, &candidates))
     })
     .await
@@ -588,7 +777,7 @@ pub struct Related {
 #[tauri::command]
 pub async fn ai_related(app: tauri::AppHandle, note_id: i64) -> R<Vec<Related>> {
     let state = app.state::<AppState>();
-    let model = model(&state);
+    let model = fast_model(&state);
     let (note, candidates) = {
         let store = state.store.lock().map_err(|_| "store lock poisoned".to_string())?;
         let note = store.peek_note(note_id).map_err(|e| format!("{e:#}"))?;
@@ -613,7 +802,7 @@ pub async fn ai_related(app: tauri::AppHandle, note_id: i64) -> R<Vec<Related>> 
         user += "\nWhich of the other notes really relate to this one? Reply with a JSON array only, best first, \
             at most five: [{\"id\": <id>, \"why\": \"<how it relates, at most eight words>\"}]. Leave out notes that \
             only share a word.";
-        let reply = complete(&model, "low", SYSTEM, &user, 2_000)?;
+        let (reply, _) = complete(&model, "low", SYSTEM, json!(user), 2_000, None)?;
         let (Some(a), Some(b)) = (reply.find('['), reply.rfind(']')) else { return Ok(Vec::new()) };
         let items: Vec<Value> = serde_json::from_str(&reply[a..=b]).unwrap_or_default();
         Ok(items
@@ -667,7 +856,7 @@ pub async fn ai_week(app: tauri::AppHandle, from: i64, to: i64) -> R<String> {
             forward, in two short paragraphs at most, warm and plain, speaking to them as you. Name notes as \
             [[Title]] links where it helps (only titles listed above, never captures, which have only a time as \
             a title). Do not list open tasks or count things: the page shows those. No headings, no bullet list.";
-        complete(&model, "medium", SYSTEM, &user, 2_000)
+        Ok(complete(&model, "medium", SYSTEM, json!(user), 2_000, None)?.0)
     })
     .await
 }

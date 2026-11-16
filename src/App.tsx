@@ -108,10 +108,11 @@ export default function App() {
     clearTimeout(noticeTimer);
     noticeTimer = setTimeout(() => setNotice(null), 5000);
   };
-  const [ai, setAi] = createSignal<AiStatus>({ ready: false, model: "", error: null });
+  const [ai, setAi] = createSignal<AiStatus>({ ready: false, model: "", fastModel: "", error: null });
   const [root, setRoot] = createSignal("");
   const [rev, setRev] = createSignal(0);
-  const [lib] = createResource(rev, loadLibrary);
+  // The library's data (every note's summary) is read only while the library is open.
+  const [lib] = createResource(() => (view().kind === "library" ? rev() + 1 : false), loadLibrary);
   let page: NotePageHandle | undefined;
   const back: View[] = [];
 
@@ -481,6 +482,9 @@ export default function App() {
     } catch {
       applyPrefs(prefs());
     }
+    // The window shows as soon as it looks right; the keyring and the folder scan come after, so a slow keyring
+    // or a big folder never keeps the window from opening.
+    await s.showWindow();
     setRoot((await s.notesInfo().catch(() => ({ root: "" }))).root);
     watchUpdates(() => prefs().updates);
     const stored = await s.uiSettings().catch(() => ({}) as Record<string, string>);
@@ -495,10 +499,9 @@ export default function App() {
     }
     const [lastId, at] = ((stored["last.note"] ?? "") as string).split(":").map(Number);
     if (lastId && Date.now() - at < RESUME_MS) void go({ kind: "note", id: lastId, folder: "" }, false);
-    setAi(await s.aiStatus().catch(() => ({ ready: false, model: "", error: null })));
+    void s.aiStatus().then(setAi, () => {});
     await s.scanNotes().catch((e) => say(`The Petrel folder cannot be read: ${errText(e)}`, { error: true }));
     setRev(rev() + 1);
-    await s.showWindow();
     await s.listen({
       quit: async () => {
         await page?.flush();

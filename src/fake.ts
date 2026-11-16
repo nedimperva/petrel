@@ -2,7 +2,7 @@
 // and collections, and an AI that answers from a script. The real rules (files, conflicts, front matter, links)
 // are in crates/petrel-core/src/notes.rs and its tests; this is enough to work on the screens.
 
-import type { AiSuggestion, Api, Note, NoteSummary, NoteVersion, OpenTask, SyncStatus, TopicFace, UndoToken } from "./api";
+import type { AiLive, AiSuggestion, Api, Note, NoteSummary, NoteVersion, OpenTask, SyncStatus, TopicFace, UndoToken } from "./api";
 import { parseLinks } from "./notes/parse";
 
 const MIN = 60_000;
@@ -39,6 +39,27 @@ export function fakeApi(): Api {
   const lower = (s: string) => s.trim().toLowerCase();
   const pathOf = (folder: string, title: string) => (folder ? `${folder}/${title}.md` : `${title}.md`);
   const wait = <T>(v: T, ms = 0) => new Promise<T>((r) => setTimeout(() => r(v), ms));
+  let aiModels: [string, string] = ["claude-opus-5-5", "claude-haiku-5-5"];
+  const aiStopped = new Set<string>();
+  /** Sends a reply a few words at a time, as the real one streams. */
+  const fakeStream = async (text: string, live?: AiLive) => {
+    if (!live) return wait(text, 900);
+    let soFar = "";
+    for (const w of text.split(/(?<=\s)/)) {
+      await wait(null, 40);
+      if (aiStopped.has(live.id)) throw "stopped";
+      soFar += w;
+      live.onText(soFar);
+    }
+    return text;
+  };
+  const fakeUsage = (inChars: number, outChars: number) => ({
+    model: aiModels[0],
+    inputTokens: Math.round(inChars / 4) + 300,
+    outputTokens: Math.round(outChars / 4),
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+  });
   const sync: SyncStatus = { configured: false, clientId: "", signedIn: false, account: "", on: false, state: "off", message: null, lastAt: null, last: null };
 
   const add = (folder: string, title: string, body: string, tags: string[] = [], age = 0, pinned = false): Note => {
@@ -158,7 +179,7 @@ export function fakeApi(): Api {
       .map((x) => x.n);
   };
 
-  return {
+  const self: Api = {
     appInfo: () => wait({ version: "dev", dbPath: "(browser, nothing saved)", debug: true }),
     rescueText: () => wait("(nowhere)"),
     closeWindow: () => wait(undefined),
@@ -231,6 +252,16 @@ export function fakeApi(): Api {
         .filter(([path]) => path !== "")
         .map(([path, c]) => ({ path, name: path.split("/").pop() || "Notes", depth: path.split("/").length - 1, count: c }));
     },
+    sidebarCounts: async () => {
+      const all = [...notes.values()];
+      return {
+        folders: await self.noteFolders(),
+        loose: all.filter((n) => n.folder === "").length,
+        inbox: all.filter((n) => n.folder === "inbox").length,
+        tasks: (await self.openTasks()).length,
+      };
+    },
+    peekNotes: async (ids) => ids.filter((id) => notes.has(id)).map((id) => ({ ...get(id) })),
     openNote: async (id) => ({ ...get(id) }),
     peekNote: async (id) => ({ ...get(id) }),
     createNote: async (folder, title, body, tags) => ({ ...add(folder, freeTitle(folder, title), body, tags) }),
@@ -463,12 +494,19 @@ export function fakeApi(): Api {
           }
         : { text: null, app: null, title: null, link: null },
 
-    aiStatus: async () => ({ ready: aiKey !== null, model: "claude-opus-5-5", error: null }),
+    aiStatus: async () => ({ ready: aiKey !== null, model: aiModels[0], fastModel: aiModels[1], error: null }),
     setAiKey: async (key) => {
       aiKey = key;
-      return { ready: key !== null, model: "claude-opus-5-5", error: null };
+      return { ready: key !== null, model: aiModels[0], fastModel: aiModels[1], error: null };
     },
-    aiWrite: async ({ task, text }) => {
+    setAiModels: async (model, fast) => {
+      aiModels = [model || "claude-opus-5-5", fast || "claude-haiku-5-5"];
+      return { ready: aiKey !== null, model: aiModels[0], fastModel: aiModels[1], error: null };
+    },
+    aiCancel: async (id) => {
+      aiStopped.add(id);
+    },
+    aiWrite: async ({ task, text }, live) => {
       const t = text.trim();
       const out: Record<string, string> = {
         tidy: t.replace(/\s+\n/g, "\n").replace(/^(\w)/, (c) => c.toUpperCase()),
@@ -482,12 +520,18 @@ export function fakeApi(): Api {
         title: "Release checklist",
         prompt: `Done as the prompt asks:\n\n${t}`,
       };
-      return wait(out[task] ?? t, 900);
+      const reply = await fakeStream(out[task] ?? t, live);
+      return { text: reply, usage: fakeUsage(text.length, reply.length) };
     },
-    aiAsk: async (q, _earlier, ids) => {
+    aiAsk: async (q, _earlier, ids, live) => {
       const found = ids?.length ? ids.map(get) : about(q, 3);
+      const answer = found.length
+        ? `From your notes: **${found[0].title}** is the closest. ${found[0].body.replace(/^#.*\n/, "").trim().split("\n")[0]}`
+        : "Nothing in your notes seems to be about that.";
+      await fakeStream(answer, live);
       return wait(
         {
+          usage: fakeUsage(4000, answer.length),
           answer: found.length
             ? `From your notes: **${found[0].title}** is the closest. ${found[0].body.replace(/^#.*\n/, "").trim().split("\n")[0]}`
             : "Nothing in your notes seems to be about that.",
@@ -520,4 +564,5 @@ export function fakeApi(): Api {
       );
     },
   };
+  return self;
 }

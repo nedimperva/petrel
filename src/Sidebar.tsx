@@ -22,13 +22,7 @@ interface Data {
 }
 
 async function load(): Promise<Data> {
-  const s = await api();
-  const [folders, inbox, tasks, loose] = await Promise.all([
-    s.noteFolders(),
-    s.listNotes({ folder: "inbox", limit: 1000 }).then((n) => n.length, () => 0),
-    s.openTasks().then((t) => t.length, () => 0),
-    s.listNotes({ folder: "", limit: 1000 }).then((n) => n.length, () => 0),
-  ]);
+  const { folders, inbox, tasks, loose } = await (await api()).sidebarCounts();
   const shown = folders.filter((f) => f.path && f.path !== "inbox" && !f.path.startsWith("."));
   // Notes at the top of the folder are a collection of pages too: "Notes".
   if (loose) shown.unshift({ path: "", name: "Notes", depth: 0, count: loose });

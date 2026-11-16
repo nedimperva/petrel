@@ -38,6 +38,24 @@ const READ_LIMIT: u64 = 64 * 1024 * 1024;
 /// A folder made twice: (the one kept, an extra one, the extra one's children).
 type Twin = (String, String, Vec<String>);
 
+/// How many transfers run side by side. Drive allows more; four keeps a first sync quick without tripping its
+/// per-user rate limit.
+const PARALLEL: usize = 4;
+
+/// One agent for every sync, so its connections to Google are kept and reused rather than opened each time.
+fn shared_agent() -> ureq::Agent {
+    static AGENT: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new();
+    AGENT
+        .get_or_init(|| {
+            ureq::Agent::config_builder()
+                .http_status_as_error(false)
+                .timeout_global(Some(Duration::from_secs(120)))
+                .build()
+                .into()
+        })
+        .clone()
+}
+
 pub struct Drive {
     token: Box<dyn FnMut() -> Result<String> + Send>,
     agent: ureq::Agent,
@@ -55,11 +73,7 @@ impl Drive {
         root: String,
         cursor: Option<String>,
     ) -> Drive {
-        let agent = ureq::Agent::config_builder()
-            .http_status_as_error(false)
-            .timeout_global(Some(Duration::from_secs(120)))
-            .build()
-            .into();
+        let agent = shared_agent();
         let mut folders = HashMap::new();
         folders.insert(String::new(), root.clone());
         Drive { token: Box::new(token), agent, root, cursor, folders }
@@ -306,69 +320,68 @@ impl Remote for Drive {
 
     fn download(&mut self, id: &str) -> Result<Vec<u8>> {
         let auth = self.bearer()?;
-        let mut resp = self
-            .agent
-            .get(&format!("{}/files/{id}?alt=media", api()))
-            .header("Authorization", &auth)
-            .call()
-            .map_err(offline)?;
-        let status = resp.status().as_u16();
-        if status != 200 {
-            let v: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
-            check(status, &v)?;
-        }
-        resp.body_mut().with_config().limit(READ_LIMIT).read_to_vec().map_err(|e| anyhow!("downloading: {e}"))
+        download_one(&self.agent, &auth, id)
     }
 
     fn upload(&mut self, path: &str, id: Option<&str>, bytes: &[u8]) -> Result<RemoteFile> {
         let auth = self.bearer()?;
-        let v: Value = match id {
-            Some(id) => {
-                let mut resp = self
-                    .agent
-                    .patch(&format!("{}/files/{id}?uploadType=media&fields=id,md5Checksum", upload_url()))
-                    .header("Authorization", &auth)
-                    .header("Content-Type", "application/octet-stream")
-                    .send(bytes)
-                    .map_err(offline)?;
-                let status = resp.status().as_u16();
-                let v = resp.body_mut().read_json().map_err(|e| anyhow!("reading Drive's answer: {e}"))?;
-                check(status, &v)?;
-                v
-            }
-            None => {
-                let (dir, name) = path.rsplit_once('/').unwrap_or(("", path));
-                let parent = self.folder(dir)?;
-                let meta = json!({ "name": name, "parents": [parent] });
-                let boundary = "petrel-boundary-7f3c1d";
-                let mut body = Vec::with_capacity(bytes.len() + 512);
-                body.extend_from_slice(
-                    format!(
-                        "--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{meta}\r\n\
-                         --{boundary}\r\nContent-Type: application/octet-stream\r\n\r\n"
-                    )
-                    .as_bytes(),
-                );
-                body.extend_from_slice(bytes);
-                body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
-                let mut resp = self
-                    .agent
-                    .post(&format!("{}/files?uploadType=multipart&fields=id,md5Checksum", upload_url()))
-                    .header("Authorization", &auth)
-                    .header("Content-Type", &format!("multipart/related; boundary={boundary}"))
-                    .send(&body[..])
-                    .map_err(offline)?;
-                let status = resp.status().as_u16();
-                let v = resp.body_mut().read_json().map_err(|e| anyhow!("reading Drive's answer: {e}"))?;
-                check(status, &v)?;
-                v
-            }
+        let parent = match id {
+            Some(_) => None,
+            None => Some(self.folder(path.rsplit_once('/').map_or("", |(d, _)| d))?),
         };
-        Ok(RemoteFile {
-            id: v["id"].as_str().context("Drive sent no id")?.to_string(),
+        upload_one(&self.agent, &auth, path, id, parent.as_deref(), bytes)
+    }
+
+    fn upload_many(&mut self, items: &[(String, Option<String>, Vec<u8>)]) -> Vec<Result<RemoteFile>> {
+        let auth = match self.bearer() {
+            Ok(a) => a,
+            Err(e) => return items.iter().map(|_| Err(anyhow!("{e:#}"))).collect(),
+        };
+        // Folders are made one at a time first, so two new files in one new folder do not make it twice.
+        let parents: Vec<Result<Option<String>>> = items
+            .iter()
+            .map(|(path, id, _)| match id {
+                Some(_) => Ok(None),
+                None => self.folder(path.rsplit_once('/').map_or("", |(d, _)| d)).map(Some),
+            })
+            .collect();
+        let agent = &self.agent;
+        let jobs: Vec<_> = items.iter().zip(parents).collect();
+        in_parallel(&jobs, |((path, id, bytes), parent)| match parent {
+            Ok(parent) => upload_one(agent, &auth, path, id.as_deref(), parent.as_deref(), bytes),
+            Err(e) => Err(anyhow!("{e:#}")),
+        })
+    }
+
+    fn download_many(&mut self, ids: &[String]) -> Vec<Result<Vec<u8>>> {
+        let auth = match self.bearer() {
+            Ok(a) => a,
+            Err(e) => return ids.iter().map(|_| Err(anyhow!("{e:#}"))).collect(),
+        };
+        let agent = &self.agent;
+        in_parallel(ids, |id| download_one(agent, &auth, id))
+    }
+
+    fn move_to(&mut self, id: &str, path: &str) -> Result<Option<RemoteFile>> {
+        let v = self.get_json(&format!("{}/files/{id}?fields=parents", api()))?;
+        let from: Vec<String> = v["parents"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|p| p.as_str().map(str::to_string))
+            .collect();
+        let (dir, name) = path.rsplit_once('/').unwrap_or(("", path));
+        let to = self.folder(dir)?;
+        let mut url = format!("{}/files/{id}?fields=id,md5Checksum", api());
+        if !from.contains(&to) {
+            url.push_str(&format!("&addParents={}&removeParents={}", enc(&to), enc(&from.join(","))));
+        }
+        let v = self.send_json("PATCH", &url, &json!({ "name": name }))?;
+        Ok(Some(RemoteFile {
+            id: v["id"].as_str().unwrap_or(id).to_string(),
             path: path.to_string(),
             md5: v["md5Checksum"].as_str().unwrap_or("").to_string(),
-        })
+        }))
     }
 
     fn trash(&mut self, id: &str) -> Result<()> {
@@ -380,6 +393,94 @@ impl Remote for Drive {
             Err(e) => Err(e),
         }
     }
+}
+
+/// Runs `f` over `items` on up to `PARALLEL` threads, answers in the order of `items`.
+fn in_parallel<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
+    let mut out: Vec<Option<R>> = (0..items.len()).map(|_| None).collect();
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let slots = std::sync::Mutex::new(&mut out);
+    std::thread::scope(|scope| {
+        for _ in 0..PARALLEL.min(items.len()) {
+            scope.spawn(|| loop {
+                let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let Some(item) = items.get(i) else { break };
+                let r = f(item);
+                slots.lock().unwrap_or_else(|e| e.into_inner())[i] = Some(r);
+            });
+        }
+    });
+    out.into_iter().map(|r| r.expect("every item ran")).collect()
+}
+
+fn download_one(agent: &ureq::Agent, auth: &str, id: &str) -> Result<Vec<u8>> {
+    let mut resp = agent
+        .get(&format!("{}/files/{id}?alt=media", api()))
+        .header("Authorization", auth)
+        .call()
+        .map_err(offline)?;
+    let status = resp.status().as_u16();
+    if status != 200 {
+        let v: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
+        check(status, &v)?;
+    }
+    resp.body_mut().with_config().limit(READ_LIMIT).read_to_vec().map_err(|e| anyhow!("downloading: {e}"))
+}
+
+/// New text for `id`, or a new file named after `path` in the folder `parent`.
+fn upload_one(
+    agent: &ureq::Agent,
+    auth: &str,
+    path: &str,
+    id: Option<&str>,
+    parent: Option<&str>,
+    bytes: &[u8],
+) -> Result<RemoteFile> {
+    let v: Value = match id {
+        Some(id) => {
+            let mut resp = agent
+                .patch(&format!("{}/files/{id}?uploadType=media&fields=id,md5Checksum", upload_url()))
+                .header("Authorization", auth)
+                .header("Content-Type", "application/octet-stream")
+                .send(bytes)
+                .map_err(offline)?;
+            let status = resp.status().as_u16();
+            let v = resp.body_mut().read_json().map_err(|e| anyhow!("reading Drive's answer: {e}"))?;
+            check(status, &v)?;
+            v
+        }
+        None => {
+            let name = path.rsplit_once('/').map_or(path, |(_, n)| n);
+            let parent = parent.context("no folder for a new file")?;
+            let meta = json!({ "name": name, "parents": [parent] });
+            let boundary = "petrel-boundary-7f3c1d";
+            let mut body = Vec::with_capacity(bytes.len() + 512);
+            body.extend_from_slice(
+                format!(
+                    "--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{meta}\r\n\
+                     --{boundary}\r\nContent-Type: application/octet-stream\r\n\r\n"
+                )
+                .as_bytes(),
+            );
+            body.extend_from_slice(bytes);
+            body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+            let mut resp = agent
+                .post(&format!("{}/files?uploadType=multipart&fields=id,md5Checksum", upload_url()))
+                .header("Authorization", auth)
+                .header("Content-Type", &format!("multipart/related; boundary={boundary}"))
+                .send(&body[..])
+                .map_err(offline)?;
+            let status = resp.status().as_u16();
+            let v = resp.body_mut().read_json().map_err(|e| anyhow!("reading Drive's answer: {e}"))?;
+            check(status, &v)?;
+            v
+        }
+    };
+    Ok(RemoteFile {
+        id: v["id"].as_str().context("Drive sent no id")?.to_string(),
+        path: path.to_string(),
+        md5: v["md5Checksum"].as_str().unwrap_or("").to_string(),
+    })
 }
 
 /// Could not reach Drive at all.
@@ -492,6 +593,12 @@ mod tests {
         assert!(da.list_once().unwrap().1.is_empty());
         assert!(da.folders.contains_key("Travel/Inner"), "{:?}", da.folders);
         assert!(files.iter().any(|f| f.path == "Travel/Split.md"));
+        // A note moved to another collection is moved on Drive, not copied.
+        std::fs::create_dir_all(a.join("Trips")).unwrap();
+        std::fs::rename(a.join("Travel/Split.md"), a.join("Trips/Split.md")).unwrap();
+        let r = sync(&a, &mut da, &mut sa, "s").unwrap();
+        assert_eq!((r.moved, r.uploaded, r.trashed_there), (1, 0, 0), "{r:?}");
+        assert!(da.list().unwrap().iter().any(|f| f.path == "Trips/Split.md"));
         assert_eq!(Drive::new(|| Ok("t".into()), String::new(), None).account().unwrap(), "you@example.com");
     }
 }

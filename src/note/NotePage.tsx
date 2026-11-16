@@ -6,7 +6,7 @@
 // Pasted pictures are saved next to the note and shown under their line.
 
 import { createEffect, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
-import { api, errText, type AiRelated, type AiTask, type Backlinks, type Note, type NoteSummary, type OpenTask } from "../api";
+import { aiLive, api, errText, type AiRelated, type AiTask, type Backlinks, type Note, type NoteSummary, type OpenTask } from "../api";
 import { blanks, fill, todayText } from "../blanks";
 import FillBlanks from "../collection/FillBlanks";
 import { lastVersions } from "../collection/BlankFields";
@@ -97,6 +97,9 @@ const MENU_H = 400;
 /** Where the cursor and the scroll were in each note this session, so going back never jumps. */
 const places = new Map<number, { anchor: number; head: number; top: number }>();
 
+/** Characters after which a note counts as long (see `measureSoon`). */
+const LONG_NOTE = 20_000;
+
 export default function NotePage(p: Props) {
   let host!: HTMLDivElement;
   let titleInput!: HTMLInputElement;
@@ -110,13 +113,20 @@ export default function NotePage(p: Props) {
   const [related, setRelated] = createSignal<AiRelated[] | "loading" | null>(null);
   // The one AI menu (Ctrl J, or `/` on an empty line). `whole`: nothing was selected when it opened.
   const [menu, setMenu] = createSignal<{ x: number; y: number; i: number; q: string; whole: boolean; from: number; to: number; head: number } | null>(null);
-  const [explain, setExplain] = createSignal<{ x: number; y: number; text: string | null; at: number } | null>(null);
+  const [explain, setExplain] = createSignal<{ x: number; y: number; text: string | null; at: number; partial?: string } | null>(null);
   // The last AI request, for Try again.
   let last: { task: AiTask; from: number; to: number; instruction?: string; label?: string } | null = null;
   // Ctrl J's own prompts: the Prompts collection, the most copied first.
   const [prompts, setPrompts] = createSignal<NoteSummary[]>([]);
   const [filling, setFilling] = createSignal<{ title: string; text: string; from: number; to: number; selected: string } | null>(null);
   let seq = 0;
+  /** The AI reply being written now, to stop it on Esc. */
+  let running: string | null = null;
+  const stopRunning = () => {
+    if (running) void api().then((a) => a.aiCancel(running!));
+    running = null;
+  };
+  onCleanup(stopRunning);
 
   /** The day this page is, if it is a day's page: from the view, or from the note that was opened. */
   const dayPage = (): string | null => {
@@ -276,9 +286,18 @@ export default function NotePage(p: Props) {
       const at = task === "continue" || task === "summarize" ? to : from;
       v.dispatch({ effects: setPreview.of({ from: at, to: task === "continue" || task === "summarize" ? at : to, text: null, error: null, label: label ?? LABELS[task] }) });
     }
-    try {
-      const out = await (await api()).aiWrite({ task, text, context: doc.toString(), instruction, noteId: note()?.id });
+    // The reply shows as it is written; Esc stops it (the connection is dropped, so Claude stops too).
+    const live = aiLive((soFar) => {
       if (mine !== seq) return;
+      if (task === "explain") return setExplain((e) => e && { ...e, partial: soFar });
+      const pv = previewOf(v.state);
+      if (pv && pv.text === null) v.dispatch({ effects: setPreview.of({ ...pv, partial: soFar }) });
+    });
+    running = live.id;
+    try {
+      const { text: out, usage } = await (await api()).aiWrite({ task, text, context: doc.toString(), instruction, noteId: note()?.id }, live);
+      if (mine !== seq) return;
+      void usage;
       if (task === "explain") return setExplain((e) => e && { ...e, text: out });
       if (task === "title") return proposeTitle(out);
       const pv = previewOf(v.state);
@@ -310,6 +329,7 @@ export default function NotePage(p: Props) {
     },
     drop() {
       seq++;
+      stopRunning();
       view().dispatch({ effects: setPreview.of(null) });
       view().focus();
     },
@@ -506,6 +526,15 @@ export default function NotePage(p: Props) {
     setOutLinks([...new Set(parseLinks(t).map((l) => l.inner.split("|")[0].trim()))].slice(0, 30));
     setHere(currentHeading(heads(), editor?.cursor() ?? 0));
   };
+  // Counting words and reading headings and links goes over the whole text; on a long note that waits for a
+  // pause in the typing instead of running on every key.
+  let measureTimer: ReturnType<typeof setTimeout> | undefined;
+  const measureSoon = () => {
+    clearTimeout(measureTimer);
+    if ((editor?.view.state.doc.length ?? 0) < LONG_NOTE) return measure();
+    measureTimer = setTimeout(measure, 400);
+  };
+  onCleanup(() => clearTimeout(measureTimer));
   const hasLinks = () => !!(links().linked.length || links().mentioned.length || related());
   const minLevel = () => Math.min(...heads().map((h) => h.level));
   const jump = (from: number) => {
@@ -517,7 +546,7 @@ export default function NotePage(p: Props) {
   onMount(() => {
     editor = createEditor(host, () => {
       saver.changed();
-      measure();
+      measureSoon();
       setTypingNow(true);
       clearTimeout(typingTimer);
       typingTimer = setTimeout(() => setTypingNow(false), 1500);
@@ -642,6 +671,8 @@ export default function NotePage(p: Props) {
     if (explain() && e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
+      seq++;
+      stopRunning();
       setExplain(null);
       return editor?.view.focus();
     }
@@ -1014,7 +1045,7 @@ export default function NotePage(p: Props) {
             <div class="menu-head">
               <span class="spark">✦</span> Explained
             </div>
-            <p classList={{ "ai-thinking": x().text === null }}>{x().text ?? "Claude is reading…"}</p>
+            <p classList={{ "ai-thinking": x().text === null && !x().partial }}>{x().text ?? (x().partial || "Claude is reading…")}</p>
             <div class="row">
               <button class="btn small" disabled={!x().text} onClick={insertExplain}>
                 Add below as a quote

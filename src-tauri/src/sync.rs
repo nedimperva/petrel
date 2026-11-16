@@ -51,9 +51,26 @@ pub struct Sync {
 }
 
 enum Nudge {
-    /// Something changed here, or the person asked.
-    Soon,
+    /// These files or folders changed here (absolute paths, from the watcher).
+    Soon(Vec<PathBuf>),
+    /// The person asked, or the window came back: look at everything.
     Now,
+}
+
+/// What the next sync must look at here: only the paths the watcher named, or the whole folder.
+#[derive(Default)]
+struct Pending {
+    full: bool,
+    paths: std::collections::BTreeSet<PathBuf>,
+}
+
+impl Pending {
+    fn take(&mut self, n: Nudge) {
+        match n {
+            Nudge::Soon(p) => self.paths.extend(p),
+            Nudge::Now => self.full = true,
+        }
+    }
 }
 
 pub fn state() -> Sync {
@@ -132,12 +149,21 @@ fn tell(app: &tauri::AppHandle, f: impl FnOnce(&mut Status)) {
     let _ = app.emit("petrel-sync", status(app));
 }
 
-/// Asks for a sync soon (after a save) or now.
+/// Asks for a sync now, looking at the whole folder.
 pub fn nudge(app: &tauri::AppHandle, now: bool) {
+    send(app, if now { Nudge::Now } else { Nudge::Soon(Vec::new()) });
+}
+
+/// Asks for a sync soon, of these changed paths.
+pub fn nudge_paths(app: &tauri::AppHandle, paths: Vec<PathBuf>) {
+    send(app, Nudge::Soon(paths));
+}
+
+fn send(app: &tauri::AppHandle, n: Nudge) {
     let sync = app.state::<Sync>();
     let tx = sync.nudge.lock().ok().and_then(|n| n.clone());
     if let Some(tx) = tx {
-        let _ = tx.send(if now { Nudge::Now } else { Nudge::Soon });
+        let _ = tx.send(n);
     }
 }
 
@@ -149,29 +175,36 @@ pub fn start(app: &tauri::AppHandle) {
     }
     let app = app.clone();
     std::thread::spawn(move || {
-        // A first sync shortly after start.
+        // A first sync shortly after start, of the whole folder.
         let mut wait = Duration::from_secs(5);
+        let mut pending = Pending { full: true, ..Pending::default() };
         loop {
             match rx.recv_timeout(wait) {
-                Ok(Nudge::Soon) => {
-                    // Let the typing settle, and take the nudges that came meanwhile with this one.
-                    std::thread::sleep(AFTER_SAVE);
-                    while rx.try_recv().is_ok() {}
+                Ok(n) => {
+                    if matches!(n, Nudge::Soon(_)) {
+                        // Let the typing settle.
+                        std::thread::sleep(AFTER_SAVE);
+                    }
+                    pending.take(n);
+                    // The nudges that came meanwhile go with this one.
+                    while let Ok(n) = rx.try_recv() {
+                        pending.take(n);
+                    }
                 }
-                Ok(Nudge::Now) => while rx.try_recv().is_ok() {},
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => return,
             }
             let shown = app.get_webview_window("main").and_then(|w| w.is_visible().ok()).unwrap_or(false);
             wait = if shown { OPEN_EVERY } else { TRAY_EVERY };
-            if let Err(e) = run_once(&app) {
+            let todo = std::mem::take(&mut pending);
+            if let Err(e) = run_once(&app, todo) {
                 log::warn!("sync: {e:#}");
             }
         }
     });
 }
 
-fn run_once(app: &tauri::AppHandle) -> Result<()> {
+fn run_once(app: &tauri::AppHandle, todo: Pending) -> Result<()> {
     let st = status(app);
     if !st.on || st.state == "blocked" {
         return Ok(());
@@ -196,7 +229,18 @@ fn run_once(app: &tauri::AppHandle) -> Result<()> {
     let id = client_id.clone();
     let mut drive = Drive::new(move || google::access_token(&id), folder, state.cursor.clone());
     let stamp = chrono_stamp();
-    let result = engine::sync(&root, &mut drive, &mut state, &stamp);
+    // Between full looks (hourly, at start, when asked) only what the watcher named is read again; a quiet
+    // folder costs no walk at all, just the one question to Drive.
+    let full = todo.full || now_ms() - state.full_at > engine::FULL_SCAN_MS;
+    let hint: Vec<String> = todo
+        .paths
+        .iter()
+        .filter_map(|p| p.strip_prefix(&root).ok())
+        .filter_map(|p| p.components().map(|c| c.as_os_str().to_str()).collect::<Option<Vec<_>>>())
+        .map(|parts| parts.join("/"))
+        .collect();
+    let hint = (!full).then_some(&hint[..]);
+    let result = engine::sync_hinted(&root, &mut drive, &mut state, &stamp, hint);
     state.cursor = drive.cursor.clone();
     // Saved even after a failure: what was done is remembered, so it is not done twice.
     if let Err(e) = state.save(&file) {
@@ -266,6 +310,12 @@ fn describe(r: &engine::Report) -> Option<String> {
     }
     if r.trashed_here + r.trashed_there > 0 {
         parts.push(format!("{} to the trash", n(r.trashed_here + r.trashed_there, "file", "files")));
+    }
+    if r.moved > 0 {
+        parts.push(format!("{} moved", n(r.moved, "file", "files")));
+    }
+    if r.merged > 0 {
+        parts.push(format!("{} merged", n(r.merged, "note", "notes")));
     }
     if r.conflicts > 0 {
         parts.push(format!("{} kept both ways", n(r.conflicts, "note", "notes")));

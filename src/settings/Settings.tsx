@@ -70,6 +70,14 @@ export default function Settings(p: { section?: Section | "all"; onClose(): void
   const [app] = createResource(async () => (await api()).appInfo());
   const [desk, { mutate: setDesk }] = createResource<DesktopSettings>(async () => (await api()).desktopSettings());
   const [ai, { mutate: setAi }] = createResource<AiStatus>(async () => (await api()).aiStatus());
+  const saveModels = async (model: string, fast: string) => {
+    try {
+      setAi(await (await api()).setAiModels(model.trim(), fast.trim()));
+      say("Saved");
+    } catch (e) {
+      say(errText(e), { error: true });
+    }
+  };
   const [key, setKey] = createSignal("");
   const version = () => app()?.version ?? "";
   const [checking, setChecking] = createSignal(false);
@@ -444,6 +452,12 @@ export default function Settings(p: { section?: Section | "all"; onClose(): void
                 <button class="btn" onClick={() => saveKey(null)}>
                   Remove key
                 </button>
+              </Row>
+              <Row label="Model" hint="For writing and answering. Empty is the default.">
+                <input class="set-model" value={ai()!.model} aria-label="Model" onChange={(e) => void saveModels(e.currentTarget.value, ai()!.fastModel)} />
+              </Row>
+              <Row label="Fast model" hint="For small jobs: a title, tidying, a list, where a capture goes, related notes.">
+                <input class="set-model" value={ai()!.fastModel} aria-label="Fast model" onChange={(e) => void saveModels(ai()!.model, e.currentTarget.value)} />
               </Row>
             </Show>
             <Show when={ai()?.error}>

@@ -885,6 +885,14 @@ impl Store {
     }
 
     /// The folders that hold notes, and the folders above them, in tree order.
+    /// How many notes are right in `folder` ("" is the top of the folder).
+    pub fn count_notes_in(&self, folder: &str) -> Result<usize> {
+        let n: i64 =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM notes WHERE folder = ?1", params![folder], |r| r.get(0))?;
+        Ok(n as usize)
+    }
+
     pub fn note_folders(&self) -> Result<Vec<NoteFolder>> {
         let counts: Vec<(String, i64)> = self
             .conn

@@ -144,7 +144,37 @@ export interface DesktopSettings {
 export interface AiStatus {
   ready: boolean;
   model: string;
+  /** For small jobs: a title, tidying, a list, where a capture goes. */
+  fastModel: string;
   error: string | null;
+}
+
+export interface SidebarCounts {
+  folders: NoteFolder[];
+  /** Notes at the top of the folder. */
+  loose: number;
+  inbox: number;
+  tasks: number;
+}
+
+/** What one AI call used. */
+export interface AiUsage {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+}
+
+/** A reply shown as it is written; `aiCancel(id)` stops it. */
+export interface AiLive {
+  id: string;
+  /** The whole text so far, each time a piece arrives. */
+  onText: (soFar: string) => void;
+}
+
+export function aiLive(onText: (soFar: string) => void): AiLive {
+  return { id: `ai-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`, onText };
 }
 
 export type AiTask =
@@ -171,6 +201,7 @@ export interface AiAnswer {
   sources: AiSource[];
   /** Every note the answer was given from: a follow-up asks the same ones. */
   read: number[];
+  usage: AiUsage | null;
 }
 
 /** One question and its answer, sent back with a follow-up. */
@@ -276,6 +307,10 @@ export interface Api {
   /** By the words in the text. */
   searchNotes(text: string, limit: number): Promise<NoteSummary[]>;
   noteFolders(): Promise<NoteFolder[]>;
+  /** The sidebar's counts in one call. */
+  sidebarCounts(): Promise<SidebarCounts>;
+  /** Several notes whole, in one call. */
+  peekNotes(ids: number[]): Promise<Note[]>;
   openNote(id: number): Promise<Note>;
   peekNote(id: number): Promise<Note>;
   createNote(folder: string, title: string, body: string, tags: string[]): Promise<Note>;
@@ -333,6 +368,8 @@ export interface Api {
 
   aiStatus(): Promise<AiStatus>;
   setAiKey(key: string | null): Promise<AiStatus>;
+  setAiModels(model: string, fastModel: string): Promise<AiStatus>;
+  aiCancel(id: string): Promise<void>;
 
   syncStatus(): Promise<SyncStatus>;
   syncSetup(clientId: string, clientSecret: string): Promise<SyncStatus>;
@@ -348,9 +385,9 @@ export interface Api {
     context?: string;
     instruction?: string;
     noteId?: number;
-  }): Promise<string>;
+  }, live?: AiLive): Promise<{ text: string; usage: AiUsage }>;
   /** With `earlier` and `notes`, a follow-up: the same notes, the talk so far. */
-  aiAsk(question: string, earlier?: AiExchange[], notes?: number[]): Promise<AiAnswer>;
+  aiAsk(question: string, earlier?: AiExchange[], notes?: number[], live?: AiLive): Promise<AiAnswer>;
   aiSuggestHome(noteId: number): Promise<AiSuggestion[]>;
   aiRelated(noteId: number): Promise<AiRelated[]>;
   /** A few sentences on the notes changed between two moments. */
@@ -404,6 +441,8 @@ async function tauriApi(): Promise<Api> {
     findNotes: (text, limit) => invoke("find_notes", { text, limit }),
     searchNotes: (text, limit) => invoke("search_notes", { text, limit }),
     noteFolders: () => invoke("note_folders"),
+    sidebarCounts: () => invoke("sidebar_counts"),
+    peekNotes: (ids) => invoke("peek_notes", { ids }),
     openNote: (id) => invoke("open_note", { id }),
     peekNote: (id) => invoke("peek_note", { id }),
     createNote: (folder, title, body, tags) => invoke("create_note", { folder, title, body, tags }),
@@ -451,6 +490,8 @@ async function tauriApi(): Promise<Api> {
 
     aiStatus: () => invoke("ai_status"),
     setAiKey: (key) => invoke("set_ai_key", { key }),
+    setAiModels: (model, fastModel) => invoke("set_ai_models", { model, fastModel }),
+    aiCancel: (id) => invoke("ai_cancel", { id }),
     syncStatus: () => invoke("sync_status"),
     syncSetup: (clientId, clientSecret) => invoke("sync_setup", { clientId, clientSecret }),
     syncSignIn: () => invoke("sync_sign_in"),
@@ -461,12 +502,30 @@ async function tauriApi(): Promise<Api> {
       const { listen } = await import("@tauri-apps/api/event");
       await listen<SyncStatus>("petrel-sync", (e) => run(e.payload));
     },
-    aiWrite: (o) => invoke("ai_write", { ...o }),
-    aiAsk: (question, earlier, notes) => invoke("ai_ask", { question, earlier: earlier ?? null, notes: notes ?? null }),
+    aiWrite: (o, live) => streamed(live, () => invoke("ai_write", { ...o, streamId: live?.id ?? null })),
+    aiAsk: (question, earlier, notes, live) =>
+      streamed(live, () => invoke("ai_ask", { question, earlier: earlier ?? null, notes: notes ?? null, streamId: live?.id ?? null })),
     aiSuggestHome: (noteId) => invoke("ai_suggest_home", { noteId }),
     aiRelated: (noteId) => invoke("ai_related", { noteId }),
     aiWeek: (from, to) => invoke("ai_week", { from, to }),
   };
+}
+
+/** Runs an AI call while passing its pieces of text to `live` as they come. */
+async function streamed<T>(live: AiLive | undefined, call: () => Promise<T>): Promise<T> {
+  if (!live) return call();
+  const { listen } = await import("@tauri-apps/api/event");
+  let soFar = "";
+  const stop = await listen<{ id: string; text: string }>("petrel-ai", (e) => {
+    if (e.payload.id !== live.id) return;
+    soFar += e.payload.text;
+    live.onText(soFar);
+  });
+  try {
+    return await call();
+  } finally {
+    stop();
+  }
 }
 
 let cached: Promise<Api> | undefined;

@@ -12,6 +12,8 @@ export interface Preview {
   text: string | null;
   error: string | null;
   label: string;
+  /** What has arrived so far, while Claude is still writing. */
+  partial?: string;
 }
 
 export const setPreview = StateEffect.define<Preview | null>();
@@ -30,7 +32,7 @@ class Suggestion extends WidgetType {
     super();
   }
   eq(o: Suggestion) {
-    return o.p.text === this.p.text && o.p.error === this.p.error && o.p.label === this.p.label;
+    return o.p.text === this.p.text && o.p.error === this.p.error && o.p.label === this.p.label && o.p.partial === this.p.partial;
   }
   toDOM() {
     const box = document.createElement("div");
@@ -46,7 +48,8 @@ class Suggestion extends WidgetType {
       body.textContent = this.p.error;
     } else if (this.p.text === null) {
       body.classList.add("ai-thinking");
-      body.textContent = "Claude is writing…";
+      if (this.p.partial) body.classList.add("ai-streaming");
+      body.textContent = this.p.partial || "Claude is writing…";
     } else {
       body.textContent = this.p.text;
     }

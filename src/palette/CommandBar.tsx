@@ -4,8 +4,8 @@
 // `this week`, `has:link`, `has:picture`, `has:task` (palette/filters.ts). After an answer, Tab asks again: the
 // follow-up goes with the earlier answers and the same notes, and Ctrl Enter keeps the whole exchange as a note.
 
-import { createEffect, createResource, createSignal, For, onMount, Show } from "solid-js";
-import { api, errText, type AiAnswer, type AiSource, type NoteSummary } from "../api";
+import { createEffect, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { aiLive, api, errText, type AiAnswer, type AiSource, type NoteSummary } from "../api";
 import { answerHtml } from "../copy";
 import { ago, folderName, Kbd, say } from "../ui";
 import { keep, noFilters, parseFilters } from "./filters";
@@ -24,6 +24,9 @@ const escapeRe = (w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 type Row = { kind: "ask" } | { kind: "note"; n: NoteSummary } | { kind: "command"; c: Command };
 
+/** An answer still being written, without the `Sources:` line it ends with. */
+const unsourced = (t: string) => t.replace(/\n\s*\**Sources:[\s\S]*$/, "");
+
 export default function CommandBar(p: {
   commands: Command[];
   notesOnly?: boolean;
@@ -41,6 +44,13 @@ export default function CommandBar(p: {
   const [q, setQ] = createSignal("");
   const [i, setI] = createSignal(0);
   const [answer, setAnswer] = createSignal<AiAnswer | "loading" | null>(null);
+  /** The answer as it is written. */
+  const [partial, setPartial] = createSignal("");
+  /** The answer being written now; closing the bar stops it. */
+  let running: string | null = null;
+  onCleanup(() => {
+    if (running) void api().then((a) => a.aiCancel(running!));
+  });
   const [asked, setAsked] = createSignal("");
   /** The questions answered before the latest one, in this exchange. */
   const [thread, setThread] = createSignal<{ question: string; answer: AiAnswer }[]>([]);
@@ -153,11 +163,17 @@ export default function CommandBar(p: {
     setThread([]);
     setFollowing(false);
     setAnswer("loading");
+    const live = aiLive(setPartial);
+    running = live.id;
+    setPartial("");
     try {
-      setAnswer(await (await api()).aiAsk(question));
+      setAnswer(await (await api()).aiAsk(question, undefined, undefined, live));
     } catch (e) {
       setAnswer(null);
-      say(errText(e), { error: true });
+      if (running === live.id) say(errText(e), { error: true });
+    } finally {
+      if (running === live.id) running = null;
+      setPartial("");
     }
   }
 
@@ -175,11 +191,15 @@ export default function CommandBar(p: {
     const all = turns();
     const notes = [...new Set(all.flatMap((t) => t.answer.read ?? t.answer.sources.map((s) => s.id)))];
     setMoreLoading(true);
+    const live = aiLive(setPartial);
+    running = live.id;
+    setPartial("");
     try {
       const next = await (await api()).aiAsk(
         question,
         all.map((t) => ({ question: t.question, answer: t.answer.answer })),
         notes,
+        live,
       );
       setThread(all);
       setAsked(question);
@@ -188,6 +208,8 @@ export default function CommandBar(p: {
     } catch (e) {
       say(errText(e), { error: true });
     } finally {
+      if (running === live.id) running = null;
+      setPartial("");
       setMoreLoading(false);
     }
   }
@@ -352,7 +374,14 @@ export default function CommandBar(p: {
               if (t?.dataset.title) void openCited(t.dataset.title);
             }}
           >
-            <Show when={answer() !== "loading"} fallback={<p class="ai-thinking">Claude is reading your notes…</p>}>
+            <Show
+              when={answer() !== "loading"}
+              fallback={
+                <Show when={partial()} fallback={<p class="ai-thinking">Claude is reading your notes…</p>}>
+                  <div class="answer-text streaming" innerHTML={answerHtml(unsourced(partial()))} />
+                </Show>
+              }
+            >
               {(() => {
                 const a = answer() as AiAnswer;
                 return (
@@ -369,6 +398,10 @@ export default function CommandBar(p: {
                       <p class="answer-q">{asked()}</p>
                     </Show>
                     <div class="answer-text" innerHTML={answerHtml(a.answer)} />
+                    <Show when={moreLoading() && partial()}>
+                      <p class="answer-q">{more()}</p>
+                      <div class="answer-text streaming" innerHTML={answerHtml(unsourced(partial()))} />
+                    </Show>
                     <Show when={following()}>
                       <form
                         class="answer-more"

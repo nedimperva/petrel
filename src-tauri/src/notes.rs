@@ -1,5 +1,6 @@
 //! The notes commands (docs/design/notes.md). Same shape as `commands.rs`: the store does the work, these
-//! translate errors. File reads and writes are small and local, so they run on the command thread like a save.
+//! translate errors. They are `async` so Tauri runs them off the main thread: a scan of a big folder or a
+//! save while Drive holds a file never stalls the window.
 
 use std::path::{Path, PathBuf};
 
@@ -35,20 +36,24 @@ pub struct NotesInfo {
 }
 
 #[tauri::command]
-pub fn notes_info(state: State<AppState>) -> R<NotesInfo> {
+pub async fn notes_info(state: State<'_, AppState>) -> R<NotesInfo> {
     let default = default_root(&state.db_path);
     with(&state, |s| Ok(NotesInfo { root: s.notes_root_or(&default)?.display().to_string() }))
 }
 
 #[tauri::command]
-pub fn set_notes_root(app: tauri::AppHandle, state: State<AppState>, root: String) -> R<ScanReport> {
+pub async fn set_notes_root(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    root: String,
+) -> R<ScanReport> {
     let report = with(&state, |s| s.set_notes_root(Path::new(&root)))?;
     crate::watch::start(&app, Path::new(&root));
     Ok(report)
 }
 
 #[tauri::command]
-pub fn scan_notes(state: State<AppState>) -> R<ScanReport> {
+pub async fn scan_notes(state: State<'_, AppState>) -> R<ScanReport> {
     let default = default_root(&state.db_path);
     with(&state, |s| {
         let root = s.notes_root_or(&default)?;
@@ -60,38 +65,69 @@ pub fn scan_notes(state: State<AppState>) -> R<ScanReport> {
 }
 
 #[tauri::command]
-pub fn list_notes(state: State<AppState>, query: NoteQuery) -> R<Vec<NoteSummary>> {
+pub async fn list_notes(state: State<'_, AppState>, query: NoteQuery) -> R<Vec<NoteSummary>> {
     with(&state, |s| s.list_notes(&query))
 }
 
 #[tauri::command]
-pub fn find_notes(state: State<AppState>, text: String, limit: usize) -> R<Vec<NoteSummary>> {
+pub async fn find_notes(state: State<'_, AppState>, text: String, limit: usize) -> R<Vec<NoteSummary>> {
     with(&state, |s| s.find_notes(&text, limit.min(200)))
 }
 
 #[tauri::command]
-pub fn search_notes(state: State<AppState>, text: String, limit: usize) -> R<Vec<NoteSummary>> {
+pub async fn search_notes(state: State<'_, AppState>, text: String, limit: usize) -> R<Vec<NoteSummary>> {
     with(&state, |s| s.search_notes(&text, limit.min(200)))
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SidebarCounts {
+    folders: Vec<NoteFolder>,
+    /// Notes at the top of the folder.
+    loose: usize,
+    inbox: usize,
+    tasks: usize,
+}
+
+/// Everything the sidebar counts, in one call: it is drawn again after every change.
 #[tauri::command]
-pub fn note_folders(state: State<AppState>) -> R<Vec<NoteFolder>> {
+pub async fn sidebar_counts(state: State<'_, AppState>) -> R<SidebarCounts> {
+    with(&state, |s| {
+        let folders = s.note_folders()?;
+        let in_folder = |f: &str| s.count_notes_in(f);
+        Ok(SidebarCounts {
+            loose: in_folder("")?,
+            inbox: in_folder("inbox")?,
+            tasks: s.open_tasks()?.len(),
+            folders,
+        })
+    })
+}
+
+/// Several notes whole, in one call (the library reads its prompts and snippets this way).
+#[tauri::command]
+pub async fn peek_notes(state: State<'_, AppState>, ids: Vec<i64>) -> R<Vec<Note>> {
+    with(&state, |s| Ok(ids.iter().filter_map(|&id| s.peek_note(id).ok()).collect()))
+}
+
+#[tauri::command]
+pub async fn note_folders(state: State<'_, AppState>) -> R<Vec<NoteFolder>> {
     with(&state, |s| s.note_folders())
 }
 
 #[tauri::command]
-pub fn open_note(state: State<AppState>, id: i64) -> R<Note> {
+pub async fn open_note(state: State<'_, AppState>, id: i64) -> R<Note> {
     with(&state, |s| s.note(id))
 }
 
 #[tauri::command]
-pub fn peek_note(state: State<AppState>, id: i64) -> R<Note> {
+pub async fn peek_note(state: State<'_, AppState>, id: i64) -> R<Note> {
     with(&state, |s| s.peek_note(id))
 }
 
 #[tauri::command]
-pub fn create_note(
-    state: State<AppState>,
+pub async fn create_note(
+    state: State<'_, AppState>,
     folder: String,
     title: String,
     body: String,
@@ -101,33 +137,33 @@ pub fn create_note(
 }
 
 #[tauri::command]
-pub fn save_note(state: State<AppState>, id: i64, body: String, base_hash: String) -> R<SavedNote> {
+pub async fn save_note(state: State<'_, AppState>, id: i64, body: String, base_hash: String) -> R<SavedNote> {
     with(&state, |s| s.save_note(id, &body, &base_hash))
 }
 
 #[tauri::command]
-pub fn rename_note(state: State<AppState>, id: i64, title: String) -> R<NoteChange> {
+pub async fn rename_note(state: State<'_, AppState>, id: i64, title: String) -> R<NoteChange> {
     with(&state, |s| s.rename_note(id, &title))
 }
 
 #[tauri::command]
-pub fn pin_note(state: State<AppState>, id: i64, pinned: bool) -> R<Note> {
+pub async fn pin_note(state: State<'_, AppState>, id: i64, pinned: bool) -> R<Note> {
     with(&state, |s| s.set_note_pinned(id, pinned))
 }
 
 #[tauri::command]
-pub fn set_note_tags(state: State<AppState>, id: i64, tags: Vec<String>) -> R<Note> {
+pub async fn set_note_tags(state: State<'_, AppState>, id: i64, tags: Vec<String>) -> R<Note> {
     with(&state, |s| s.set_note_tags(id, &tags))
 }
 
 #[tauri::command]
-pub fn trash_note(state: State<AppState>, id: i64) -> R<UndoToken> {
+pub async fn trash_note(state: State<'_, AppState>, id: i64) -> R<UndoToken> {
     with(&state, |s| s.trash_note(id))
 }
 
 /// A new capture: a file in `inbox/`. The capture window calls this on the first keystroke, then saves.
 #[tauri::command]
-pub fn capture_note(state: State<AppState>, body: String) -> R<Note> {
+pub async fn capture_note(state: State<'_, AppState>, body: String) -> R<Note> {
     let default = default_root(&state.db_path);
     with(&state, |s| {
         let root = s.notes_root_or(&default)?;
@@ -138,81 +174,84 @@ pub fn capture_note(state: State<AppState>, body: String) -> R<Note> {
 
 /// Files a note somewhere else (the inbox's `m` and Enter): another folder, a new title, or both.
 #[tauri::command]
-pub fn move_note(state: State<AppState>, id: i64, folder: String, title: String) -> R<NoteChange> {
+pub async fn move_note(state: State<'_, AppState>, id: i64, folder: String, title: String) -> R<NoteChange> {
     with(&state, |s| s.move_note(id, &folder, &title))
 }
 
 /// Adds a capture to the end of a note and puts the capture in the trash.
 #[tauri::command]
-pub fn merge_note(state: State<AppState>, from: i64, into: i64) -> R<NoteChange> {
+pub async fn merge_note(state: State<'_, AppState>, from: i64, into: i64) -> R<NoteChange> {
     with(&state, |s| s.merge_note(from, into))
 }
 
 #[tauri::command]
-pub fn undo_note(state: State<AppState>, token: String) -> R<usize> {
+pub async fn undo_note(state: State<'_, AppState>, token: String) -> R<usize> {
     with(&state, |s| s.undo(&token))
 }
 
 #[tauri::command]
-pub fn note_versions(state: State<AppState>, id: i64) -> R<Vec<NoteVersion>> {
+pub async fn note_versions(state: State<'_, AppState>, id: i64) -> R<Vec<NoteVersion>> {
     with(&state, |s| s.note_versions(id))
 }
 
 #[tauri::command]
-pub fn note_version_text(state: State<AppState>, version_id: i64) -> R<String> {
+pub async fn note_version_text(state: State<'_, AppState>, version_id: i64) -> R<String> {
     with(&state, |s| s.note_version_text(version_id))
 }
 
 #[tauri::command]
-pub fn restore_note_version(state: State<AppState>, id: i64, version_id: i64) -> R<Note> {
+pub async fn restore_note_version(state: State<'_, AppState>, id: i64, version_id: i64) -> R<Note> {
     with(&state, |s| s.restore_note_version(id, version_id))
 }
 
 /// Counts a copy from a collection, so its most used items come first; `app` is the app in front of the picker.
 #[tauri::command]
-pub fn record_copy(state: State<AppState>, id: i64, app: Option<String>) -> R<i64> {
+pub async fn record_copy(state: State<'_, AppState>, id: i64, app: Option<String>) -> R<i64> {
     with(&state, |s| s.record_copy(id, app.as_deref()))
 }
 
 /// What the picker copied with this app in front, by path.
 #[tauri::command]
-pub fn copy_counts_in(state: State<AppState>, app: String) -> R<std::collections::HashMap<String, i64>> {
+pub async fn copy_counts_in(
+    state: State<'_, AppState>,
+    app: String,
+) -> R<std::collections::HashMap<String, i64>> {
     with(&state, |s| s.copy_counts_in(&app))
 }
 
 /// Every unticked task, for the Ctrl K tasks page.
 #[tauri::command]
-pub fn open_tasks(state: State<AppState>) -> R<Vec<OpenTask>> {
+pub async fn open_tasks(state: State<'_, AppState>) -> R<Vec<OpenTask>> {
     with(&state, |s| s.open_tasks())
 }
 
 /// Ticks one task in its file.
 #[tauri::command]
-pub fn tick_task(state: State<AppState>, id: i64, line: usize, text: String) -> R<UndoToken> {
+pub async fn tick_task(state: State<'_, AppState>, id: i64, line: usize, text: String) -> R<UndoToken> {
     with(&state, |s| s.tick_task(id, line, &text))
 }
 
 /// A new collection from the sidebar (`Recipes`, or `Travel/Mostar` inside one).
 #[tauri::command]
-pub fn create_folder(state: State<AppState>, folder: String) -> R<String> {
+pub async fn create_folder(state: State<'_, AppState>, folder: String) -> R<String> {
     with(&state, |s| s.create_folder(&folder))
 }
 
 /// Renames a collection in place; returns its new path.
 #[tauri::command]
-pub fn rename_folder(state: State<AppState>, folder: String, name: String) -> R<String> {
+pub async fn rename_folder(state: State<'_, AppState>, folder: String, name: String) -> R<String> {
     with(&state, |s| s.rename_folder(&folder, &name))
 }
 
 /// Moves a collection and its notes to `.trash/`; returns how many notes went.
 #[tauri::command]
-pub fn trash_folder(state: State<AppState>, folder: String) -> R<usize> {
+pub async fn trash_folder(state: State<'_, AppState>, folder: String) -> R<usize> {
     with(&state, |s| s.trash_folder(&folder))
 }
 
 /// "Show in the folder": the file manager, on the collection.
 #[tauri::command]
-pub fn reveal_folder(app: tauri::AppHandle, state: State<AppState>, folder: String) -> R<()> {
+pub async fn reveal_folder(app: tauri::AppHandle, state: State<'_, AppState>, folder: String) -> R<()> {
     use tauri_plugin_opener::OpenerExt;
     let default = default_root(&state.db_path);
     let root = with(&state, |s| s.notes_root_or(&default))?;
@@ -222,73 +261,78 @@ pub fn reveal_folder(app: tauri::AppHandle, state: State<AppState>, folder: Stri
 
 /// Notes with a conflict copy beside them.
 #[tauri::command]
-pub fn conflicts(state: State<AppState>) -> R<Vec<Conflict>> {
+pub async fn conflicts(state: State<'_, AppState>) -> R<Vec<Conflict>> {
     with(&state, |s| s.conflicts())
 }
 
 /// `keep`: `left`, `right` or `both`.
 #[tauri::command]
-pub fn settle_conflict(state: State<AppState>, original: i64, copy: i64, keep: String) -> R<UndoToken> {
+pub async fn settle_conflict(
+    state: State<'_, AppState>,
+    original: i64,
+    copy: i64,
+    keep: String,
+) -> R<UndoToken> {
     with(&state, |s| s.settle_conflict(original, copy, &keep))
 }
 
 #[tauri::command]
-pub fn copy_counts(state: State<AppState>) -> R<std::collections::HashMap<String, i64>> {
+pub async fn copy_counts(state: State<'_, AppState>) -> R<std::collections::HashMap<String, i64>> {
     with(&state, |s| s.copy_counts())
 }
 
 #[tauri::command]
-pub fn link_targets(state: State<AppState>, text: String, limit: usize) -> R<Vec<LinkTarget>> {
+pub async fn link_targets(state: State<'_, AppState>, text: String, limit: usize) -> R<Vec<LinkTarget>> {
     with(&state, |s| s.link_targets(&text, limit.min(50)))
 }
 
 #[tauri::command]
-pub fn resolve_link(state: State<AppState>, inner: String) -> R<Resolved> {
+pub async fn resolve_link(state: State<'_, AppState>, inner: String) -> R<Resolved> {
     with(&state, |s| s.resolve_link(&inner))
 }
 
 #[tauri::command]
-pub fn backlinks(state: State<AppState>, id: i64) -> R<Backlinks> {
+pub async fn backlinks(state: State<'_, AppState>, id: i64) -> R<Backlinks> {
     with(&state, |s| s.backlinks(id))
 }
 
 #[tauri::command]
-pub fn link_mention(state: State<AppState>, note_id: i64, kind: String, id: i64) -> R<UndoToken> {
+pub async fn link_mention(state: State<'_, AppState>, note_id: i64, kind: String, id: i64) -> R<UndoToken> {
     with(&state, |s| s.link_mention(note_id, &kind, id))
 }
 
 /// Today's page, or any day's (`YYYY-MM-DD`). None when the day has no page yet.
 #[tauri::command]
-pub fn day_note(state: State<AppState>, date: String) -> R<Option<Note>> {
+pub async fn day_note(state: State<'_, AppState>, date: String) -> R<Option<Note>> {
     with(&state, |s| s.day_note(&date))
 }
 
 /// Files a capture onto a day's page, under the time.
 #[tauri::command]
-pub fn file_into_day(state: State<AppState>, id: i64, date: String) -> R<NoteChange> {
+pub async fn file_into_day(state: State<'_, AppState>, id: i64, date: String) -> R<NoteChange> {
     with(&state, |s| s.file_into_day(id, &date))
 }
 
 /// `has:link`, `has:picture`, `has:task` in Ctrl K.
 #[tauri::command]
-pub fn notes_having(state: State<AppState>, what: String) -> R<Vec<i64>> {
+pub async fn notes_having(state: State<'_, AppState>, what: String) -> R<Vec<i64>> {
     with(&state, |s| s.notes_having(&what))
 }
 
 /// What "the week" reads, and what the week's page counts and lists without AI.
 #[tauri::command]
-pub fn notes_between(state: State<AppState>, from: i64, to: i64) -> R<Vec<Note>> {
+pub async fn notes_between(state: State<'_, AppState>, from: i64, to: i64) -> R<Vec<Note>> {
     with(&state, |s| s.notes_between(from, to))
 }
 
 #[tauri::command]
-pub fn topic_faces(state: State<AppState>) -> R<std::collections::HashMap<String, TopicFace>> {
+pub async fn topic_faces(state: State<'_, AppState>) -> R<std::collections::HashMap<String, TopicFace>> {
     with(&state, |s| s.topic_faces())
 }
 
 #[tauri::command]
-pub fn set_topic_face(
-    state: State<AppState>,
+pub async fn set_topic_face(
+    state: State<'_, AppState>,
     top: String,
     color: String,
     mark: String,
@@ -300,7 +344,7 @@ pub fn set_topic_face(
 /// A pasted picture, sent as raw bytes (a JSON array would be several times bigger). The folder and the file
 /// name come in headers, percent-encoded: a header carries ASCII only.
 #[tauri::command]
-pub fn save_attachment(state: State<AppState>, request: tauri::ipc::Request<'_>) -> R<String> {
+pub async fn save_attachment(state: State<'_, AppState>, request: tauri::ipc::Request<'_>) -> R<String> {
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
         return Err("the picture did not arrive as bytes".into());
     };
@@ -314,7 +358,7 @@ pub fn save_attachment(state: State<AppState>, request: tauri::ipc::Request<'_>)
 
 /// A picture's bytes, to show on the page.
 #[tauri::command]
-pub fn attachment(state: State<AppState>, folder: String, link: String) -> R<tauri::ipc::Response> {
+pub async fn attachment(state: State<'_, AppState>, folder: String, link: String) -> R<tauri::ipc::Response> {
     with(&state, |s| s.attachment(&folder, &link)).map(tauri::ipc::Response::new)
 }
 

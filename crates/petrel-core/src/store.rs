@@ -1484,6 +1484,8 @@ impl Store {
         let thinned =
             tx.execute("DELETE FROM versions WHERE id IN rarray(?1)", params![id_array(&doomed)])?;
         tx.commit()?;
+        // Note histories thin the same way. A note whose folder is gone keeps its index rows until it is seen.
+        let thinned = thinned + self.thin_note_histories().unwrap_or(0);
         Ok(SweepReport { tombstoned, purged, tags_removed: tags, versions_thinned: thinned })
     }
 
