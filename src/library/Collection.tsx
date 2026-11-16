@@ -5,7 +5,7 @@
 
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 import type { NoteSummary } from "../api";
-import { blanks } from "../blanks";
+import CardText, { plain } from "./CardText";
 import { loadUsed, type Used } from "../collection/lastUsed";
 import { ago, folderName, KeyHints, typing, undoLast } from "../ui";
 import { kindOf } from "./Card";
@@ -18,16 +18,7 @@ type Order = "use" | "new" | "az" | "tasks";
 const openTasks = (n: NoteSummary) => tasksOf(n.id);
 const words = (n: NoteSummary) => (n.preview.match(/[\p{L}\p{N}]+/gu) ?? []).length;
 
-/** A preview without Markdown marks, for a card. */
-export const plain = (s: string) =>
-  s
-    .replace(/^#+\s+/gm, "")
-    .replace(/^\s*[-*] \[[ xX]\]\s*/gm, "")
-    .replace(/^\s*[-*>]\s+/gm, "")
-    .replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_m, t: string, l?: string) => l ?? t)
-    .replace(/[*_`]/g, "")
-    .replace(/\s*\n+\s*/g, " ")
-    .trim();
+export { plain } from "./CardText";
 
 /** A card's date: the weekday this week, else "11 Nov". */
 export function shortDay(ms: number): string {
@@ -41,6 +32,7 @@ export default function Collection(p: {
   notes: NoteSummary[];
   copies: Record<string, number>;
   versions: Record<number, number>;
+  firstVersion: Record<number, string>;
   onCopy(n: NoteSummary): void;
   onRead(id: number): void;
   onEdit(id: number): void;
@@ -259,19 +251,12 @@ export default function Collection(p: {
                     </Show>
                     <Show when={p.versions[n.id]}>{(v) => <span class="ccard-badge">{v()} versions</span>}</Show>
                   </span>
-                  <Show when={code()} fallback={<span class="ccard-text serif">{plain(n.preview.replace(/\{\{([^}|]+)(\|[^}]*)?\}\}/g, "$1"))}</span>}>
-                    <span class="ccard-code">{n.preview.replace(/\n+$/, "")}</span>
-                  </Show>
-                  <Show when={!code() && blanks(n.preview).length}>
-                    <span class="ccard-blanks">
-                      <For each={blanks(n.preview).slice(0, 4)}>{(b) => <span class="blank-chip">{b.name}</span>}</For>
-                    </span>
-                  </Show>
+                  <CardText class={code() ? "ccard-code" : "ccard-text serif"} code={code()} text={p.firstVersion[n.id] ?? n.preview} />
                   <span class="ccard-foot">
                     <Show when={uses(n)}>
-                      <b>{uses(n)}×</b>
+                      <span class="uses">{uses(n)}×</span>
                     </Show>
-                    <span class="ccard-used">{lastUse(n) || (uses(n) ? "" : "not used yet")}</span>
+                    <span class="ccard-used">{lastUse(n)}</span>
                     <span class="grow" />
                     <Show when={on()}>
                       <span class="ccard-go">

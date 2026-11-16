@@ -7,6 +7,19 @@ keys; `docs/design/petrel.md` is the design; this file covers state and decision
 
 ## Where things stand (2026-11-11, night)
 
+- **Polish and Drive sync (owner asked 2026-11-14, page https://claude.ai/artifact/HTT8hZAXAQUPnkBXeDwzJW), branch
+  `claude/project-thread-8gux00`:** all 12 polish items: the capture window and the picker are warm (`src-tauri/src/
+  warm.rs`, `src/warm.ts`: made once, hidden on Esc, the page reloads itself to wait), each window loads only its
+  own screens, Ctrl K opens on notes, every key label comes from `keyLabel` in `src/keys.ts`, cards share
+  `src/library/CardText.tsx`, a new collection from `@` takes Enter twice. Google Drive sync, built in: the engine
+  is `crates/petrel-core/src/sync.rs` (three-way per file against the last synced md5, state in
+  `<data dir>/sync-<hash>.json`, conflicts as `Title (conflict …)` copies), Drive is `src-tauri/src/drive.rs`
+  (`drive.file` scope, `My Drive/Petrel`, changes.list page token), sign-in `src-tauri/src/google.rs` (loopback +
+  PKCE; refresh token and client secret in the keyring), the loop `src-tauri/src/sync.rs`, UI
+  `src/settings/SyncSection.tsx` and the sidebar foot. Note versions are also files in `<folder>/.history/<stem>/`
+  (`notes/history.rs`) so Ctrl H syncs. The owner makes his own Google Cloud client. Tried against a stand-in Drive
+  (`src-tauri/tests/fake_drive.py`), not yet against Google.
+
 - **Coherence pass (owner asked 2026-11-11), branch `claude/project-thread-4an9hg`, PR to `main`:** the model and
   the key grammar are at the top of `docs/design/petrel.md` (write, find, copy; three kinds of screen; one meaning
   per key). Collections are pages or things to copy (`copy: yes|no` in `.petrel`, `toCopy` in
@@ -18,8 +31,8 @@ keys; `docs/design/petrel.md` is the design; this file covers state and decision
 - **Settings and keys (owner asked 2026-11-12), same branch:** Settings is a screen of its own with categories
   (`src/settings/Settings.tsx`); every shortcut is in `src/keys.ts` with Windows and Linux defaults, changeable in
   Settings › Keys for this computer only (`ui.keys`; on Wayland the global ones show a Hyprland `bind` line to copy);
-  `Ctrl /` or `?` shows them all (`src/Shortcuts.tsx`). The margin always shows its sections, with empty states, and
-  the links going out of the note. hypr.rs also matches a window by `initialTitle`.
+  `Ctrl /` or `?` shows them all (`src/Shortcuts.tsx`). The margin shows only what the note has (headings, links out, links in);
+  a new page is only the page (owner, 2026-11-14). hypr.rs also matches a window by `initialTitle`.
 - **The next look (owner approved 2026-11-11, canvas https://claude.ai/artifact/6YTYsvgRztVuzNvHvFP2GS, margin
   wider than drawn), same branch:** the sidebar (`src/Sidebar.tsx`: collections made, renamed, trashed through
   `Store::create_folder`/`rename_folder`/`trash_folder` in `crates/petrel-core/src/notes/folders.rs`), the right

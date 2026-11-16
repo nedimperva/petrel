@@ -72,6 +72,19 @@ export type KeyMap = Partial<Record<Platform, Record<string, string>>>;
 const [custom, setCustom] = createSignal<KeyMap>({});
 export { custom as customKeys, setCustom as setCustomKeys };
 
+/** The global hotkeys as the system has them (Windows registers them; Settings may have changed them). Unset where
+ * the compositor binds them (Hyprland), so the key list's own default is shown. */
+const [systemKeys, setSystemKeys] = createSignal<Partial<Record<"capture" | "picker", string | null>>>({});
+export { setSystemKeys };
+
+/** A shortcut as the screen shows it (`Ctrl K`), never typed by hand: it follows Settings › Keys. */
+export function keyLabel(id: string): string {
+  const s = SHORTCUTS.find((x) => x.id === id);
+  const sys = s?.global ? systemKeys()[s.global] : undefined;
+  const k = sys === undefined ? keyOf(id) : (sys ?? "");
+  return k.replace(/\+(?=.)/g, " ");
+}
+
 /** The key for a shortcut on a system: the owner's, else the default. */
 export function keyOf(id: string, on: Platform = platform, map: KeyMap = custom()): string {
   const s = SHORTCUTS.find((x) => x.id === id);

@@ -10,6 +10,8 @@ import FacePicker from "./library/FacePicker";
 import Mark, { faces, loadFaces, saveFace } from "./library/Mark";
 import { toCopy } from "./library/faces";
 import { folderName, Kbd, say } from "./ui";
+import { keyLabel } from "./keys";
+import { syncLine, syncStatus } from "./sync";
 
 export type Place = "today" | "inbox" | "tasks" | "all" | `c:${string}` | null;
 
@@ -48,8 +50,14 @@ export default function Sidebar(p: {
   /** A collection was renamed or trashed: what is open may have moved. */
   onFolderChanged(from: string, to: string | null): void;
   onSettings(): void;
+  /** Settings › Sync. */
+  onSync(): void;
   onClose(): void;
 }) {
+  // "Synced 2 min ago" stays true: the foot is redrawn every half minute.
+  const [tick, setTick] = createSignal(0);
+  const ticker = setInterval(() => setTick((n) => n + 1), 30_000);
+  onCleanup(() => clearInterval(ticker));
   const [data, { refetch }] = createResource(() => p.rev, load);
   const [now, setNow] = createSignal(clock());
   const [renaming, setRenaming] = createSignal<string | null>(null);
@@ -199,7 +207,7 @@ export default function Sidebar(p: {
           <path d="M12 5v14M5 12h14" />
         </svg>
         New note
-        <Kbd keys="Ctrl N" />
+        <Kbd keys={keyLabel("new")} />
       </button>
 
       <div class="side-group">
@@ -264,9 +272,21 @@ export default function Sidebar(p: {
       </div>
 
       <footer class="side-foot">
-        <span class="side-root" title={p.root}>
-          {/google drive|googledrive|my drive/i.test(p.root) ? "Google Drive" : p.root.split(/[\\/]/).filter(Boolean).pop() ?? ""}
-        </span>
+        <Show
+          when={(tick(), syncLine(syncStatus()))}
+          fallback={
+            <span class="side-root" title={p.root}>
+              {/google drive|googledrive|my drive/i.test(p.root) ? "Google Drive" : p.root.split(/[\\/]/).filter(Boolean).pop() ?? ""}
+            </span>
+          }
+        >
+          {(line) => (
+            <button type="button" class={`side-sync ${line().tone}`} title={syncStatus()?.message ?? `${p.root}, synced with Google Drive`} onClick={p.onSync}>
+              <span class="sync-dot" aria-hidden="true" />
+              {line().text}
+            </button>
+          )}
+        </Show>
         <button type="button" class="icon-btn" title="Settings (Ctrl ,)" aria-label="Settings" onClick={p.onSettings}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
             <circle cx="12" cy="12" r="3" />

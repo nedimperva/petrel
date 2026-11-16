@@ -103,7 +103,8 @@ const markdownHighlight = HighlightStyle.define([
   { tag: tags.url, color: "var(--accent)" },
   { tag: tags.monospace, fontFamily: "var(--font-mono)" },
   { tag: tags.quote, color: "var(--ink-2)" },
-  { tag: tags.processingInstruction, color: "var(--faint)" },
+  // The marks (#, **, >, `) stay quiet so the text reads as text: light and thin, even inside a heading.
+  { tag: tags.processingInstruction, color: "var(--faint)", fontWeight: "400" },
   { tag: tags.meta, color: "var(--faint)" },
   { tag: tags.contentSeparator, color: "var(--faint)" },
 ]);

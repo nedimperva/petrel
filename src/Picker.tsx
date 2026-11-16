@@ -14,6 +14,7 @@ import { applyPrefs, parsePrefs } from "./settings/prefs";
 import { ago, folderName, KeyHints } from "./ui";
 import { loadUsed, type Used } from "./collection/lastUsed";
 import { faces, loadFaces } from "./library/Mark";
+import { rest, whenOpened } from "./warm";
 import { toCopy } from "./library/faces";
 
 export default function Picker() {
@@ -24,7 +25,7 @@ export default function Picker() {
   const [ctx, setCtx] = createSignal<CaptureContext | null>(null);
   const [here, setHere] = createSignal<Record<string, number>>({});
   const [used, setUsed] = createSignal<Used>({});
-  const [data] = createResource(async () => {
+  const [data, { refetch }] = createResource(async () => {
     const s = await api();
     const [all, counts] = await Promise.all([s.listNotes({ limit: 2000 }), s.copyCounts()]);
     return { all: all.filter((n) => n.folder !== "inbox"), counts };
@@ -55,7 +56,13 @@ export default function Picker() {
   };
   const isPage = (n: NoteSummary) => !toCopy(n.folder, faces());
 
-  const close = async () => (await api()).closePicker();
+  const close = async () => {
+    if (closed) return;
+    closed = true;
+    await (await api()).closePicker();
+    rest();
+  };
+  let closed = false;
   const sel = () => rows()[i()];
 
   // The selected card's full text, for its versions.
@@ -102,9 +109,15 @@ export default function Picker() {
   };
 
   onMount(async () => {
-    input?.focus();
     void loadFaces();
+    await whenOpened(start);
+  });
+
+  /** The picker was asked for: the latest notes, the app in front, then show. */
+  async function start() {
+    input?.focus();
     const s = await api();
+    void refetch();
     s.uiSettings().then((m) => applyPrefs(parsePrefs(m)), () => {});
     loadUsed().then(setUsed, () => {});
     await s.showWindow();
@@ -113,7 +126,7 @@ export default function Picker() {
     const c = await s.pickerContext().catch(() => null);
     setCtx(c);
     if (c?.app) setHere(await s.copyCountsIn(c.app).catch(() => ({})));
-  });
+  }
 
   const shown = () => version()?.text ?? sel()?.preview ?? "";
 
@@ -133,11 +146,16 @@ export default function Picker() {
         }
       >
         <div class="palette-field">
-          <span class="spark">⌕</span>
+          <span class="spark picker-glass">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" />
+              <path d="m20 20-3.5-3.5" />
+            </svg>
+          </span>
           <input
             class="palette-input"
             ref={input}
-            placeholder={ctx()?.app ? `Find a prompt, snippet or note to copy into ${ctx()!.app}…` : "Find a prompt, snippet or note to copy…"}
+            placeholder={ctx()?.app ? `Copy into ${ctx()!.app}: find a prompt or snippet…` : "Find a prompt, snippet or note to copy…"}
             value={q()}
             onInput={(e) => (setQ(e.currentTarget.value), setI(0), setVi(0))}
             onKeyDown={key}

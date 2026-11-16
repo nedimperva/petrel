@@ -68,7 +68,12 @@ pub fn quit(app: &tauri::AppHandle) {
     if windows.is_empty() {
         return app.exit(0);
     }
-    for label in windows.keys() {
+    for (label, w) in &windows {
+        // A warm window that is hidden has no text in it; the picker never has.
+        if label == "picker" || (label == "capture" && !w.is_visible().unwrap_or(false)) {
+            let _ = w.destroy();
+            continue;
+        }
         if let Err(e) = app.emit_to(label.as_str(), "petrel-quit", ()) {
             log::warn!("asking {label} to close: {e}");
         }

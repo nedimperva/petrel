@@ -22,11 +22,11 @@ import { parseLinks } from "../notes/parse";
 import { createNoteSaver, type NoteSaver, type SaveState } from "../notes/saver";
 import { prefs } from "../settings/prefs";
 import { wordCount } from "../copy";
-import { folderName, KeyHints, say } from "../ui";
+import { folderName, Kbd, KeyHints, say } from "../ui";
 import { rank } from "../palette/match";
-import { keyOf, matches } from "../keys";
+import { keyLabel, matches } from "../keys";
 
-const chips = (id: string) => keyOf(id).replace(/\+/g, " ");
+const chips = keyLabel;
 import { aiPreview, keepPreview, previewOf, setPreview, type Preview } from "./aiPreview";
 import { currentHeading, outline, type Heading } from "./outline";
 import { EditorView } from "@codemirror/view";
@@ -821,15 +821,16 @@ export default function NotePage(p: Props) {
               <section aria-label="Captured today">
                 <h4>Captured today</h4>
                 <p class="muted small">
-                  {k()} in the inbox. <kbd>Ctrl L</kbd> to file them.
+                  {k()} in the inbox. <Kbd keys={keyLabel("library")} /> to file them.
                 </p>
               </section>
             )}
           </Show>
-          <Show when={!dayPage()}>
+          {/* Only what the note has: a new page is only the page (the shortcuts sheet explains # and [[). */}
+          <Show when={!dayPage() && heads().length}>
             <section aria-label="On this page">
               <h4>On this page</h4>
-              <Show when={heads().length} fallback={<p class="margin-empty">No headings yet. A line that starts with # shows here.</p>}>
+              <Show when={heads().length}>
               <For each={heads()}>
                 {(h, i) => (
                   <button
@@ -846,9 +847,9 @@ export default function NotePage(p: Props) {
               </Show>
             </section>
           </Show>
-          <section aria-label="Links in this note">
-            <h4>Links in this note</h4>
-            <Show when={outLinks().length} fallback={<p class="margin-empty">None yet. Type [[ to link a note.</p>}>
+          <Show when={outLinks().length}>
+            <section aria-label="Links in this note">
+              <h4>Links in this note</h4>
               <For each={outLinks()}>
                 {(l) => (
                   <button class="link-row" onClick={() => void followLink(l)}>
@@ -856,12 +857,6 @@ export default function NotePage(p: Props) {
                   </button>
                 )}
               </For>
-            </Show>
-          </section>
-          <Show when={!hasLinks() && note()}>
-            <section aria-label="Linked from">
-              <h4>Linked from</h4>
-              <p class="margin-empty">Nothing links here yet.</p>
             </section>
           </Show>
           <Show when={hasLinks()}>

@@ -1,4 +1,4 @@
-// The capture window (`petrel --capture`, Ctrl Alt Space): text, and one quiet line under it. The file is made in
+// The capture window (`petrel --capture` or the capture hotkey): text, and one quiet line under it. The file is made in
 // inbox/ on the first keystroke and saved as you type. Text selected in the app you were in comes in as a quote
 // with where it came from. `@recipes`, `@today`, a day (`@fri`, `@nov20`) or a note (`@Groceries`) in the text
 // says where it goes (the list offers places as you type, and the word is taken out); Ctrl K picks a
@@ -8,7 +8,7 @@
 // Keep going: opened again within two minutes of the last capture, the window shows that capture faded and adds
 // the new text under it, in the same file. Ctrl Enter makes the new text a capture of its own instead.
 
-import { autocompletion, type Completion, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
+import { autocompletion, startCompletion, type Completion, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
 import { RangeSetBuilder, StateEffect, StateField, type Extension } from "@codemirror/state";
 import { Decoration, EditorView } from "@codemirror/view";
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
@@ -27,6 +27,7 @@ import { completionTheme } from "./notes/links";
 import { createNoteSaver, type SaveState } from "./notes/saver";
 import { applyPrefs, parsePrefs } from "./settings/prefs";
 import { folderName, KeyHints, say, ToastView } from "./ui";
+import { rest, whenOpened } from "./warm";
 
 /** Opening the window again within this long adds to the last capture. */
 const KEEP_GOING_MS = 2 * 60 * 1000;
@@ -100,7 +101,10 @@ export default function Capture() {
 
   const end = () => (editor ? editor.view.state.field(earlierEnd, false) ?? 0 : 0);
 
-  /** The suggestion list for `#` and `>`: picking one sets where the capture goes and takes the word out. */
+  /** A new collection named once; a second Enter on it makes it. */
+  let armed = "";
+
+  /** The suggestion list for `@`: picking one sets where the capture goes and takes the word out. */
   async function suggest(ctx: CompletionContext): Promise<CompletionResult | null> {
     const line = ctx.state.doc.lineAt(ctx.pos);
     const t = typingToken(line.text.slice(0, ctx.pos - line.from));
@@ -128,7 +132,19 @@ export default function Capture() {
       ...ns.map((n) => ({ label: `@${n.title}`, detail: `add to the end · ${folderName(n.folder)}`, apply: pick({ kind: "note", id: n.id, title: n.title }, n.folder) })),
     ];
     if (w && !folders.some((f) => f.toLowerCase() === w) && !days.length && !ns.length) {
-      options.push({ label: `@${t.word}`, detail: `new collection “${t.word}”`, apply: pick({ kind: "folder", folder: t.word }, t.word) });
+      // A new collection is a new folder: a typo must not make one, so it takes Enter twice.
+      const make = pick({ kind: "folder", folder: t.word }, t.word);
+      const sure = armed === t.word;
+      options.push({
+        label: `@${t.word}`,
+        detail: sure ? `Enter again: new collection “${t.word}”` : `new collection “${t.word}”?`,
+        apply: (view, c, a, b) => {
+          if (armed === t.word) return make(view, c, a, b);
+          armed = t.word;
+          say(`“${t.word}” is not a collection yet. Enter again to make it, or keep typing.`);
+          setTimeout(() => startCompletion(view));
+        },
+      });
     }
     return options.length ? { from, options, filter: false } : null;
   }
@@ -243,6 +259,7 @@ export default function Capture() {
     // A capture left in the inbox can be added to if the window comes back soon.
     await s.setUiSetting(LAST, stays && n ? `${n.id}:${Date.now()}` : "").catch(() => {});
     await s.closeCapture();
+    rest();
   }
 
   const onKey = (e: KeyboardEvent) => {
@@ -285,6 +302,13 @@ export default function Capture() {
       completionTheme,
     ];
     editor.setExtra(extra);
+    void loadFaces();
+    await whenOpened(start);
+  });
+
+  /** The window was asked for: read what was selected and the last capture, then show. */
+  async function start() {
+    if (!editor) return;
     editor.view.focus();
     const s = await api();
     const ctx = s.captureContext().catch(() => null);
@@ -299,7 +323,7 @@ export default function Capture() {
       setEarlier(last.body);
     }
     await s.showWindow();
-    void loadFaces();
+    editor.view.focus();
     places().then((f) => (folders = f), () => {});
     window.addEventListener("keydown", onKey, true);
     const c = await ctx;
@@ -322,7 +346,7 @@ export default function Capture() {
         void done();
       });
     }
-  });
+  }
   onCleanup(() => {
     window.removeEventListener("keydown", onKey, true);
     editor?.destroy();

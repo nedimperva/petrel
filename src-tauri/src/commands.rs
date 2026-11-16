@@ -75,9 +75,7 @@ pub fn show_window(state: State<AppState>, window: tauri::WebviewWindow) {
 #[tauri::command]
 pub fn close_capture(state: State<AppState>, app: tauri::AppHandle) {
     use tauri::Emitter;
-    if let Some(w) = app.get_webview_window("capture") {
-        let _ = w.destroy();
-    }
+    crate::warm::hide(&app, "capture");
     let _ = app.emit_to("main", "petrel-changed", ());
     if state.tray.load(Ordering::SeqCst) {
         return;
@@ -213,9 +211,7 @@ pub fn open_picker_window(app: tauri::AppHandle) {
 /// The picker copied (or was dismissed) and is done.
 #[tauri::command]
 pub fn close_picker(app: tauri::AppHandle) {
-    if let Some(w) = app.get_webview_window("picker") {
-        let _ = w.destroy();
-    }
+    crate::warm::hide(&app, "picker");
 }
 
 /// "Open in Petrel" from the picker: the main window shows the note.

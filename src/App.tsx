@@ -10,7 +10,7 @@ import { api, errText, inTauri, type AiStatus, type Note, type NoteSummary, type
 import { plainText } from "./copy";
 import TitleBar from "./TitleBar";
 import Sidebar, { type Place } from "./Sidebar";
-import { loadLibrary } from "./library/Library";
+import { loadLibrary } from "./library/data";
 import NotePage, { type NotePageHandle } from "./note/NotePage";
 import CommandBar, { type Command } from "./palette/CommandBar";
 import { applyPrefs, changePref, parsePrefs, prefs, setPrefs } from "./settings/prefs";
@@ -20,7 +20,8 @@ import { setBeforeInstall, watchUpdates } from "./updates";
 import { folderName, say, ToastView, typing, undoLast } from "./ui";
 import { pushRecent } from "./palette/match";
 import Beside, { type BesideHandle } from "./note/Beside";
-import { matches, parseKeyMap, setCustomKeys } from "./keys";
+import { syncStatus, watchSync } from "./sync";
+import { keyLabel, matches, parseKeyMap, setCustomKeys, setSystemKeys } from "./keys";
 import Shortcuts from "./Shortcuts";
 import Destination, { type Target } from "./inbox/Destination";
 import { addDays, JOURNAL, today } from "./journal/days";
@@ -316,11 +317,11 @@ export default function App() {
   }
 
   const commands: Command[] = [
-    { id: "new", label: "New note", keys: "Ctrl N", run: () => void newNote() },
-    { id: "capture", label: "Quick capture window", keys: "Ctrl Alt Space", run: () => void api().then((s) => s.openCapture()) },
-    { id: "picker", label: "Quick picker: copy a prompt or snippet", keys: "Ctrl Shift Space", run: () => void api().then((s) => s.openPicker()) },
-    { id: "library", label: "Library", keys: "Ctrl L", run: () => void library("all") },
-    { id: "today", label: "Today's page", keys: "Ctrl D", run: () => void openDay(today()) },
+    { id: "new", label: "New note", get keys() { return keyLabel("new"); }, run: () => void newNote() },
+    { id: "capture", label: "Quick capture window", get keys() { return keyLabel("capture"); }, run: () => void api().then((s) => s.openCapture()) },
+    { id: "picker", label: "Quick picker: copy a prompt or snippet", get keys() { return keyLabel("picker"); }, run: () => void api().then((s) => s.openPicker()) },
+    { id: "library", label: "Library", get keys() { return keyLabel("library"); }, run: () => void library("all") },
+    { id: "today", label: "Today's page", get keys() { return keyLabel("today"); }, run: () => void openDay(today()) },
     { id: "inbox", label: "Inbox", run: () => void library("inbox") },
     { id: "review", label: "Review the Inbox, one card at a time", run: () => void review() },
     { id: "week", label: "The week: what you wrote, what is open, and a few words from Claude", run: () => openPanel("week", setWeek) },
@@ -333,18 +334,18 @@ export default function App() {
       },
     },
     { id: "copy", label: "Copy", when: onNote, run: () => void copy("plain") },
-    { id: "copy-md", label: "Copy as Markdown", keys: "Ctrl Shift C", when: onNote, run: () => void copy("markdown") },
+    { id: "copy-md", label: "Copy as Markdown", get keys() { return keyLabel("copyMd"); }, when: onNote, run: () => void copy("markdown") },
     { id: "copy-html", label: "Copy formatted (for mail and docs)", when: onNote, run: () => void copy("html") },
     { id: "tidy", label: "AI: Tidy this note", when: onNote, run: () => page?.ai("tidy") },
     { id: "continue", label: "AI: Continue writing", when: onNote, run: () => page?.ai("continue") },
     { id: "summarize", label: "AI: Summarize this note", when: onNote, run: () => page?.ai("summarize") },
     { id: "title", label: "AI: Suggest a title", when: onNote, run: () => page?.ai("title") },
     { id: "related", label: "AI: Find related notes", when: onNote, run: () => page?.findRelated() },
-    { id: "move", label: "Move to a note or collection…", keys: "Ctrl M", when: onNote, run: () => setMoving(true) },
-    { id: "task", label: "Add a task, or tick one", keys: "Ctrl Shift X", when: () => view().kind === "note", run: () => page?.task() },
-    { id: "beside", label: "Open a note beside this one", keys: "Ctrl Shift Enter", run: () => setTimeout(() => setBar("beside")) },
+    { id: "move", label: "Move to a note or collection…", get keys() { return keyLabel("move"); }, when: onNote, run: () => setMoving(true) },
+    { id: "task", label: "Add a task, or tick one", get keys() { return keyLabel("task"); }, when: () => view().kind === "note", run: () => page?.task() },
+    { id: "beside", label: "Open a note beside this one", get keys() { return keyLabel("beside"); }, run: () => setTimeout(() => setBar("beside")) },
     { id: "beside-close", label: "Close the note beside", when: () => beside() !== null, run: () => void closeBeside() },
-    { id: "back", label: "Back to the note before", keys: "Ctrl Tab", when: () => others().length > 0, run: () => void openNote(others()[0]) },
+    { id: "back", label: "Back to the note before", get keys() { return keyLabel("back"); }, when: () => others().length > 0, run: () => void openNote(others()[0]) },
     {
       id: "focus",
       label: "Paragraph focus: fade the other paragraphs (on or off)",
@@ -355,11 +356,11 @@ export default function App() {
       },
     },
     { id: "pin", label: "Pin or unpin this note", when: onNote, run: () => void pin() },
-    { id: "history", label: "History", keys: "Ctrl H", when: onNote, run: () => openPanel("history", setHistory) },
+    { id: "history", label: "History", get keys() { return keyLabel("history"); }, when: onNote, run: () => openPanel("history", setHistory) },
     { id: "delete", label: "Delete this note", when: onNote, run: () => void trash() },
     { id: "rescan", label: "Look for changes in the folder", run: () => void rescan(true) },
-    { id: "settings", label: "Settings", keys: "Ctrl ,", run: () => setSettings("all") },
-    { id: "shortcuts", label: "All shortcuts", keys: "Ctrl /", run: () => setKeysOpen(true) },
+    { id: "settings", label: "Settings", get keys() { return keyLabel("settings"); }, run: () => setSettings("all") },
+    { id: "shortcuts", label: "All shortcuts", get keys() { return keyLabel("shortcuts"); }, run: () => setKeysOpen(true) },
   ];
 
   /** Notes changed on disk (the watcher, or a rescan): the lists redraw, and the open note reloads where you
@@ -457,6 +458,10 @@ export default function App() {
   setBeforeInstall(async () => (await page?.flush(), await remember()));
 
   onMount(async () => {
+    void watchSync();
+    void api()
+      .then((s) => s.desktopSettings())
+      .then((d) => d.hotkeySupported !== false && setSystemKeys({ capture: d.hotkey, picker: d.pickerHotkey }), () => {});
     document.addEventListener("keydown", key);
     document.addEventListener("keydown", dayKey, true);
     document.addEventListener("keydown", earlyKey, true);
@@ -501,7 +506,11 @@ export default function App() {
         await s.closeWindow();
       },
       openNote: (id) => void openNote(id),
-      focus: () => void rescan(),
+      focus: () => {
+        void rescan();
+        // Back at the window: see what changed on the other computer.
+        if (syncStatus()?.on) void api().then((s) => s.syncNow());
+      },
       folder: (r) => void folderChanged(r),
       // Hidden to the tray counts as leaving: coming back soon opens the same note.
       changed: () => view().kind !== "note" && setRev(rev() + 1),
@@ -535,7 +544,7 @@ export default function App() {
   return (
     <div class="app" classList={{ "in-library": view().kind === "library" }}>
       <TitleBar
-        title={view().kind === "library" ? `Library · ${libraryTitle()}` : title() || (noteView()?.id === null ? "New note" : "")}
+        title={settings() ? "Settings" : view().kind === "library" ? `Library · ${libraryTitle()}` : title() || (noteView()?.id === null ? "New note" : "")}
         sidebar={sideOn()}
         onSidebar={toggleSide}
         onSettings={() => setSettings("all")}
@@ -561,6 +570,7 @@ export default function App() {
           onCollection={(f) => void library(`c:${f}`)}
           onFolderChanged={(from, to) => void folderMoved(from, to)}
           onSettings={() => setSettings("all")}
+          onSync={() => setSettings("sync")}
           onClose={() => setSideOn(false)}
         />
       </Show>

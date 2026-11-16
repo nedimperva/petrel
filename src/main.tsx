@@ -1,7 +1,4 @@
 import { render } from "solid-js/web";
-import App from "./App";
-import Capture from "./Capture";
-import Picker from "./Picker";
 import "@fontsource-variable/inter";
 import "@fontsource-variable/literata";
 import "@fontsource-variable/literata/wght-italic.css";
@@ -22,4 +19,6 @@ document.documentElement.dataset.window = capture ? "capture" : picker ? "picker
 // The window title is what Hyprland matches the capture window and the picker by (src-tauri/src/hypr.rs).
 document.title = capture ? "Petrel capture" : picker ? "Petrel picker" : "Petrel";
 
-render(() => (capture ? <Capture /> : picker ? <Picker /> : <App />), document.getElementById("root")!);
+// Each window loads only its own screens: the capture window and the picker never load the library or Settings.
+const root = capture ? import("./Capture") : picker ? import("./Picker") : import("./App");
+void root.then(({ default: Screen }) => render(() => <Screen />, document.getElementById("root")!));

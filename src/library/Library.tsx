@@ -7,10 +7,11 @@
 
 import { createEffect, createMemo, createSignal, For, lazy, on, onCleanup, onMount, Show } from "solid-js";
 import { api, errText, type AiSuggestion, type Conflict, type Note, type NoteSummary } from "../api";
-import { hasVersions, versionsOf } from "../collection/versions";
+import type { LibraryData } from "./data";
 import Destination, { type Target } from "../inbox/Destination";
 import { fileCapture } from "../inbox/file";
-import { ago, folderName, KeyHints, say, typing, undoLast } from "../ui";
+import { ago, folderName, Kbd, KeyHints, say, typing, undoLast } from "../ui";
+import { keyLabel } from "../keys";
 import { topOf } from "./Card";
 import FacePicker from "./FacePicker";
 import Mark, { faces, loadFaces } from "./Mark";
@@ -25,33 +26,7 @@ import { copyFilled, itemText } from "../collection/copyItem";
 // The review is a mode of the inbox's cards: one at a time, in the library's place.
 const Review = lazy(() => import("../inbox/Review"));
 
-export interface LibraryData {
-  notes: NoteSummary[];
-  copies: Record<string, number>;
-  /** How many `## versions` a prompt or snippet has, by id, when it has two or more. */
-  versions: Record<number, number>;
-  /** Notes with a conflict copy beside them; the copies are not cards of their own. */
-  conflicts: Conflict[];
-}
-
-export async function loadLibrary(): Promise<LibraryData> {
-  const s = await api();
-  const [all, copies, conflicts] = await Promise.all([s.listNotes({ limit: 5000 }), s.copyCounts(), s.conflicts().catch(() => [] as Conflict[])]);
-  const copyIds = new Set(conflicts.map((c) => c.copy));
-  const notes = all.filter((n) => !n.folder.startsWith(".") && !copyIds.has(n.id));
-  // The preview has no headings in it, so the few prompts and snippets are read whole to count their versions.
-  const versions: Record<number, number> = {};
-  await Promise.all(
-    notes
-      .filter((n) => hasVersions(n.folder))
-      .slice(0, 400)
-      .map(async (n) => {
-        const k = versionsOf((await s.peekNote(n.id).catch(() => null))?.body ?? "").length;
-        if (k > 1) versions[n.id] = k;
-      }),
-  );
-  return { notes, copies, versions, conflicts };
-}
+export { loadLibrary, type LibraryData } from "./data";
 
 function sortByUse(ns: NoteSummary[], copies: Record<string, number>): NoteSummary[] {
   return [...ns].sort((a, b) => Number(b.pinned) - Number(a.pinned) || (copies[b.path] ?? 0) - (copies[a.path] ?? 0) || b.modifiedAt - a.modifiedAt);
@@ -255,6 +230,7 @@ export default function Library(p: {
             notes={pages()}
             copies={p.data?.copies ?? {}}
             versions={p.data?.versions ?? {}}
+            firstVersion={p.data?.firstVersion ?? {}}
             onCopy={(n) => void copyCard(n)}
             onRead={(id) => setReading(id)}
             onEdit={p.onEdit}
@@ -345,7 +321,7 @@ export default function Library(p: {
                 {q()
                   ? "Nothing matches."
                   : p.tab === "inbox"
-                    ? "Inbox zero. Captures from Ctrl Alt Space land here until you file them."
+                    ? `Inbox zero. Captures from ${keyLabel("capture")} land here until you file them.`
                     : p.tab === "all"
                       ? "Nothing to copy yet. Make a collection like Prompts or Snippets in the sidebar."
                       : "Nothing here yet."}
@@ -353,7 +329,7 @@ export default function Library(p: {
             </Show>
             <Show when={p.tab.startsWith("c:")}>
               <button type="button" class="lib-new" onClick={() => p.onNew(p.tab.slice(2))}>
-                New in {heading()} <kbd>Ctrl N</kbd>
+                New in {heading()} <Kbd keys={keyLabel("new")} />
               </button>
             </Show>
           </div>

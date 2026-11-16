@@ -97,6 +97,20 @@ export interface Backlinks {
   mentioned: BackRef[];
 }
 
+/** Google Drive sync (src-tauri/src/sync.rs). */
+export interface SyncStatus {
+  configured: boolean;
+  clientId: string;
+  signedIn: boolean;
+  account: string;
+  on: boolean;
+  /** `off`, `idle`, `syncing`, `offline`, `signin`, `error`, `blocked`. */
+  state: string;
+  message: string | null;
+  lastAt: number | null;
+  last: string | null;
+}
+
 export interface NoteQuery {
   folder?: string | null;
   pinned?: boolean | null;
@@ -238,6 +252,10 @@ export interface Api {
   openCapture(): Promise<void>;
   openPicker(): Promise<void>;
   closePicker(): Promise<void>;
+  /** A warm window (capture, picker) is loaded and waiting; true means it was already asked for. */
+  windowReady(): Promise<boolean>;
+  /** Calls back when a waiting warm window is asked for. */
+  onOpenWindow(run: () => void): Promise<void>;
   showNoteInMain(id: number): Promise<void>;
   /** `html`: also as rich text, from the Markdown. */
   copyText(text: string, html: boolean): Promise<void>;
@@ -315,6 +333,15 @@ export interface Api {
 
   aiStatus(): Promise<AiStatus>;
   setAiKey(key: string | null): Promise<AiStatus>;
+
+  syncStatus(): Promise<SyncStatus>;
+  syncSetup(clientId: string, clientSecret: string): Promise<SyncStatus>;
+  /** Opens Google's sign-in in the browser and waits for it. */
+  syncSignIn(): Promise<SyncStatus>;
+  syncSignOut(): Promise<SyncStatus>;
+  syncSetOn(on: boolean): Promise<SyncStatus>;
+  syncNow(): Promise<void>;
+  onSync(run: (s: SyncStatus) => void): Promise<void>;
   aiWrite(o: {
     task: AiTask;
     text: string;
@@ -343,6 +370,11 @@ async function tauriApi(): Promise<Api> {
     openCapture: () => invoke("open_capture_window"),
     openPicker: () => invoke("open_picker_window"),
     closePicker: () => invoke("close_picker"),
+    windowReady: () => invoke("window_ready"),
+    onOpenWindow: async (run) => {
+      const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+      await getCurrentWebviewWindow().listen("petrel-open-window", () => run());
+    },
     showNoteInMain: (id) => invoke("show_note_in_main", { id }),
     copyText: (text, html) => invoke("copy_text", { text, html }),
     desktopSettings: () => invoke("desktop_settings"),
@@ -419,6 +451,16 @@ async function tauriApi(): Promise<Api> {
 
     aiStatus: () => invoke("ai_status"),
     setAiKey: (key) => invoke("set_ai_key", { key }),
+    syncStatus: () => invoke("sync_status"),
+    syncSetup: (clientId, clientSecret) => invoke("sync_setup", { clientId, clientSecret }),
+    syncSignIn: () => invoke("sync_sign_in"),
+    syncSignOut: () => invoke("sync_sign_out"),
+    syncSetOn: (on) => invoke("sync_set_on", { on }),
+    syncNow: () => invoke("sync_now"),
+    onSync: async (run) => {
+      const { listen } = await import("@tauri-apps/api/event");
+      await listen<SyncStatus>("petrel-sync", (e) => run(e.payload));
+    },
     aiWrite: (o) => invoke("ai_write", { ...o }),
     aiAsk: (question, earlier, notes) => invoke("ai_ask", { question, earlier: earlier ?? null, notes: notes ?? null }),
     aiSuggestHome: (noteId) => invoke("ai_suggest_home", { noteId }),
