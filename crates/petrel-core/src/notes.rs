@@ -458,6 +458,14 @@ fn rename_with_retry(from: &Path, to: &Path) -> Result<()> {
     Err(anyhow!("moving {} to {}: {}", from.display(), to.display(), last.expect("tried")))
 }
 
+/// `Title (conflict 2026-11-11 2114)`, as `conflict_copy` names the other side of a clash.
+pub fn is_conflict_copy(title: &str) -> bool {
+    title.ends_with(')') && title.rfind(" (conflict ").is_some_and(|at| {
+        let rest = &title[at + 11..];
+        rest.len() >= 10 && rest.as_bytes()[..10].iter().enumerate().all(|(i, b)| if i == 4 || i == 7 { *b == b'-' } else { b.is_ascii_digit() })
+    })
+}
+
 /// A title that is a file name on Linux and Windows: no path or reserved characters, no dots or spaces at the
 /// ends, at most `NOTE_TITLE_MAX` characters.
 pub fn clean_title(title: &str) -> String {
@@ -465,7 +473,23 @@ pub fn clean_title(title: &str) -> String {
         title.chars().map(|c| if "/\\:*?\"<>|".contains(c) || c.is_control() { '-' } else { c }).collect();
     let s = s.split_whitespace().collect::<Vec<_>>().join(" ");
     let s: String = s.chars().take(NOTE_TITLE_MAX).collect();
-    s.trim_matches(|c: char| c == '.' || c.is_whitespace()).to_string()
+    let s = s.trim_matches(|c: char| c == '.' || c.is_whitespace()).to_string();
+    // Windows keeps these names for devices (`nul.md` too), so a note called Con could not be written there.
+    if windows_reserved(&s) {
+        format!("{s}_")
+    } else {
+        s
+    }
+}
+
+/// CON, PRN, AUX, NUL, COM1–9 and LPT1–9, in any case, alone or before a dot.
+pub fn windows_reserved(name: &str) -> bool {
+    let stem = name.split('.').next().unwrap_or("").trim_end().to_ascii_uppercase();
+    matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || (stem.len() == 4
+            && (stem.starts_with("COM") || stem.starts_with("LPT"))
+            && stem.as_bytes()[3].is_ascii_digit()
+            && stem.as_bytes()[3] != b'0')
 }
 
 /// A folder path from the UI or a link: clean parts joined by `/`; `..`, `.` and dot-folders dropped.
@@ -983,9 +1007,12 @@ impl Store {
             .collect::<rusqlite::Result<_>>()?;
         Ok(rows
             .into_iter()
+            // Whole words, so "plan" does not count "planet"; a conflict copy is the same note, not a related one.
+            .filter(|(n, _)| !is_conflict_copy(&n.title))
             .filter(|(n, body)| {
                 let text = fold::fold(&format!("{} {body}", n.title));
-                words.iter().filter(|w| text.contains(w.as_str())).count() >= 3
+                let have: HashSet<&str> = text.split(|c: char| !c.is_alphanumeric()).collect();
+                words.iter().filter(|w| have.contains(w.as_str())).count() >= 3
             })
             .map(|(n, _)| n)
             .take(limit)
@@ -1057,9 +1084,7 @@ impl Store {
         let base = if base.is_empty() { "Untitled".to_string() } else { base };
         let mut name = base.clone();
         let mut n = 2;
-        while abs(&root, &join_rel(&folder, &name)).exists()
-            || self.id_of(&join_rel(&folder, &name))?.is_some()
-        {
+        while self.taken(&root, &join_rel(&folder, &name))? {
             name = format!("{base} {n}");
             n += 1;
         }
@@ -1105,12 +1130,28 @@ impl Store {
         Ok(SavedNote { hash, modified_at, conflict })
     }
 
+    /// Whether a note path is in use: the file, the index, or a file that differs only in capitals. Windows sees
+    /// `Plan.md` and `plan.md` as one file, so a twin made on Linux would clash there once synced.
+    fn taken(&self, root: &Path, rel: &str) -> Result<bool> {
+        if abs(root, rel).exists() || self.id_of(rel)?.is_some() {
+            return Ok(true);
+        }
+        let file = rel.rsplit('/').next().unwrap_or(rel).to_lowercase();
+        let dir = abs(root, rel);
+        let Some(dir) = dir.parent() else { return Ok(false) };
+        Ok(std::fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .any(|e| e.file_name().to_string_lossy().to_lowercase() == file))
+    }
+
     fn conflict_copy(&self, root: &Path, row: &Row, text: &str) -> Result<String> {
         let stamp = chrono::Local::now().format("%Y-%m-%d %H%M");
         let base = format!("{} (conflict {stamp})", row.title);
         let mut name = base.clone();
         let mut n = 2;
-        while abs(root, &join_rel(&row.folder, &name)).exists() {
+        while self.taken(root, &join_rel(&row.folder, &name))? {
             name = format!("{base} {n}");
             n += 1;
         }
@@ -1219,7 +1260,7 @@ impl Store {
             let to = join_rel(&row.folder, &new_title);
             // A case-only rename is the same file on Windows and macOS.
             let same_file = to.to_lowercase() == row.path.to_lowercase();
-            if !same_file && (abs(&root, &to).exists() || self.id_of(&to)?.is_some()) {
+            if !same_file && self.taken(&root, &to)? {
                 bail!("there is already a note called “{new_title}” in that folder");
             }
             rename_with_retry(&abs(&root, &row.path), &abs(&root, &to))?;
@@ -1266,9 +1307,7 @@ impl Store {
         // A free name in the new folder: `Plan 2` when `Plan` is taken, as for a new note.
         let mut name = wanted.clone();
         let mut n = 2;
-        while abs(&root, &join_rel(&new_folder, &name)).exists()
-            || self.id_of(&join_rel(&new_folder, &name))?.is_some()
-        {
+        while self.taken(&root, &join_rel(&new_folder, &name))? {
             name = format!("{wanted} {n}");
             n += 1;
         }
@@ -2517,6 +2556,27 @@ mod tests {
         assert_eq!(ids(s.search_notes("Đorđa", 5).unwrap()), vec![b.id]);
         // The title weighs more than a word in passing.
         assert_eq!(ids(s.search_notes("cevapi", 5).unwrap()), vec![b.id, c.id]);
+    }
+
+    #[test]
+    fn titles_windows_keeps_for_devices_get_a_mark() {
+        assert_eq!(clean_title("Con"), "Con_");
+        assert_eq!(clean_title("nul"), "nul_");
+        assert_eq!(clean_title("COM3"), "COM3_");
+        assert_eq!(clean_title("Console"), "Console");
+        assert_eq!(clean_title("COM0"), "COM0");
+        assert!(is_conflict_copy("Tern release (conflict 2026-11-11 2114)"));
+        assert!(!is_conflict_copy("Tern release (conflict notes)"));
+    }
+
+    #[test]
+    fn a_title_that_differs_only_in_capitals_gets_a_number() {
+        let dir = tmp();
+        let mut s = store_in(&dir);
+        s.create_note("", "Plan", "a", &[]).unwrap();
+        let n = s.create_note("", "plan", "b", &[]).unwrap();
+        assert_eq!(n.title, "plan 2");
+        assert!(dir.join("plan 2.md").exists());
     }
 
     #[test]

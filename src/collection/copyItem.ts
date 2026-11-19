@@ -4,6 +4,7 @@
 import { api, errText, type NoteSummary } from "../api";
 import { blanks } from "../blanks";
 import { say } from "../ui";
+import { stepDone } from "../firstSteps";
 import { noteUse } from "./lastUsed";
 import { hasVersions, versionsOf } from "./versions";
 
@@ -22,6 +23,7 @@ export async function copyFilled(item: Pick<NoteSummary, "id" | "title"> & { pat
     await s.recordCopy(item.id, app).catch(() => 0);
     if (item.path) await noteUse(item.path, app);
     say(`Copied “${item.title}”`);
+    stepDone("copy");
     return true;
   } catch (e) {
     say(errText(e), { error: true });

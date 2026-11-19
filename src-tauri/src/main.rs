@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod ai;
+mod calendar;
 mod cli;
 mod commands;
 mod context;
@@ -453,6 +454,9 @@ fn main() {
             paste::paste_into_front,
             warm::window_ready,
             sync::sync_status,
+            calendar::calendar_status,
+            calendar::calendar_set_on,
+            calendar::calendar_day,
             sync::sync_log,
             sync::sync_setup,
             sync::sync_sign_in,

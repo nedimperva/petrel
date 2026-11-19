@@ -64,6 +64,8 @@ export function fakeApi(): Api {
     cacheWriteTokens: 0,
   });
   const sync: SyncStatus = { configured: false, clientId: "", signedIn: false, account: "", on: false, state: "off", message: null, lastAt: null, last: null };
+  // `?calendar` in the address starts with today's calendar on.
+  let calendarOn = typeof location !== "undefined" && location.search.includes("calendar");
   // `?synced` in the address starts signed in to Drive, to try the sync screens.
   if (typeof location !== "undefined" && location.search.includes("synced"))
     Object.assign(sync, { configured: true, signedIn: true, on: true, account: "you@example.com", state: "idle", lastAt: Date.now(), last: "2 files received" });
@@ -215,6 +217,18 @@ export function fakeApi(): Api {
     syncSetOn: (on) => wait(Object.assign(sync, { on, state: on ? "idle" : "off" })).then((x) => ({ ...x })),
     syncNow: () => wait(undefined).then(() => void (sync.lastAt = Date.now())),
     onSync: () => wait(undefined),
+    calendarStatus: () => wait({ on: calendarOn }),
+    calendarSetOn: (on) => wait((calendarOn = on, { on }), on ? 600 : 0),
+    calendarDay: () =>
+      wait(
+        calendarOn
+          ? [
+              { start: "", end: "", title: "Lejla's birthday" },
+              { start: "10:00", end: "10:30", title: "Tern release sync" },
+              { start: "14:30", end: "15:30", title: "Dentist" },
+            ]
+          : [],
+      ),
     // In the browser a page is opened when it is asked for, so it starts at once.
     windowReady: () => wait(true),
     onOpenWindow: () => wait(undefined),

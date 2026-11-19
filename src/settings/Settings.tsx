@@ -2,6 +2,7 @@
 // (the folder, start at login), Writing, Look, Capture, Keys (every shortcut on this computer, changeable), AI and
 // About. Each change is saved at once; Esc goes back.
 
+import { forgetKeys, keysUsed } from "../learned";
 import { createResource, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { api, errText, type AiStatus, type DesktopSettings } from "../api";
 import { comboOf, conflicts, customKeys, hyprBind, keyOf, platform, setCustomKeys, setSystemKeys, SHORTCUTS, typesCharacter, type Shortcut } from "../keys";
@@ -295,7 +296,7 @@ export default function Settings(p: { section?: Section | "all"; onClose(): void
             <Toggle label="A quiet page" hint="The title bar, sidebar, margin and footer fade while you type. Move the mouse and they come back." on={prefs().quiet} onChange={(on) => void pref("quiet", on)} />
             <Toggle label="Quiet Markdown" hint="The marks (#, **, [[ ]]) hide on every line but the one you are on, so bold reads as bold. The file stays plain Markdown." on={prefs().quietMarks} onChange={(on) => void pref("quietMarks", on)} />
             <Toggle label="Paragraph focus" hint="The other paragraphs fade while you type." on={prefs().focus} onChange={(on) => void pref("focus", on)} />
-            <Toggle label="Typewriter scrolling" hint="The line you type stays in the middle of the window." on={prefs().typewriter} onChange={(on) => void pref("typewriter", on)} />
+            <Toggle label="Typewriter scrolling" hint="The line you type stays a third of the way down the window, not at its bottom edge." on={prefs().typewriter} onChange={(on) => void pref("typewriter", on)} />
             <Toggle
               label="A pencil sound as you type"
               hint="Soft, and only while the window is in front."
@@ -368,6 +369,14 @@ export default function Settings(p: { section?: Section | "all"; onClose(): void
           <h1>Keys</h1>
           <p class="muted">
             The shortcuts on this computer ({platform === "linux" ? "Omarchy" : "Windows"}). Click one and press the new keys; <kbd>Esc</kbd> cancels. All of them, with the fixed ones, are on <kbd>Shift</kbd> <kbd>?</kbd>.
+          </p>
+          <p class="muted small set-note">
+            A key you have pressed ten times leaves the key line at the foot of the screens.{" "}
+            <Show when={Object.keys(keysUsed()).length} fallback={"None is learned yet."}>
+              <button type="button" class="link" onClick={() => void forgetKeys().then(() => say("Every key hint is back."))}>
+                Show every hint again
+              </button>
+            </Show>
           </p>
           <section class="set-card">
             <For each={SHORTCUTS.filter((s) => s.editable)}>

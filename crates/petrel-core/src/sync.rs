@@ -395,7 +395,7 @@ pub fn sync_hinted(
         return Ok(report);
     }
     // When the remote says nothing changed there, it still has what was synced: no need to list it.
-    let there: BTreeMap<String, RemoteFile> = if remote_changed {
+    let mut there: BTreeMap<String, RemoteFile> = if remote_changed {
         let mut m = BTreeMap::new();
         for f in remote.list()? {
             if syncs(&f.path) {
@@ -411,6 +411,9 @@ pub fn sync_hinted(
             .collect()
     };
 
+    if remote_changed {
+        rename_twins(remote, state, &mut report, &here, &mut there);
+    }
     let mut paths: BTreeSet<String> =
         here.keys().chain(there.keys()).chain(state.synced.keys()).cloned().collect();
     moves(root, remote, state, &mut report, &here, &there, &mut paths);
@@ -511,6 +514,58 @@ pub fn sync_hinted(
     }
     state.keep_bases(root, hint.is_none());
     Ok(report)
+}
+
+/// A new file there whose name differs from another only in capitals (`plan.md` beside `Plan.md`) is one file
+/// on Windows, so it would never arrive there, or arrive over the other. It is renamed there first, to a free
+/// name like `plan 2.md`, and then comes down as any new file.
+fn rename_twins(
+    remote: &mut dyn Remote,
+    state: &State,
+    report: &mut Report,
+    here: &BTreeMap<String, String>,
+    there: &mut BTreeMap<String, RemoteFile>,
+) {
+    let mut known: BTreeMap<String, String> = BTreeMap::new();
+    for p in here.keys().chain(state.synced.keys()) {
+        known.insert(p.to_lowercase(), p.clone());
+    }
+    let new: Vec<String> =
+        there.keys().filter(|p| !here.contains_key(*p) && !state.synced.contains_key(*p)).cloned().collect();
+    for p in there.keys() {
+        if !new.contains(p) {
+            known.entry(p.to_lowercase()).or_insert_with(|| p.clone());
+        }
+    }
+    for p in new {
+        let lower = p.to_lowercase();
+        match known.get(&lower) {
+            Some(other) if other != &p => {}
+            _ => {
+                known.insert(lower, p.clone());
+                continue;
+            }
+        }
+        let (stem, ext) = match p.rfind('.') {
+            Some(dot) if dot > p.rfind('/').map_or(0, |s| s + 1) => (&p[..dot], &p[dot..]),
+            _ => (p.as_str(), ""),
+        };
+        let Some(free) = (2..100).map(|n| format!("{stem} {n}{ext}")).find(|c| !known.contains_key(&c.to_lowercase()))
+        else {
+            continue;
+        };
+        let Some(f) = there.get(&p).cloned() else { continue };
+        match remote.move_to(&f.id, &free) {
+            Ok(Some(moved)) => {
+                there.remove(&p);
+                known.insert(free.to_lowercase(), free.clone());
+                report.did("renamed, its name differed only in capitals", &free);
+                there.insert(free.clone(), RemoteFile { path: free, ..moved });
+            }
+            Ok(None) => {}
+            Err(e) => report.failed.push((p.clone(), format!("renaming a twin by capitals: {e:#}"))),
+        }
+    }
 }
 
 /// Renames and moves, on either side, done as moves on the other rather than a new copy and a deletion. A
@@ -1011,6 +1066,21 @@ mod tests {
         sync(&a, &mut drive, &mut sa, "s").unwrap();
         assert_eq!(sync(&b, &mut drive, &mut sb, "s").unwrap().trashed_here, 1);
         assert!(!b.join(TRASH_DIR).exists());
+    }
+
+    #[test]
+    fn a_twin_by_capitals_is_renamed_before_it_comes_down() {
+        let root = tmp();
+        put(&root, "Plan.md", "mine");
+        let mut remote = Fake::default();
+        let mut state = State::default();
+        sync(&root, &mut remote, &mut state, "s").unwrap();
+        // Another computer, case-sensitive, put a twin there.
+        remote.upload("plan.md", None, b"theirs").unwrap();
+        let r = sync(&root, &mut remote, &mut state, "s").unwrap();
+        assert_eq!(read(&root, "Plan.md"), "mine");
+        assert_eq!(read(&root, "plan 2.md"), "theirs");
+        assert!(remote.files.values().all(|(p, _)| p != "plan.md"), "{:?}", r.failed);
     }
 
     #[test]

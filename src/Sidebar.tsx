@@ -218,7 +218,7 @@ export default function Sidebar(p: {
             <path d="M4 13h4l2 3h4l2-3h4M4 13l2-8h12l2 8v6H4z" />
           </svg>
           <span class="side-name">Inbox</span>
-          <span class="side-count">{data()?.inbox || ""}</span>
+          <span class="side-count" classList={{ keep: !!data()?.inbox }}>{data()?.inbox || ""}</span>
         </button>
         <button type="button" class="side-row" classList={{ on: p.here === "tasks" }} onClick={pick(p.onTasks)}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

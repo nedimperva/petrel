@@ -278,6 +278,13 @@ export interface TopicFace {
   copy?: string;
 }
 
+/** An event on the calendar: `start` and `end` as `09:30`, empty for an all-day one. */
+export interface CalEvent {
+  start: string;
+  end: string;
+  title: string;
+}
+
 export interface AppEvents {
   /** Tray "Quit": save, then close this window. */
   quit(): void;
@@ -413,6 +420,11 @@ export interface Api {
   syncSignOut(): Promise<SyncStatus>;
   syncSetOn(on: boolean): Promise<SyncStatus>;
   syncNow(): Promise<void>;
+  /** Today's calendar on today's page: read-only, asked for with its own sign-in. */
+  calendarStatus(): Promise<{ on: boolean }>;
+  calendarSetOn(on: boolean): Promise<{ on: boolean }>;
+  /** One day's events (`YYYY-MM-DD`), empty when the calendar is off. */
+  calendarDay(day: string): Promise<CalEvent[]>;
   onSync(run: (s: SyncStatus) => void): Promise<void>;
   aiWrite(o: {
     task: AiTask;
@@ -546,6 +558,9 @@ async function tauriApi(): Promise<Api> {
     syncSignOut: () => invoke("sync_sign_out"),
     syncSetOn: (on) => invoke("sync_set_on", { on }),
     syncNow: () => invoke("sync_now"),
+    calendarStatus: () => invoke("calendar_status"),
+    calendarSetOn: (on) => invoke("calendar_set_on", { on }),
+    calendarDay: (day) => invoke("calendar_day", { day }),
     onSync: async (run) => {
       const { listen } = await import("@tauri-apps/api/event");
       await listen<SyncStatus>("petrel-sync", (e) => run(e.payload));

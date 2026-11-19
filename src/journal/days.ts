@@ -143,3 +143,43 @@ export function dueGroup(due: string, today: string): DueGroup {
   if (due === today) return "today";
   return due <= addDays(today, 6) ? "week" : "later";
 }
+
+/** A day's page as it is saved: a time with nothing after it is left out (today's page starts a fresh one each
+ * time it is opened, and only what is written after it counts), and the blank lines around it go with it. */
+export function dropBareStamps(text: string): string {
+  if (!/^\d{1,2}:\d{2}[ \t]*$/m.test(text)) return text;
+  const out = text
+    .split("\n")
+    .filter((l) => !/^\d{1,2}:\d{2}[ \t]*$/.test(l))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/\s+$/, "");
+  return out ? `${out}\n` : "";
+}
+
+/** The seven days of the week `day` is in, Monday first. */
+export function weekOf(day: string): string[] {
+  const d = parseDay(day) ?? new Date();
+  const monday = new Date(d.getFullYear(), d.getMonth(), d.getDate() - ((d.getDay() + 6) % 7));
+  return Array.from({ length: 7 }, (_, i) => dayOf(new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i)));
+}
+
+/** What a day's page holds, for the line at its foot: entries written (a time with words after it), tasks
+ * ticked, and captures filed onto it. From the text alone. */
+export function dayTally(text: string): { entries: number; done: number; captures: number } {
+  let entries = 0;
+  let done = 0;
+  let captures = 0;
+  for (const line of text.split("\n")) {
+    if (/^\d{1,2}:\d{2}\s+\S/.test(line)) entries++;
+    if (/^\s*[-*+] \[[xX]\]/.test(line)) done++;
+    if (line.trim() === "_from capture_") captures++;
+  }
+  return { entries, done, captures };
+}
+
+/** `3 entries · 2 tasks done · 1 capture`, leaving out what is none. */
+export function tallyLine(t: { entries: number; done: number; captures: number }): string {
+  const n = (k: number, one: string, many: string) => (k ? `${k} ${k === 1 ? one : many}` : "");
+  return [n(t.entries, "entry", "entries"), n(t.done, "task done", "tasks done"), n(t.captures, "capture", "captures")].filter(Boolean).join(" · ");
+}

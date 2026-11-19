@@ -5117,3 +5117,345 @@ button.cap-top-text:hover {
 .margin-links h4:not(:first-child) {
   margin-top: var(--s-5);
 }
+
+/* ---- The page, calmer (17 November list) --------------------------------------------------------------------- */
+
+/* Paper with a grain you only see up close: the app, the capture window and the title bar sit on it. */
+.app,
+.titlebar,
+.capture {
+  background-image: var(--grain);
+}
+
+/* A blank line between paragraphs is half as tall, as in a book (editor.ts, `blankLines`). */
+.cm-editor .cm-line.cm-blank {
+  line-height: calc(var(--editor-leading) * 0.42);
+}
+
+/* Typewriter scrolling: room under the text, so the last line can rise to a third of the window too. */
+.cm-typewriter .cm-content {
+  padding-bottom: 62vh;
+}
+
+/* A calmer sidebar: New note is a line like the others, counts show on the row you point at or are on (the inbox
+   keeps its count while something waits there), the group labels step back. */
+.side-new {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink-2);
+  font-weight: 500;
+}
+.side-new:hover,
+.side-new:focus-visible {
+  background: var(--hover);
+  color: var(--ink);
+  outline: none;
+}
+.side-new .keys {
+  opacity: 0;
+  transition: opacity var(--d-fast) var(--ease);
+}
+.side-new:hover .keys,
+.side-new:focus-visible .keys {
+  opacity: 1;
+}
+.side-count {
+  opacity: 0;
+  transition: opacity var(--d-fast) var(--ease);
+}
+.side-row:hover .side-count,
+.side-row:focus-visible .side-count,
+.side-row.on .side-count,
+.side-count.keep {
+  opacity: 1;
+}
+.side-head {
+  color: var(--faint);
+  font-weight: 500;
+}
+
+/* ---- a day's page as a day: the week over the title, the times on a thread, the calendar, the tally ---------- */
+
+.day-head {
+  flex-wrap: wrap;
+  row-gap: var(--s-3);
+}
+.day-week {
+  flex: 1 0 100%;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-bottom: 2px;
+}
+.week-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  min-width: 40px;
+  padding: 5px 6px 6px;
+  border-radius: var(--r-md);
+  color: var(--muted);
+  font: 500 var(--t-xs) / 1.2 var(--font-ui);
+  position: relative;
+}
+.week-day .week-n {
+  font: 600 var(--t-rd) / 1.2 var(--font-ui);
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.week-day.future .week-n {
+  color: var(--faint);
+}
+.week-day.has::after {
+  content: "";
+  position: absolute;
+  bottom: 2px;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  margin-left: -2px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+.week-day.today .week-n {
+  color: var(--accent);
+}
+.week-day:hover,
+.week-day:focus-visible {
+  background: var(--hover);
+  outline: none;
+}
+.week-day.on {
+  background: var(--ink);
+  color: var(--paper);
+}
+.week-day.on .week-n {
+  color: var(--paper);
+}
+.week-day.on.has::after {
+  background: var(--paper);
+}
+.week-month {
+  margin-left: auto;
+  color: var(--muted);
+}
+
+/* The thread: a hairline down the left of the text, a dot where an entry starts at its time. */
+.day-page .cm-line::after {
+  content: "";
+  position: absolute;
+  left: -10px;
+  top: 0;
+  bottom: 0;
+  border-left: 1px solid var(--line);
+  pointer-events: none;
+}
+.day-page .cm-line:has(.cm-stamp)::before {
+  content: "";
+  position: absolute;
+  left: -13px;
+  top: calc(var(--editor-leading) * 0.5em - 3.5px);
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--paper);
+  border: 1.5px solid var(--faint);
+  z-index: 1;
+}
+@container (max-width: 479px) {
+  .day-page .cm-line::after,
+  .day-page .cm-line:has(.cm-stamp)::before {
+    display: none;
+  }
+}
+
+.day-cal {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cal-row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 4px 6px;
+  margin: 0 -6px;
+  border-radius: var(--r-sm);
+  text-align: left;
+  font-size: var(--t-md);
+  color: var(--ink-2);
+}
+.cal-row:hover,
+.cal-row:focus-visible {
+  background: var(--hover);
+  color: var(--ink);
+  outline: none;
+}
+.cal-time {
+  flex: none;
+  width: 52px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  font-size: var(--t-sm);
+}
+.day-tally {
+  color: var(--muted);
+}
+
+/* First steps on the empty page: a quiet list, not a dialog. */
+.first-steps {
+  max-width: var(--editor-max);
+  margin: var(--s-6) auto 0;
+  padding: var(--s-4) var(--s-5);
+  box-sizing: border-box;
+  font-size: var(--t-md);
+  color: var(--ink-2);
+}
+.first-steps-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-3);
+  margin-bottom: var(--s-3);
+  font-weight: 600;
+  color: var(--ink);
+}
+.first-steps-head .link {
+  margin-left: auto;
+}
+.first-steps ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.first-steps li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.first-box {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 4px;
+}
+.first-steps li.done .first-box {
+  background: var(--ok);
+  border-color: var(--ok);
+  box-shadow: inset 0 0 0 2px var(--paper);
+}
+.first-steps li.done .first-text {
+  color: var(--faint);
+  text-decoration: line-through;
+  text-decoration-color: var(--line-strong);
+}
+.first-text {
+  flex: 1;
+  min-width: 0;
+}
+.first-steps .keys {
+  flex: none;
+  opacity: 0.8;
+}
+
+/* ---- the reading view (Ctrl E) ------------------------------------------------------------------------------- */
+
+.reading {
+  position: fixed;
+  inset: var(--titlebar-h) 0 0;
+  z-index: 40;
+  overflow: auto;
+  background-color: var(--paper);
+  background-image: var(--grain);
+  outline: none;
+  animation: reading-in var(--d-slow) var(--ease);
+}
+@keyframes reading-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .reading {
+    animation: none;
+  }
+}
+.reading-page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: var(--s-7) var(--s-5) 96px;
+  font: calc(var(--editor-size) + 2px) / 1.75 var(--editor-font);
+  color: var(--ink);
+}
+.reading-page.song {
+  max-width: 1080px;
+}
+.reading-meta {
+  margin: 0 0 var(--s-2);
+  font: 500 var(--t-sm) var(--font-ui);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.reading-title {
+  margin: 0 0 var(--s-6);
+  font: 600 38px/1.2 var(--font-write);
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+.reading-page .read {
+  font: inherit;
+}
+.reading-page .read p {
+  margin: 0 0 0.9em;
+  hyphens: auto;
+}
+.song {
+  columns: 2 26em;
+  column-gap: 64px;
+}
+.song-line {
+  break-inside: avoid;
+  white-space: pre-wrap;
+}
+.song-part {
+  display: inline-flex;
+  flex-direction: column;
+  vertical-align: bottom;
+}
+.song-line:has(.chorded) .song-part .song-chord {
+  min-height: 1.3em;
+}
+.song-chord {
+  font: 600 0.72em/1.3 var(--font-ui);
+  color: var(--accent);
+  padding-right: 0.4em;
+}
+.song-words {
+  white-space: pre;
+}
+.song-gap {
+  height: 1em;
+}
+.song-label {
+  break-after: avoid;
+  margin: 0.4em 0 0.2em;
+  font: 600 var(--t-sm) var(--font-ui);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.reading-foot {
+  position: fixed;
+  right: var(--s-5);
+  bottom: var(--s-4);
+  margin: 0;
+  font-size: var(--t-sm);
+  color: var(--faint);
+}

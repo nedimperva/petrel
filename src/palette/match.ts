@@ -71,6 +71,10 @@ export function score(query: string, name: string): number {
     gaps += i - at;
     at = i + 1;
   }
+  // Letters strewn across a long name are chance, not a match: "petrel" is in "put back a deleted note, or empty
+  // the old" letter by letter. Keep it only when the letters sit close or mostly start words.
+  const letters = q.replace(/ /g, "").length;
+  if (letters > 2 && gaps > letters * 2 && starts * 2 < letters) return 0;
   return 10 + starts * 4 - Math.min(gaps, 20) / 4;
 }
 

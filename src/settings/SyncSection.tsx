@@ -27,6 +27,21 @@ export default function SyncSection(p: { onOpen?(id: number): void }) {
     if (r?.kind === "note") p.onOpen?.(r.id);
     else say("That note is not there any more.");
   }
+  const [calOn, setCalOn] = createSignal(false);
+  const [calBusy, setCalBusy] = createSignal(false);
+  void api().then((s) => s.calendarStatus()).then((c) => setCalOn(c.on), () => {});
+  async function setCalendar(on: boolean) {
+    setCalBusy(on);
+    try {
+      setCalOn((await (await api()).calendarSetOn(on)).on);
+      say(on ? "Today's calendar is on. It shows beside today's page." : "Today's calendar is off.");
+    } catch (e) {
+      setCalOn(false);
+      say(errText(e), { error: true });
+    } finally {
+      setCalBusy(false);
+    }
+  }
   const [id, setId] = createSignal("");
   const [secret, setSecret] = createSignal("");
   const [busy, setBusy] = createSignal<null | "save" | "signin">(null);
@@ -143,6 +158,19 @@ export default function SyncSection(p: { onOpen?(id: number): void }) {
               Sign out
             </button>
           </div>
+        </section>
+        <section class="set-card">
+          <label class="set-row set-toggle">
+            <div class="set-label">
+              <span>Today's calendar on today's page</span>
+              <span class="muted small">
+                {calBusy()
+                  ? "Waiting for Google in the browser…"
+                  : "Your primary calendar's events for the day, read-only, beside today's page. Turning it on signs in again with one more permission. Your Google project needs the Calendar API enabled."}
+              </span>
+            </div>
+            <input type="checkbox" role="switch" checked={calOn()} disabled={calBusy()} onChange={(e) => void setCalendar(e.currentTarget.checked)} />
+          </label>
         </section>
         <Show when={log()?.length}>
           <section class="set-card">

@@ -99,3 +99,21 @@ test("adding to a capture shows its last line", async () => {
   assert.equal(lastLine("> a quote\n> — Some page · Firefox\n"), "a quote");
   assert.match(lastLine(`${"word ".repeat(30)}the end`), /^….*the end$/);
 });
+
+test("a day's page never keeps a time with nothing after it", async () => {
+  const { dropBareStamps } = await import("../src/journal/days.ts");
+  assert.equal(dropBareStamps("08:12 Want to finish.\n\n\n23:21\n\n\n23:21 \n"), "08:12 Want to finish.\n");
+  assert.equal(dropBareStamps("08:12 One\n\n09:00\n\n10:00 Two\n"), "08:12 One\n\n10:00 Two\n");
+  assert.equal(dropBareStamps("23:20 "), "");
+  assert.equal(dropBareStamps("No times here\n"), "No times here\n");
+});
+
+test("the week strip and the day's tally", async () => {
+  const { weekOf, dayTally, tallyLine } = await import("../src/journal/days.ts");
+  assert.deepEqual(weekOf("2026-11-19"), ["2026-11-16", "2026-11-17", "2026-11-18", "2026-11-19", "2026-11-20", "2026-11-21", "2026-11-22"]);
+  assert.equal(weekOf("2026-11-16")[0], "2026-11-16");
+  const t = dayTally("08:12 Morning.\n\n10:00 [x] no\n- [x] Called the bank\n- [ ] Dentist\n\n11:00 Bread\n_from capture_\n\n23:20 ");
+  assert.deepEqual(t, { entries: 3, done: 1, captures: 1 });
+  assert.equal(tallyLine(t), "3 entries · 1 task done · 1 capture");
+  assert.equal(tallyLine({ entries: 0, done: 0, captures: 0 }), "");
+});

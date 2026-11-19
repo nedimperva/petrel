@@ -6,7 +6,7 @@
 // Pasted pictures are saved next to the note and shown under their line.
 
 import { createEffect, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
-import { aiLive, api, errText, type AiRelated, type AiTask, type Backlinks, type Note, type NoteSummary, type OpenTask } from "../api";
+import { aiLive, api, errText, type CalEvent, type AiRelated, type AiTask, type Backlinks, type Note, type NoteSummary, type OpenTask } from "../api";
 import { blanks, fill, todayText } from "../blanks";
 import FillBlanks from "../collection/FillBlanks";
 import { lastVersions } from "../collection/BlankFields";
@@ -15,7 +15,7 @@ import { toggleTask } from "../editor/commands";
 import { createEditor, type EditorHandle } from "../editor/editor";
 import { cleanPaste } from "../editor/paste";
 import { pictureExtensions } from "../editor/pictures";
-import { addDays, clock, dayTitle, dueOf, isDayNote, JOURNAL, monthGrid, today } from "../journal/days";
+import { addDays, clock, dayTally, dayTitle, dropBareStamps, dueOf, isDayNote, JOURNAL, monthGrid, tallyLine, today, weekOf } from "../journal/days";
 import { dayExtensions } from "../journal/stamps";
 import { linkExtensions } from "../notes/links";
 import { parseLinks } from "../notes/parse";
@@ -32,6 +32,7 @@ import { currentHeading, outline, type Heading } from "./outline";
 import { EditorView } from "@codemirror/view";
 import { hush } from "./quiet";
 import { takeJump } from "./jump";
+import FirstSteps from "./FirstSteps";
 import { usageLine } from "../ai/usage";
 import { addAsk, ASKS_KEY, parseAsks } from "../ai/asks";
 
@@ -102,6 +103,9 @@ const MENU_H = 400;
 /** Where the cursor and the scroll were in each note this session, so going back never jumps. */
 const places = new Map<number, { anchor: number; head: number; top: number }>();
 
+/** `Title (conflict 2026-11-11 2114)`: the other side of a clash, settled in the library, never offered as related. */
+const CONFLICT_COPY = / \(conflict \d{4}-\d{2}-\d{2}[^)]*\)$/;
+
 /** Characters after which a note counts as long (see `measureSoon`). */
 const LONG_NOTE = 20_000;
 
@@ -160,6 +164,31 @@ export default function NotePage(p: Props) {
       },
     ),
   );
+
+  /** The month grid, on request: the week strip over the title is enough to step between days. */
+  const [showMonth, setShowMonth] = createSignal(false);
+  /** The day's events from Google Calendar, when it is turned on (Settings › Sync). */
+  const [events, setEvents] = createSignal<CalEvent[]>([]);
+  createEffect(
+    on(dayPage, (d) => {
+      setEvents([]);
+      if (d) void api().then((s) => s.calendarDay(d)).then((e) => dayPage() === d && setEvents(e), () => {});
+    }),
+  );
+  /** An event becomes an entry at the end of the page, its time and title, the cursor after it for notes. */
+  function writeUnder(e: CalEvent) {
+    const v = editor?.view;
+    if (!v) return;
+    const doc = v.state.doc.toString();
+    // The fresh time line at the end (nothing after it) gives way to the event's line.
+    const bare = /\n*\d{1,2}:\d{2}[ \t]*$/.exec(doc);
+    const from = bare ? bare.index : doc.length;
+    const before = doc.slice(0, from).replace(/\s+$/, "");
+    const line = `${e.start || clock()} **${e.title}** `;
+    const insert = `${before ? "\n\n" : ""}${line}`;
+    v.dispatch({ changes: { from: before.length, to: doc.length, insert }, selection: { anchor: before.length + insert.length }, scrollIntoView: true, userEvent: "input" });
+    v.focus();
+  }
 
   // On today's page: tasks still open on earlier days' pages, and how many captures came in today.
   const [carried, setCarried] = createSignal<OpenTask[]>([]);
@@ -224,12 +253,17 @@ export default function NotePage(p: Props) {
     const s = await api();
     const [l, near] = await Promise.all([s.backlinks(id).catch(() => ({ linked: [], mentioned: [] })), s.similarNotes(id).catch(() => [])]);
     setLinks(l);
-    // Notes already listed as linking here are not repeated as similar.
+    // Notes already listed as linking here are not repeated as similar, nor are conflict copies.
     const shown = new Set([...l.linked, ...l.mentioned].map((b) => b.id));
-    setSimilar(near.filter((n) => !shown.has(n.id)));
+    setNear(near.filter((n) => !shown.has(n.id) && !CONFLICT_COPY.test(n.title)));
   };
-  /** Notes that share telling words with this one, from the index: no AI, no key. */
-  const [similar, setSimilar] = createSignal<NoteSummary[]>([]);
+  /** Notes that share telling words with this one, from the index: no AI, no key. Not the notes this one links to:
+   * they are listed just above. */
+  const [near, setNear] = createSignal<NoteSummary[]>([]);
+  const similar = () => {
+    const out = new Set(outLinks().map((t) => (t.split("/").pop() ?? t).toLowerCase()));
+    return near().filter((n) => !out.has(n.title.toLowerCase()));
+  };
 
   const keepPlace = () => {
     const n = note();
@@ -237,6 +271,29 @@ export default function NotePage(p: Props) {
     const sel = editor.selection();
     places.set(n.id, { ...sel, top: host.closest(".page-main")?.scrollTop ?? 0 });
   };
+
+  /** The note or day just shown, so a day after it slides in from the right and one before from the left. */
+  let shown: { id: number | null; day: string | null } | null = null;
+  /** A short fade as another note arrives, a slide between days; nothing when the system asks for less motion. */
+  function arrive(id: number | null) {
+    const day = p.day ?? null;
+    const before = shown;
+    shown = { id, day };
+    if (!before || (before.id === id && before.day === day && id !== null)) return;
+    if (typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const sheet = host?.closest(".sheet") as HTMLElement | null;
+    if (!sheet?.animate) return;
+    const to = day ?? null;
+    const from = before.day;
+    const dx = to && from && to !== from ? (to > from ? 22 : -22) : 0;
+    sheet.animate(
+      [
+        { opacity: 0.25, transform: `translate(${dx}px, ${dx ? 0 : 6}px)` },
+        { opacity: 1, transform: "none" },
+      ],
+      { duration: dx ? 220 : 170, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" },
+    );
+  }
 
   async function load(id: number | null) {
     await saver?.flush();
@@ -246,6 +303,7 @@ export default function NotePage(p: Props) {
     setExplain(null);
     if (id === null) {
       saver.load(null);
+      arrive(null);
       setNote(null);
       setTitle("");
       setLinks({ linked: [], mentioned: [] });
@@ -271,6 +329,7 @@ export default function NotePage(p: Props) {
     try {
       const n = await (await api()).openNote(id);
       saver.load(n);
+      arrive(n.id);
       setTitle(n.title);
       measure();
       void loadLinks(n.id);
@@ -600,9 +659,12 @@ export default function NotePage(p: Props) {
   // The margin steps back while you type, and comes back when you stop.
   const [typingNow, setTypingNow] = createSignal(false);
   let typingTimer: ReturnType<typeof setTimeout> | undefined;
+  /** A day's page: what it holds, for its foot ("3 entries · 1 task done"). */
+  const [tally, setTally] = createSignal("");
   const measure = () => {
     const t = editor?.text() ?? "";
     setWords(wordCount(t));
+    setTally(dayPage() ? tallyLine(dayTally(t)) : "");
     setHeads(outline(t));
     setOutLinks([...new Set(parseLinks(t).map((l) => l.inner.split("|")[0].trim()))].slice(0, 30));
     setHere(currentHeading(heads(), editor?.cursor() ?? 0));
@@ -642,6 +704,7 @@ export default function NotePage(p: Props) {
       setSave,
       fresh: () => ({ folder: p.folder, title: dayPage() ?? title() }),
       conflict: (path) => say(`This note was also changed elsewhere. That copy is kept as ${path}.`, { error: true }),
+      clean: (body) => (dayPage() ? dropBareStamps(body) : body),
     });
     editor.setExtra([
       EditorView.updateListener.of((u) => {
@@ -817,6 +880,26 @@ export default function NotePage(p: Props) {
           <Show when={dayPage()}>
             {(d) => (
               <div class="day-head">
+                <div class="day-week" role="group" aria-label="This week">
+                  <For each={weekOf(d())}>
+                    {(x) => (
+                      <button
+                        type="button"
+                        class="week-day"
+                        classList={{ on: x === d(), has: journal().has(x), today: x === today(), future: x > today() }}
+                        aria-label={dayTitle(x)}
+                        aria-current={x === d() ? "date" : undefined}
+                        onClick={() => p.onDay?.(x)}
+                      >
+                        <span class="week-wd">{new Date(`${x}T12:00`).toLocaleDateString(undefined, { weekday: "short" })}</span>
+                        <span class="week-n">{Number(x.slice(8))}</span>
+                      </button>
+                    )}
+                  </For>
+                  <button type="button" class="link small week-month" aria-expanded={showMonth()} onClick={() => setShowMonth(!showMonth())}>
+                    {showMonth() ? "Hide the month" : "Month"}
+                  </button>
+                </div>
                 <h1 class="day-title">{dayTitle(d())}</h1>
                 <span class="day-nav">
                   <button class="icon-btn" title="The day before (Alt ←)" aria-label="The day before" onClick={() => p.onDay?.(addDays(d(), -1))}>
@@ -855,6 +938,9 @@ export default function NotePage(p: Props) {
             }}
           />
           <div class="writer" ref={host} />
+          <Show when={!note() && !dayPage() && !words() && !title()}>
+            <FirstSteps />
+          </Show>
         </div>
         {/* On a narrow page the margin waits at the right edge as a rail of short lines, one per heading (the one you
             are in is darker); hovering it opens the margin over the text. A wide page shows the margin as it is. */}
@@ -867,7 +953,20 @@ export default function NotePage(p: Props) {
           </Show>
         </div>
         <aside class="note-margin" classList={{ quiet: typingNow() }} aria-label="About this note">
-          <Show when={dayPage()}>
+          <Show when={dayPage() && events().length}>
+            <section class="day-cal" aria-label="Calendar">
+              <h4>Calendar</h4>
+              <For each={events()}>
+                {(e) => (
+                  <button type="button" class="cal-row" title="Write under it" onMouseDown={(ev) => ev.preventDefault()} onClick={() => writeUnder(e)}>
+                    <span class="cal-time">{e.start || "all day"}</span>
+                    <span class="cal-title">{e.title}</span>
+                  </button>
+                )}
+              </For>
+            </section>
+          </Show>
+          <Show when={showMonth() ? dayPage() : null}>
             {(d) => (
               <section class="day-month" aria-label="This month">
                 <div class="day-month-name">{new Date(`${d()}T12:00`).toLocaleDateString(undefined, { month: "long" })}</div>
@@ -890,7 +989,7 @@ export default function NotePage(p: Props) {
                 }
               </For>
             </div>
-            <p class="muted small">A dot is a day with a page. A day you skip makes no file.</p>
+
               </section>
             )}
           </Show>
@@ -1037,8 +1136,8 @@ export default function NotePage(p: Props) {
       </div>
       <footer class="page-foot">
         <span>{dayPage() ? "Journal" : folderName(note()?.folder ?? p.folder)}</span>
-        <Show when={words()}>
-          <span>{words()} words</span>
+        <Show when={dayPage() && tally()} fallback={<Show when={words()}><span>{words()} words</span></Show>}>
+          <span class="day-tally">{tally()}</span>
         </Show>
         <KeyHints hints={[!!dayPage() && ["Alt ← →", "other days"], [chips("find"), "find"], [chips("ai"), "AI"], [chips("library"), "library"], [chips("shortcuts"), "all keys"]]} />
         <Show when={p.notice}>

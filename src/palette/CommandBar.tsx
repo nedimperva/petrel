@@ -4,6 +4,7 @@
 // `when:week`, `has:link`, `has:picture`, `has:task` (palette/filters.ts). After an answer, Tab asks again: the
 // follow-up goes with the earlier answers and the same notes, and Ctrl Enter keeps the whole exchange as a note.
 
+import { plainText } from "../notes/plain";
 import { createEffect, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { aiLive, api, errText, type AiAnswer, type AiSource, type NoteSummary } from "../api";
 import { answerHtml } from "../copy";
@@ -185,7 +186,7 @@ export default function CommandBar(p: {
     const out = body
       .slice(from, from + 2400)
       .split(/\n{2,}/)
-      .map((x) => x.replace(/^#+\s+/, "").trim())
+      .map((x) => plainText(x).trim())
       .filter(Boolean)
       .slice(0, 8);
     return from > 0 ? ["…", ...out] : out;
