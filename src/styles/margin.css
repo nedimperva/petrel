@@ -1,0 +1,317 @@
+/* The right margin and a note beside. The main window only. */
+
+/* ---- headings in the margin ------------------------------------------------------------------------------ */
+
+.note-outline {
+  position: absolute;
+  top: var(--s-7);
+  right: var(--s-6);
+  width: 196px;
+  max-height: calc(100% - 140px);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: var(--t-sm);
+  transition: opacity var(--d-slow) var(--ease);
+}
+.note-outline.quiet:not(:hover) {
+  opacity: 0.2;
+}
+.outline-row {
+  padding: 3px 8px;
+  border: 0;
+  border-left: 2px solid transparent;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.outline-row:hover {
+  color: var(--ink);
+}
+.outline-row.on {
+  border-left-color: var(--accent);
+  color: var(--ink);
+  font-weight: 500;
+}
+@media (max-width: 1180px) {
+  .note-outline {
+    display: none;
+  }
+}
+
+/* ---- a note beside ------------------------------------------------------------------------------------- */
+
+.view.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  overflow: hidden;
+}
+.view.split > .page {
+  min-width: 0;
+  overflow: hidden;
+}
+.view.split .day-month {
+  display: none;
+}
+.beside {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-left: 1px solid var(--line);
+  background: var(--sunk);
+}
+.beside-head,
+.beside-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 0 var(--s-4);
+  color: var(--faint);
+  font-size: var(--t-xs);
+}
+.beside-head {
+  height: 40px;
+}
+.beside-foot {
+  height: 36px;
+}
+.beside-title {
+  color: var(--ink-2);
+  font: 600 var(--t-md) / 1.2 var(--font-write);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.beside-text {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  --editor-max: 640px;
+  --editor-top: var(--s-2);
+  cursor: text;
+}
+.beside:not(.editing) .beside-text .cm-content {
+  caret-color: transparent;
+}
+.beside.editing {
+  background: var(--paper);
+}
+
+/* ---- Back: the last few notes while Ctrl is held ----------------------------------------------------------- */
+
+.switcher {
+  position: fixed;
+  top: 20%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  width: min(420px, calc(100vw - 32px));
+  padding: var(--s-2);
+  border-radius: var(--r-xl);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-lg);
+  animation: rise var(--d-base) var(--ease);
+}
+.switcher-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  min-height: 34px;
+  padding: 4px 10px;
+  border-radius: var(--r-md);
+  cursor: pointer;
+}
+.switcher-row.on {
+  background: var(--accent-soft);
+}
+.switcher .row-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.switcher p {
+  margin: var(--s-2) 10px 2px;
+}
+
+/* A line in the footer that says what just happened, then goes. */
+.page-foot .notice {
+  color: var(--accent);
+  animation: fade var(--d-slow) var(--ease);
+}
+
+/* ---- the right margin: what is about the note (its headings, what links here, the month on a day's page) --- */
+
+.page {
+  container-type: inline-size;
+}
+/* Narrow (or a note open beside): the margin waits at the right edge as a rail of short lines, one per heading,
+   and opens over the text while the pointer is on it. */
+.margin-dock {
+  position: absolute;
+  top: var(--s-7);
+  right: 0;
+  bottom: 48px;
+  z-index: 5;
+  width: 32px;
+}
+.margin-dock:not(:has(.note-margin > *)) {
+  display: none;
+}
+.margin-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 7px;
+  padding: 6px 10px 0 0;
+  transition: opacity var(--d-base) var(--ease);
+}
+.rail-dash {
+  display: block;
+  width: 14px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--line-strong);
+}
+.rail-dash.on {
+  background: var(--ink-2);
+}
+.margin-dock:hover .margin-rail,
+.margin-dock:focus-within .margin-rail {
+  opacity: 0;
+}
+.note-margin {
+  position: absolute;
+  top: 0;
+  right: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-5);
+  width: 280px;
+  max-height: 100%;
+  box-sizing: border-box;
+  padding: var(--s-4);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg, 10px);
+  box-shadow: var(--shadow-lg);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(6px);
+  transition:
+    opacity var(--d-base) var(--ease),
+    transform var(--d-base) var(--ease);
+}
+.margin-dock:hover .note-margin,
+.margin-dock:focus-within .note-margin {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+.note-margin:not(:has(> *)) {
+  display: none;
+}
+.note-margin .day-month {
+  max-width: 300px;
+}
+/* Beside the text only when the text keeps a good width next to it. */
+@container (min-width: 960px) {
+  .page:not(.beside-open) .page-main {
+    padding-right: var(--margin-w);
+  }
+  .page:not(.beside-open) .margin-dock {
+    display: contents;
+  }
+  .page:not(.beside-open) .margin-rail {
+    display: none;
+  }
+  .page:not(.beside-open) .note-margin {
+    position: absolute;
+    top: var(--s-7);
+    /* 8 px of room each side for the rows' hover, which reach 8 px past the text. */
+    right: calc(var(--s-5) - 8px);
+    bottom: 48px;
+    width: calc(var(--margin-w) - var(--s-5) - var(--s-3) + 16px);
+    max-height: none;
+    padding: 0 8px;
+    background: none;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
+    /* Thin, and only shown while the pointer is over the margin. */
+    scrollbar-color: transparent transparent;
+    gap: var(--s-6);
+  }
+  .page:not(.beside-open) .note-margin:hover {
+    scrollbar-color: var(--line-strong) transparent;
+  }
+  .page:not(.beside-open) .note-margin .day-month {
+    max-width: none;
+  }
+  .page:not(.beside-open) .note-margin.quiet:not(:hover) {
+    opacity: 0.25;
+  }
+}
+.page {
+  /* 320 px on a wide page; on a laptop it gives up a little to keep the text wide enough. */
+  --margin-w: clamp(240px, 27cqi, 320px);
+}
+.note-margin h4 {
+  margin: 0 0 var(--s-2);
+  font-size: var(--t-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.note-margin section {
+  display: flex;
+  flex-direction: column;
+}
+.note-margin .outline-row {
+  padding-top: 4px;
+  padding-bottom: 4px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.note-margin .link-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  width: calc(100% + 16px);
+  min-width: 0;
+}
+.note-margin .link-line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-xs);
+  color: var(--muted);
+}
+.note-margin .day-month {
+  position: static;
+  display: flex;
+  width: auto;
+}
+.margin-related {
+  align-self: flex-start;
+}

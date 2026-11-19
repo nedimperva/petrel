@@ -1,0 +1,328 @@
+/* The capture window and the picker. */
+
+/* ---- capture and picker windows ------------------------------------------------------------------------------------ */
+
+/* No window frame: the panel is the window, and Windows 11 rounds its corners and draws its shadow. */
+.capture {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  box-sizing: border-box;
+}
+.capture-text-host {
+  flex: 1;
+  min-height: 0;
+  --editor-top: var(--s-4);
+  --editor-max: 100%;
+}
+.capture-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  height: 42px;
+  padding: 0 var(--s-3);
+  font-size: var(--t-sm);
+  transition: opacity var(--d-slow) var(--ease);
+}
+.capture:has(.cm-focused) .capture-foot:not(:hover) {
+  opacity: 0.6;
+}
+.capture .scrim {
+  align-items: flex-start;
+  padding-top: 12px;
+}
+.picker {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  box-sizing: border-box;
+  overflow: hidden;
+}
+.picker > .fill {
+  padding: var(--s-4);
+  overflow: auto;
+}
+.picker-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+.picker-body .palette-list {
+  border-right: 1px solid var(--line);
+}
+.picker-peek {
+  padding: var(--s-4);
+  overflow: auto;
+  background: var(--sheet);
+}
+.picker-peek .card-text {
+  -webkit-line-clamp: unset;
+  display: block;
+}
+.picker-foot {
+  display: flex;
+  gap: var(--s-4);
+  padding: 8px var(--s-4);
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: var(--t-xs);
+}
+:root[data-window="picker"] body {
+  background: transparent;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+.toast {
+  animation-name: toast-rise;
+}
+@keyframes toast-rise {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 4px);
+  }
+}
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes breathe {
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* ---- capture: where it goes, and the quote it came with ------------------------------------------------------ */
+
+.cap-place {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.cap-place.implied .chip {
+  border-style: dashed;
+}
+.chip-x {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: var(--t-rd);
+  line-height: 1;
+}
+.chip-x:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.cap-quote-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--muted);
+}
+.capture .cm-line.cap-quote-line {
+  background: var(--sunk);
+  color: var(--ink-2);
+  font-size: 0.86em;
+  padding-left: 12px;
+  padding-right: 12px;
+}
+.capture .cm-line.cap-quote-line:first-child {
+  border-radius: var(--r-md) var(--r-md) 0 0;
+  padding-top: 6px;
+}
+.capture .cm-line.cap-quote-line:not(:has(+ .cap-quote-line)) {
+  border-radius: 0 0 var(--r-md) var(--r-md);
+  padding-bottom: 6px;
+}
+
+/* ---- picker: where a card was used last, and filling it in beside its text ------------------------------------ */
+
+.row-two {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.row-two .row-label {
+  flex: none;
+}
+.row-used {
+  font-size: var(--t-xs);
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fill.fill-split {
+  display: flex;
+  gap: 0;
+  padding: 0;
+  height: 100%;
+  min-height: 0;
+}
+.fill-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  padding: var(--s-5);
+  overflow: auto;
+}
+.fill-text {
+  padding: var(--s-4) var(--s-5);
+  border-radius: var(--r-lg);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  font-family: var(--editor-font);
+  font-size: var(--t-lg);
+  line-height: 1.75;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+}
+.fill-text .blank-chip:not(.filled) {
+  background: transparent;
+  border: 1px dashed var(--line-strong);
+  color: var(--muted);
+}
+.fill-side {
+  width: 260px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  padding: var(--s-5) var(--s-4);
+  border-left: 1px solid var(--line);
+  background: var(--raised);
+  overflow: auto;
+}
+
+/* ---- scratch pages in the capture window ------------------------------------------------------------------- */
+
+.capture-text-host.away,
+.cap-place.away {
+  display: none;
+}
+/* A scratch page is the capture's paper with its colour as a thin edge on the left. */
+.scratch-host {
+  box-shadow: inset 3px 0 0 var(--hue);
+}
+.cap-page {
+  color: var(--muted);
+}
+.cap-dots {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+.cap-dot {
+  width: 9px;
+  height: 9px;
+  padding: 0;
+  border: 1.5px solid var(--hue);
+  border-radius: 50%;
+  background: transparent;
+  opacity: 0.55;
+  cursor: pointer;
+}
+.cap-dot.filled {
+  background: var(--hue);
+}
+.cap-dot.on {
+  opacity: 1;
+  box-shadow: 0 0 0 2px var(--paper), 0 0 0 3.5px var(--hue);
+}
+.cap-dot:hover {
+  opacity: 1;
+}
+
+/* ---- the picker: a prompt run on the selection ------------------------------------------------------------- */
+
+.picker-run {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.run-head {
+  display: flex;
+  gap: var(--s-2);
+  align-items: baseline;
+  padding: var(--s-3) var(--s-4) var(--s-2);
+}
+.run-text {
+  margin: 0 var(--s-4) var(--s-2);
+  padding: var(--s-2) var(--s-3);
+  overflow: auto;
+  font-size: var(--t-sm);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  border-radius: var(--r-md);
+}
+.run-prompt {
+  max-height: 30%;
+  color: var(--muted);
+  background: var(--sunk);
+}
+.run-sel {
+  flex: 1;
+  min-height: 0;
+  border-left: 2px solid var(--line);
+  border-radius: 0;
+}
+.run-out {
+  flex: 1;
+  min-height: 0;
+  font-size: var(--t-md);
+  color: var(--ink);
+}
+.run-out.live::after {
+  content: "▍";
+  color: var(--faint);
+}
+.run-out.bad {
+  color: var(--bad);
+}
+
+/* The picker's search mark: the same glass as the title bar's, sized and centred like Ctrl K's spark. */
+.picker-glass {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  color: var(--accent);
+}
+
+/* The heading over the notes that match in the picker. */
+.picker-section {
+  padding: 10px 10px 4px;
+  color: var(--faint);
+  font-size: var(--t-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}

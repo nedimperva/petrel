@@ -1,0 +1,722 @@
+/* Panels and menus: the week, Ctrl K, the AI menu, tasks, keys, the reading view. The main window only. */
+
+/* ---- the week -------------------------------------------------------------------------------------------- */
+
+.week {
+  width: min(680px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-5);
+}
+.week section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.week-bar {
+  display: flex;
+  gap: 2px;
+  height: 10px;
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+.week-bar span {
+  background: var(--hue);
+}
+.week-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2) var(--s-4);
+  font-size: var(--t-sm);
+  color: var(--ink-2);
+}
+.week-legend .dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--hue);
+}
+.week-prose p {
+  margin: 0 0 var(--s-2);
+  font: 400 var(--t-lg)/1.7 var(--font-write);
+}
+.week-prose .link {
+  font: inherit;
+}
+.week-ask {
+  display: flex;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  background: var(--accent-wash);
+  border-radius: var(--r-md);
+  color: var(--ink-2);
+}
+.week-ask p {
+  margin: 0;
+  font: var(--t-md) / 1.6 var(--font-ui);
+}
+.week-task {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-3);
+  font-size: var(--t-rd);
+}
+.week-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2) var(--s-5);
+  padding-top: var(--s-3);
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: var(--t-xs);
+}
+
+/* ---- Ctrl K filters -------------------------------------------------------------------------------------- */
+
+.palette-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0 var(--s-4) var(--s-2);
+}
+
+/* The capture's place chip carries the collection's mark. */
+.capture-foot .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Copy flashes the card once in its collection's colour. */
+.lcard.flash {
+  animation: copied 700ms var(--ease);
+}
+@keyframes copied {
+  20% {
+    background: var(--hue-soft);
+    box-shadow: 0 0 0 2px var(--hue);
+  }
+}
+
+/* `_from capture_` under an entry on a day's page. */
+.cm-from-capture {
+  font-family: var(--font-ui);
+  font-size: 0.68em;
+  color: var(--faint);
+}
+
+/* Tasks: a real checkbox where `- [ ]` is, and a done task goes quiet. */
+.cm-task-box {
+  width: 0.9em;
+  height: 0.9em;
+  margin: 0 0.45em 0 0;
+  vertical-align: -0.08em;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.cm-task-done {
+  color: var(--faint);
+  text-decoration: line-through;
+  text-decoration-color: var(--line-strong);
+}
+
+/* ---- your prompts under Ctrl J's built-in tasks ---------------------------------------------------------- */
+
+/* ---- ask again ------------------------------------------------------------------------------------------- */
+
+.answer-turn.earlier {
+  opacity: 0.72;
+  margin-bottom: var(--s-3);
+}
+.answer-q {
+  margin: var(--s-2) 0;
+  color: var(--ink-2);
+  font-weight: 600;
+}
+.answer-more {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin: var(--s-3) 0;
+  padding: 6px 10px;
+  border-radius: var(--r-md);
+  background: var(--sunk);
+}
+.answer-more input {
+  flex: 1;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+/* ---- settle a conflict ----------------------------------------------------------------------------------- */
+
+.lcard.conflict {
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  border-style: dashed;
+}
+.settle {
+  width: min(1040px, calc(100vw - 48px));
+  max-height: calc(100vh - 80px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  padding: var(--s-5);
+  border-radius: var(--r-xl);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-lg);
+  animation: rise var(--d-base) var(--ease);
+}
+.settle-head h2 {
+  margin: 0 0 4px;
+  font: 600 24px/1.2 var(--font-write);
+}
+.settle-sides {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--s-4);
+}
+.settle-side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  min-height: 0;
+}
+.settle-text {
+  flex: 1;
+  min-height: 120px;
+  overflow: auto;
+  padding: var(--s-3) var(--s-4);
+  border-radius: var(--r-md);
+  background: var(--sunk);
+  font: 400 var(--t-lg)/1.65 var(--font-write);
+  white-space: pre-wrap;
+}
+.diff-del {
+  background: color-mix(in srgb, var(--bad) 18%, transparent);
+  color: inherit;
+  border-radius: 3px;
+}
+.diff-add {
+  background: color-mix(in srgb, var(--ok) 22%, transparent);
+  color: inherit;
+  border-radius: 3px;
+}
+
+/* ---- open tasks ------------------------------------------------------------------------------------------ */
+
+.palette.tasks {
+  width: min(680px, calc(100vw - 32px));
+}
+.task-group {
+  padding: 2px 0 6px;
+}
+.task-note {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-3);
+  width: 100%;
+  padding: 8px 10px 2px;
+  border: 0;
+  background: none;
+  color: var(--ink-2);
+  font: 600 var(--t-sm) / 1.3 var(--font-ui);
+  text-align: left;
+  cursor: pointer;
+}
+.task-row {
+  min-height: 32px;
+}
+.task-row .row-label {
+  flex: 1;
+  cursor: pointer;
+}
+.task-box {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1.5px solid var(--faint);
+  border-radius: var(--r-sm);
+  background: none;
+  cursor: pointer;
+}
+.task-box:hover,
+.task-row.on .task-box {
+  border-color: var(--accent);
+}
+
+/* Collections of pages: tiles at the end of the shelf, their notes found with Ctrl K. */
+.page-tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+.page-tile {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--raised);
+  color: var(--ink-2);
+  font: inherit;
+  font-size: var(--t-sm);
+  cursor: pointer;
+}
+.page-tile:hover {
+  border-color: var(--accent);
+}
+/* ---- the one AI menu: Ctrl J, or / on an empty line ----------------------------------------------------- */
+
+.ai-menu {
+  width: 420px;
+  max-width: calc(100vw - 24px);
+  border-radius: var(--r-xl);
+  padding: 0;
+  overflow: hidden;
+  border-color: var(--line-strong);
+}
+.ai-menu-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.ai-menu-spark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--r-md);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: var(--t-md);
+}
+.ai-menu-field input {
+  flex: 1;
+  min-width: 0;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 2px 0 !important;
+  font-size: var(--t-rd);
+}
+.ai-menu-scope {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent-wash);
+  border: 1px solid var(--line);
+  font-size: var(--t-xs);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.ai-menu-list {
+  max-height: 300px;
+  overflow: auto;
+  padding: 2px 6px 6px;
+}
+.ai-menu-group {
+  padding: 10px 8px 4px;
+  font-size: var(--t-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.ai-menu .menu-item {
+  position: relative;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 36px;
+  padding: 0 8px;
+  color: var(--ink);
+  transition: background var(--d-fast) var(--ease);
+}
+.ai-menu .menu-item.on {
+  background: var(--accent-soft);
+}
+.ai-menu .menu-item.on::before {
+  content: "";
+  position: absolute;
+  left: -6px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
+}
+.ai-menu-icon {
+  flex: none;
+  color: var(--muted);
+}
+.ai-menu .menu-item.on .ai-menu-icon,
+.ai-menu .menu-item.ask .ai-menu-icon {
+  color: var(--accent);
+}
+.ai-menu-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.ai-menu-label {
+  flex: none;
+  max-width: 70%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--t-md);
+}
+.ai-menu .menu-item.ask .ai-menu-label {
+  color: var(--accent-ink);
+  font-weight: 500;
+}
+.ai-menu-hint {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--t-xs);
+  color: var(--muted);
+  opacity: 0;
+  transition: opacity var(--d-fast) var(--ease);
+}
+.ai-menu .menu-item.on .ai-menu-hint {
+  opacity: 1;
+}
+.ai-menu-num,
+.ai-menu-enter {
+  flex: none;
+  min-width: 20px;
+  text-align: center;
+}
+.ai-menu-num {
+  opacity: 0.55;
+}
+.ai-menu-foot {
+  display: flex;
+  gap: var(--s-3);
+  padding: 7px 12px;
+  border-top: 1px solid var(--line);
+  background: var(--paper);
+  font-size: var(--t-xs);
+}
+
+/* ---- one overlay that grows into a panel: Ctrl K, tasks, the week, history -------------------------------- */
+
+/* Every overlay comes and goes the same way. */
+.palette,
+.panel,
+.dialog,
+.lsheet,
+.settle,
+.switcher,
+.menu {
+  animation: rise var(--d-base) var(--ease);
+}
+.scrim.top > .panel {
+  max-height: 78vh;
+}
+.scrim.top > .history.panel {
+  height: min(640px, 78vh);
+}
+
+/* ---- every shortcut on one sheet (Shift ?) ---------------------------------------------------------------- */
+
+.panel.shortcuts {
+  width: min(1180px, calc(100vw - 48px));
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--r-xl);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+.shortcuts-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-4) var(--s-5);
+  border-bottom: 1px solid var(--line);
+}
+.shortcuts-head h2 {
+  margin: 0;
+  font: 600 var(--t-lg) / 1.3 var(--font-ui);
+}
+.shortcuts-grid {
+  overflow: auto;
+  padding: var(--s-4) var(--s-5) var(--s-6);
+  columns: 3 320px;
+  column-gap: var(--s-6);
+  /* The last rows fade out while there is more below; at the end only the empty padding fades. */
+  mask-image: linear-gradient(to bottom, #000 calc(100% - var(--s-6)), transparent);
+}
+.shortcuts-grid section {
+  break-inside: avoid;
+  margin-bottom: var(--s-5);
+}
+.shortcuts-grid h3 {
+  margin: 0 0 var(--s-2);
+  font-size: var(--t-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: var(--s-1) 0;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--t-sm);
+}
+.margin-empty {
+  margin: 0;
+  font-size: var(--t-xs);
+  line-height: 1.5;
+  color: var(--muted);
+}
+.note-margin .link-row .link-title {
+  font-size: var(--t-sm);
+}
+
+/* ---- a quiet page: the chrome steps back while you type, until the mouse moves (src/note/quiet.ts) -------- */
+
+.titlebar,
+.sidebar,
+.page-foot,
+.note-margin {
+  transition: opacity var(--d-slow) var(--ease);
+}
+:root.writing-quiet .titlebar:not(:hover),
+:root.writing-quiet .sidebar:not(:hover):not(:focus-within),
+:root.writing-quiet .page-foot:not(:hover),
+:root.writing-quiet .note-margin:not(:hover) {
+  opacity: 0.08;
+}
+
+/* ---- Ctrl K: the highlighted note beside the list ----------------------------------------------------------- */
+
+.palette-body {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+}
+.palette-body > .palette-list {
+  flex: 1;
+  min-width: 0;
+}
+.palette.previewing {
+  width: min(1000px, calc(100vw - 32px));
+}
+.palette.previewing .palette-body > .palette-list {
+  flex: none;
+  width: 400px;
+  border-right: 1px solid var(--line);
+}
+.palette-peek {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: var(--s-5) var(--s-6);
+  font-family: var(--editor-font);
+}
+.peek-meta {
+  margin: 0 0 var(--s-2);
+  font: var(--t-sm) / 1.4 var(--font-ui);
+  color: var(--muted);
+}
+.peek-title {
+  margin: 0 0 var(--s-3);
+  font-weight: 500;
+  font-size: 24px;
+  line-height: 1.25;
+  color: var(--ink);
+}
+.peek-text {
+  margin: 0 0 var(--s-3);
+  font-size: var(--t-lg);
+  line-height: 1.7;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+.peek-text mark {
+  background: var(--mark);
+  color: var(--ink);
+  border-radius: 3px;
+  padding: 0 2px;
+}
+/* Too narrow for two columns: the list alone, as before. */
+@media (max-width: 820px) {
+  .palette-peek {
+    display: none;
+  }
+  .palette.previewing {
+    width: min(640px, calc(100vw - 32px));
+  }
+  .palette.previewing .palette-body > .palette-list {
+    flex: 1;
+    width: auto;
+    border-right: 0;
+  }
+}
+.answer .cm-wikilink[data-title] {
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-size: var(--t-sm);
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+/* ---- a new Petrel is ready (src/UpdateNotice.tsx) ------------------------------------------------------------- */
+
+.update-notice {
+  position: fixed;
+  right: var(--s-4);
+  bottom: calc(var(--s-4) + 40px);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  max-width: min(520px, calc(100vw - 32px));
+  padding: 12px 14px;
+  border-radius: var(--r-lg);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-lg);
+  animation: rise var(--d-base) var(--ease);
+}
+.update-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--t-md);
+}
+.update-text b {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* ---- the reading view (Ctrl E) ------------------------------------------------------------------------------- */
+
+.reading {
+  position: fixed;
+  inset: var(--titlebar-h) 0 0;
+  z-index: 40;
+  overflow: auto;
+  background-color: var(--paper);
+  background-image: var(--grain);
+  outline: none;
+  animation: reading-in var(--d-slow) var(--ease);
+}
+@keyframes reading-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .reading {
+    animation: none;
+  }
+}
+.reading-page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: var(--s-7) var(--s-5) 96px;
+  font: calc(var(--editor-size) + 2px) / 1.75 var(--editor-font);
+  color: var(--ink);
+}
+.reading-page.song {
+  max-width: 1080px;
+}
+.reading-meta {
+  margin: 0 0 var(--s-2);
+  font: 500 var(--t-sm) var(--font-ui);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.reading-title {
+  margin: 0 0 var(--s-6);
+  font: 600 38px/1.2 var(--font-write);
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+.reading-page .read {
+  font: inherit;
+}
+.reading-page .read p {
+  margin: 0 0 0.9em;
+  hyphens: auto;
+}
+.song {
+  columns: 2 26em;
+  column-gap: 64px;
+}
+.song-line {
+  break-inside: avoid;
+  white-space: pre-wrap;
+}
+.song-part {
+  display: inline-flex;
+  flex-direction: column;
+  vertical-align: bottom;
+}
+.song-line:has(.chorded) .song-part .song-chord {
+  min-height: 1.3em;
+}
+.song-chord {
+  font: 600 0.72em/1.3 var(--font-ui);
+  color: var(--accent);
+  padding-right: 0.4em;
+}
+.song-words {
+  white-space: pre;
+}
+.song-gap {
+  height: 1em;
+}
+.song-label {
+  break-after: avoid;
+  margin: 0.4em 0 0.2em;
+  font: 600 var(--t-sm) var(--font-ui);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.reading-foot {
+  position: fixed;
+  right: var(--s-5);
+  bottom: var(--s-4);
+  margin: 0;
+  font-size: var(--t-sm);
+  color: var(--faint);
+}
+

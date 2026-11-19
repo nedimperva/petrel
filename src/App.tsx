@@ -5,6 +5,14 @@
 // go back to Ctrl K on Esc. The title bar is Petrel's own (TitleBar.tsx).
 // Ctrl Tab goes back to the note before (held, it lists the last few); Ctrl Shift Enter opens a second note beside.
 
+// The main window's own styles (the shared ones are in main.tsx).
+import "./styles/library.css";
+import "./styles/review.css";
+import "./styles/day.css";
+import "./styles/margin.css";
+import "./styles/panels.css";
+import "./styles/sidebar.css";
+import "./styles/settings.css";
 import Reading from "./note/Reading";
 import { learnKeys, USED_KEY } from "./learned";
 import { showSteps, startSteps, stepDone, STEPS_KEY } from "./firstSteps";

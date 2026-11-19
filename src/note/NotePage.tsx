@@ -6,7 +6,7 @@
 // Pasted pictures are saved next to the note and shown under their line.
 
 import { createEffect, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
-import { aiLive, api, errText, type CalEvent, type AiRelated, type AiTask, type Backlinks, type Note, type NoteSummary, type OpenTask } from "../api";
+import { aiLive, api, errText, type AiRelated, type AiTask, type Backlinks, type Note, type NoteSummary } from "../api";
 import { blanks, fill, todayText } from "../blanks";
 import FillBlanks from "../collection/FillBlanks";
 import { lastVersions } from "../collection/BlankFields";
@@ -15,7 +15,7 @@ import { toggleTask } from "../editor/commands";
 import { createEditor, type EditorHandle } from "../editor/editor";
 import { cleanPaste } from "../editor/paste";
 import { pictureExtensions } from "../editor/pictures";
-import { addDays, clock, dayTally, dayTitle, dropBareStamps, dueOf, isDayNote, JOURNAL, monthGrid, tallyLine, today, weekOf } from "../journal/days";
+import { clock, dayTally, dayTitle, dropBareStamps, isDayNote, JOURNAL, tallyLine, today } from "../journal/days";
 import { dayExtensions } from "../journal/stamps";
 import { linkExtensions } from "../notes/links";
 import { snippetCompletions } from "../editor/snippets";
@@ -23,7 +23,7 @@ import { parseLinks } from "../notes/parse";
 import { createNoteSaver, type NoteSaver, type SaveState } from "../notes/saver";
 import { prefs } from "../settings/prefs";
 import { wordCount } from "../copy";
-import { folderName, Kbd, KeyHints, say } from "../ui";
+import { folderName, KeyHints, say } from "../ui";
 import { rank } from "../palette/match";
 import { keyLabel, matches } from "../keys";
 
@@ -34,6 +34,7 @@ import { EditorView } from "@codemirror/view";
 import { hush } from "./quiet";
 import { takeJump } from "./jump";
 import FirstSteps from "./FirstSteps";
+import { createDay, DayHead, DayMargin } from "./day";
 import { usageLine } from "../ai/usage";
 import { addAsk, ASKS_KEY, parseAsks } from "../ai/asks";
 
@@ -151,104 +152,8 @@ export default function NotePage(p: Props) {
     const n = note();
     return n && isDayNote(n.folder, n.title) ? n.title : null;
   };
-  // The days that have a page, for the month. A signal, not a resource: a resource read here would suspend the
-  // whole page (App's Suspense) on every day change and take the focus out of the text.
-  const [journal, setJournal] = createSignal<Set<string>>(new Set());
-  createEffect(
-    on(
-      () => (dayPage() ? `${dayPage()}:${note()?.id ?? ""}` : null),
-      (k) => {
-        if (k)
-          void api()
-            .then((s) => s.listNotes({ folder: JOURNAL, limit: 1000 }))
-            .then((ns) => setJournal(new Set(ns.map((n) => n.title))), () => {});
-      },
-    ),
-  );
-
-  /** The month grid, on request: the week strip over the title is enough to step between days. */
-  const [showMonth, setShowMonth] = createSignal(false);
-  /** The day's events from Google Calendar, when it is turned on (Settings › Sync). */
-  const [events, setEvents] = createSignal<CalEvent[]>([]);
-  createEffect(
-    on(dayPage, (d) => {
-      setEvents([]);
-      if (d) void api().then((s) => s.calendarDay(d)).then((e) => dayPage() === d && setEvents(e), () => {});
-    }),
-  );
-  /** An event becomes an entry at the end of the page, its time and title, the cursor after it for notes. */
-  function writeUnder(e: CalEvent) {
-    const v = editor?.view;
-    if (!v) return;
-    const doc = v.state.doc.toString();
-    // The fresh time line at the end (nothing after it) gives way to the event's line.
-    const bare = /\n*\d{1,2}:\d{2}[ \t]*$/.exec(doc);
-    const from = bare ? bare.index : doc.length;
-    const before = doc.slice(0, from).replace(/\s+$/, "");
-    const line = `${e.start || clock()} **${e.title}** `;
-    const insert = `${before ? "\n\n" : ""}${line}`;
-    v.dispatch({ changes: { from: before.length, to: doc.length, insert }, selection: { anchor: before.length + insert.length }, scrollIntoView: true, userEvent: "input" });
-    v.focus();
-  }
-
-  // On today's page: tasks still open on earlier days' pages, and how many captures came in today.
-  const [carried, setCarried] = createSignal<OpenTask[]>([]);
-  /** Tasks in any note due today or before (`@fri`, `@nov20`), for today's margin. */
-  const [dueNow, setDueNow] = createSignal<{ t: OpenTask; due: string }[]>([]);
-  const [capturedToday, setCapturedToday] = createSignal(0);
-  createEffect(
-    on(
-      () => (dayPage() === today() ? `${note()?.id ?? ""}` : null),
-      (k) => {
-        if (k === null) return setCarried([]);
-        void api().then(async (s) => {
-          const [tasks, inbox] = await Promise.all([s.openTasks().catch(() => []), s.listNotes({ folder: "inbox", limit: 1000 }).catch(() => [])]);
-          setCarried(
-            tasks
-              .filter((t) => t.folder === JOURNAL && t.title < today())
-              .sort((a, b) => b.title.localeCompare(a.title) || a.line - b.line)
-              .slice(0, 8),
-          );
-          const written = (t: OpenTask) => (t.folder === JOURNAL && /^\d{4}-\d{2}-\d{2}$/.test(t.title) ? new Date(`${t.title}T12:00`) : new Date(t.modifiedAt));
-          setDueNow(
-            tasks
-              .filter((t) => !(t.folder === JOURNAL && t.title === today()))
-              .map((t) => ({ t, due: dueOf(t.text, written(t)) ?? "" }))
-              .filter((x) => x.due && x.due <= today())
-              .sort((a, b) => a.due.localeCompare(b.due))
-              .slice(0, 8),
-          );
-          const start = new Date();
-          start.setHours(0, 0, 0, 0);
-          setCapturedToday(inbox.filter((n) => n.modifiedAt >= start.getTime()).length);
-        });
-      },
-    ),
-  );
-  /** A task from an earlier day comes onto today's page: out of its note, onto the end of this one. */
-  async function bringHere(t: OpenTask) {
-    try {
-      const s = await api();
-      const tok = await s.takeTask(t.noteId, t.line, t.text);
-      setCarried(carried().filter((x) => x !== t));
-      setDueNow(dueNow().filter((x) => x.t !== t));
-      editor?.insert(`- [ ] ${t.text}`, false);
-      say(`Moved here from ${t.folder === JOURNAL ? dayTitle(t.title) : t.title}`, { undo: () => s.undo(tok.token) });
-    } catch (e) {
-      say(errText(e), { error: true });
-    }
-  }
-
-  async function tickCarried(t: OpenTask) {
-    try {
-      const s = await api();
-      const tok = await s.tickTask(t.noteId, t.line, t.text);
-      setCarried(carried().filter((x) => x !== t));
-      say(`Ticked on ${dayTitle(t.title)}`, { undo: () => s.undo(tok.token).then(() => setCarried([t, ...carried()])) });
-    } catch (e) {
-      say(errText(e), { error: true });
-    }
-  }
+  // A day's page: the week, the month, the calendar and what is still open (./day.tsx).
+  const day = createDay({ dayPage, note, editor: () => editor });
 
   const loadLinks = async (id: number) => {
     const s = await api();
@@ -879,46 +784,7 @@ export default function NotePage(p: Props) {
     <div class="page" classList={{ "day-page": !!dayPage(), "beside-open": !!p.besideOpen }}>
       <div class="page-main">
         <div class="sheet">
-          <Show when={dayPage()}>
-            {(d) => (
-              <div class="day-head">
-                <div class="day-week" role="group" aria-label="This week">
-                  <For each={weekOf(d())}>
-                    {(x) => (
-                      <button
-                        type="button"
-                        class="week-day"
-                        classList={{ on: x === d(), has: journal().has(x), today: x === today(), future: x > today() }}
-                        aria-label={dayTitle(x)}
-                        aria-current={x === d() ? "date" : undefined}
-                        onClick={() => p.onDay?.(x)}
-                      >
-                        <span class="week-wd">{new Date(`${x}T12:00`).toLocaleDateString(undefined, { weekday: "short" })}</span>
-                        <span class="week-n">{Number(x.slice(8))}</span>
-                      </button>
-                    )}
-                  </For>
-                  <button type="button" class="link small week-month" aria-expanded={showMonth()} onClick={() => setShowMonth(!showMonth())}>
-                    {showMonth() ? "Hide the month" : "Month"}
-                  </button>
-                </div>
-                <h1 class="day-title">{dayTitle(d())}</h1>
-                <span class="day-nav">
-                  <button class="icon-btn" title="The day before (Alt ←)" aria-label="The day before" onClick={() => p.onDay?.(addDays(d(), -1))}>
-                    ‹
-                  </button>
-                  <Show when={d() !== today()}>
-                    <button class="link small" onClick={() => p.onDay?.(today())}>
-                      Today
-                    </button>
-                  </Show>
-                  <button class="icon-btn" title="The day after (Alt →)" aria-label="The day after" onClick={() => p.onDay?.(addDays(d(), 1))}>
-                    ›
-                  </button>
-                </span>
-              </div>
-            )}
-          </Show>
+          <Show when={dayPage()}>{(d) => <DayHead day={d()} state={day} onDay={(x) => p.onDay?.(x)} />}</Show>
           <input
             ref={titleInput}
             hidden={!!dayPage()}
@@ -955,92 +821,7 @@ export default function NotePage(p: Props) {
           </Show>
         </div>
         <aside class="note-margin" classList={{ quiet: typingNow() }} aria-label="About this note">
-          <Show when={dayPage() && events().length}>
-            <section class="day-cal" aria-label="Calendar">
-              <h4>Calendar</h4>
-              <For each={events()}>
-                {(e) => (
-                  <button type="button" class="cal-row" title="Write under it" onMouseDown={(ev) => ev.preventDefault()} onClick={() => writeUnder(e)}>
-                    <span class="cal-time">{e.start || "all day"}</span>
-                    <span class="cal-title">{e.title}</span>
-                  </button>
-                )}
-              </For>
-            </section>
-          </Show>
-          <Show when={showMonth() ? dayPage() : null}>
-            {(d) => (
-              <section class="day-month" aria-label="This month">
-                <div class="day-month-name">{new Date(`${d()}T12:00`).toLocaleDateString(undefined, { month: "long" })}</div>
-            <div class="day-grid">
-              <For each={["M", "T", "W", "T", "F", "S", "S"]}>{(w) => <span class="day-wd">{w}</span>}</For>
-              <For each={monthGrid(d())}>
-                {(x) =>
-                  x ? (
-                    <button
-                      class="day-cell"
-                      classList={{ on: x === d(), has: journal().has(x), future: x > today() }}
-                      aria-label={dayTitle(x)}
-                      onClick={() => p.onDay?.(x)}
-                    >
-                      {Number(x.slice(8))}
-                    </button>
-                  ) : (
-                    <span />
-                  )
-                }
-              </For>
-            </div>
-
-              </section>
-            )}
-          </Show>
-          <Show when={dayPage() === today() && carried().length}>
-            <section class="day-carried" aria-label="Still open from earlier days">
-              <h4>Still open</h4>
-              <For each={carried()}>
-                {(t) => (
-                  <label class="carried-row">
-                    <input type="checkbox" onChange={() => void tickCarried(t)} />
-                    <span class="carried-text">{t.text.replace(/^\s*[-*]\s+\[ \]\s*/, "")}</span>
-                    <button type="button" class="carried-day" onClick={() => p.onDay?.(t.title)} title={`Open ${dayTitle(t.title)}`}>
-                      {new Date(`${t.title}T12:00`).toLocaleDateString(undefined, { weekday: "short" })}
-                    </button>
-                    <button type="button" class="carried-bring" onClick={(e) => (e.preventDefault(), void bringHere(t))} title="Move it onto today's page">
-                      ↓ here
-                    </button>
-                  </label>
-                )}
-              </For>
-            </section>
-          </Show>
-          <Show when={dayPage() === today() && dueNow().length}>
-            <section class="day-carried" aria-label="Due today">
-              <h4>Due</h4>
-              <For each={dueNow()}>
-                {(x) => (
-                  <div class="carried-row">
-                    <span class="carried-text" classList={{ overdue: x.due < today() }}>
-                      {x.t.text}
-                    </span>
-                    <button type="button" class="carried-day" onClick={() => p.onOpen(x.t.noteId)} title={`Open ${x.t.title}`}>
-                      {x.due < today() ? dayTitle(x.due) : x.t.folder === JOURNAL ? dayTitle(x.t.title) : x.t.title.slice(0, 16)}
-                    </button>
-                  </div>
-                )}
-              </For>
-            </section>
-          </Show>
-          <Show when={dayPage() === today() && capturedToday()}>
-            {(k) => (
-              <section aria-label="Captured today">
-                <h4>Captured today</h4>
-                <p class="muted small">
-                  {k()} in the inbox. <Kbd keys={keyLabel("library")} /> to file them.
-                </p>
-              </section>
-            )}
-          </Show>
+          <Show when={dayPage()}>{(d) => <DayMargin day={d()} state={day} onDay={(x) => p.onDay?.(x)} onOpen={p.onOpen} />}</Show>
           {/* Only what the note has: a new page is only the page (the shortcuts sheet explains # and [[). */}
           <Show when={!dayPage() && heads().length}>
             <section aria-label="On this page">
