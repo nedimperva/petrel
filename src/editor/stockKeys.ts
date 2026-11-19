@@ -26,6 +26,5 @@ export function asCombo(name: string): string {
   if (key === "" && name.endsWith("-")) key = "-";
   const mods = new Set(parts.map((m) => (m === "Mod" || m === "Ctrl" ? "Ctrl" : m)));
   if (key.length === 1) key = key.toUpperCase();
-  key = key.replace(/^Arrow/, "Arrow");
   return [...["Ctrl", "Alt", "Shift"].filter((m) => mods.has(m)), key].join("+");
 }
