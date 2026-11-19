@@ -18,11 +18,15 @@ import { pictureExtensions } from "../editor/pictures";
 import { addDays, clock, dayTitle, dueOf, isDayNote, JOURNAL, monthGrid, today } from "../journal/days";
 import { dayExtensions } from "../journal/stamps";
 import { linkExtensions } from "../notes/links";
+import { blankCompletion } from "../editor/blankMenu";
 import { parseLinks } from "../notes/parse";
 import { createNoteSaver, type NoteSaver, type SaveState } from "../notes/saver";
 import { prefs } from "../settings/prefs";
 import { wordCount } from "../copy";
 import { folderName, Kbd, KeyHints, say } from "../ui";
+import { copyWithFill } from "../collection/copyWithFill";
+import { toCopy } from "../library/faces";
+import { faces } from "../library/Mark";
 import { rank } from "../palette/match";
 import { keyLabel, matches } from "../keys";
 
@@ -667,6 +671,7 @@ export default function NotePage(p: Props) {
           return { title: n.title, where: folderName(n.folder), text: n.body.slice(0, 280) };
         },
         targets: async (text) => (await api()).linkTargets(text, 12),
+        more: [blankCompletion(() => toCopy(note()?.folder ?? p.folder, faces()))],
         beside: async (inner) => {
           const r = await (await api()).resolveLink(inner);
           if (r.kind === "note") p.onBeside?.(r.id);
@@ -678,6 +683,14 @@ export default function NotePage(p: Props) {
       // Typing, not shortcuts, quiets the chrome. AltGr letters arrive as Ctrl Alt on Windows and are typing too.
       const writes = (e.key.length === 1 && (!(e.ctrlKey || e.metaKey) || e.altKey)) || (!e.ctrlKey && /^(Enter|Backspace|Delete)$/.test(e.key));
       if (writes) hush();
+      // Ctrl C with nothing selected in a prompt or snippet copies the whole thing, its blanks filled in first.
+      const n = note();
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "c" && view().state.selection.main.empty && n && toCopy(n.folder, faces())) {
+        e.preventDefault();
+        e.stopPropagation();
+        void saver.flush().then(() => copyWithFill(n));
+        return;
+      }
       if (e.key === "/" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         const s = view().state;
         const line = s.doc.lineAt(s.selection.main.head);
@@ -1040,7 +1053,7 @@ export default function NotePage(p: Props) {
         <Show when={words()}>
           <span>{words()} words</span>
         </Show>
-        <KeyHints hints={[!!dayPage() && ["Alt ← →", "other days"], [chips("find"), "find"], [chips("ai"), "AI"], [chips("library"), "library"], [chips("shortcuts"), "all keys"]]} />
+        <KeyHints hints={[!!dayPage() && ["Alt ← →", "other days"], !!note() && toCopy(note()!.folder, faces()) && ["Ctrl C", "copy it"], [chips("find"), "find"], [chips("ai"), "AI"], [chips("library"), "library"], [chips("shortcuts"), "all keys"]]} />
         <Show when={p.notice}>
           <span class="notice">{p.notice}</span>
         </Show>

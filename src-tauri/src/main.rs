@@ -76,7 +76,7 @@ fn wants_picker(args: &[String]) -> bool {
 pub fn arrange(w: &tauri::WebviewWindow) {
     match w.label() {
         "capture" => hypr::arrange("Petrel capture", 640, 260),
-        "picker" => hypr::arrange("Petrel picker", 620, 440),
+        "picker" => hypr::arrange("Petrel picker", 720, 460),
         _ => {}
     }
 }
@@ -240,7 +240,7 @@ pub fn open_picker(app: &tauri::AppHandle) {
 fn build_picker(app: &tauri::AppHandle) {
     let built = WebviewWindowBuilder::new(app, "picker", WebviewUrl::App("index.html".into()))
         .title("Petrel picker")
-        .inner_size(620.0, 440.0)
+        .inner_size(720.0, 460.0)
         .min_inner_size(420.0, 240.0)
         .always_on_top(true)
         .decorations(false)

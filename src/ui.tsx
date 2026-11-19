@@ -45,6 +45,14 @@ export function ToastView() {
 
 /** The one-line key footer every screen ends with: `[keys, what]` pairs, in the same look everywhere. A false
  * entry is left out, so a screen can list keys that only apply now. */
+/** Ctrl C (Cmd C) with no text selected and not in a field: copy the card or note that is open, not text. */
+export function copyKey(e: KeyboardEvent): boolean {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== "c") return false;
+  if (typing(e)) return false;
+  const s = getSelection();
+  return !s || s.isCollapsed || !s.toString().trim();
+}
+
 export function KeyHints(p: { hints: ([string, string] | false | null | undefined)[] }) {
   // One line only: on a narrow window the hints at the end wrap out of sight (see .key-hints) instead of crowding.
   return (

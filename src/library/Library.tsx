@@ -1,7 +1,7 @@
 // The library (Ctrl L): what you copy, as cards. Only collections of things to copy (Prompts, Snippets: `t` sets
 // it) are rows of cards; collections of pages are tiles at the end, and their notes are found with Ctrl K. "All" is
 // the shelf, the most used first; a collection's tab shows all its cards. The arrow keys move between cards, Enter
-// opens one as a sheet, c copies, e edits, p pins, t sets the collection's look and kind, / filters, and in the inbox
+// or a click opens one as its note (to read and change), Ctrl C or c copies (its blanks filled in its text), e edits, p pins, t sets the collection's look and kind, / filters, and in the inbox
 // m files the card you are on and r reviews the inbox one card at a time. A note changed in two places is a card
 // in the inbox until it is settled (Settle.tsx).
 
@@ -21,7 +21,7 @@ import Reader from "./Reader";
 import Settle from "./Settle";
 import Shelves from "./Shelves";
 import Sheet from "./Sheet";
-import { copyFilled, itemText } from "../collection/copyItem";
+import { copyWithFill } from "../collection/copyWithFill";
 
 // The review is a mode of the inbox's cards: one at a time, in the library's place.
 const Review = lazy(() => import("../inbox/Review"));
@@ -63,14 +63,8 @@ export default function Library(p: {
   const mode = () => (p.reviewing ? "review" : p.tab === "all" ? "shelves" : p.tab.startsWith("c:") ? (reading() !== null ? "reader" : "collection") : "list");
   /** The full note, for the move list. */
   const moveCard = (n: NoteSummary) => void api().then((s) => s.peekNote(n.id)).then(setMoving, (e) => say(errText(e), { error: true }));
-  /** A card from the shelves with blanks or versions, open as a sheet over them. */
-  const [sheet, setSheet] = createSignal<NoteSummary | null>(null);
-  async function copyCard(n: NoteSummary) {
-    const t = await itemText(n.id).catch(() => null);
-    if (!t) return;
-    if (t.hasBlanks) setSheet(n);
-    else if (await copyFilled(n, t.text)) p.onChanged();
-  }
+  /** Copy a card: at once, or after filling in its blanks inside its text (copyWithFill's host in App). */
+  const copyCard = (n: NoteSummary) => copyWithFill(n, p.onChanged).catch((e) => say(errText(e), { error: true }));
   const pageTop = () => p.tab.slice(2);
   const pages = createMemo(() => (p.data?.notes ?? []).filter((n) => n.folder === pageTop() || n.folder.startsWith(`${pageTop()}/`)));
 
@@ -220,7 +214,7 @@ export default function Library(p: {
       </Show>
       <Show when={mode() === "shelves"}>
         <div class="lib-span">
-          <Shelves data={p.data} onTab={p.onTab} onEdit={p.onEdit} onCopy={(n) => void copyCard(n)} onReview={p.onReview} busy={!!sheet() || !!moving()} />
+          <Shelves data={p.data} onTab={p.onTab} onEdit={p.onEdit} onCopy={(n) => void copyCard(n)} onReview={p.onReview} busy={!!moving()} />
         </div>
       </Show>
       <Show when={mode() === "collection"}>
@@ -238,7 +232,7 @@ export default function Library(p: {
             onMove={moveCard}
             onPin={(n) => void pin(n)}
             onDelete={(n) => void remove(n)}
-            busy={!!sheet() || !!moving() || facing() !== null}
+            busy={!!moving() || facing() !== null}
           />
         </div>
       </Show>
@@ -373,21 +367,6 @@ export default function Library(p: {
 
       <Show when={moving()}>
         {(n) => <Destination exclude={n().id} what={n().folder === "inbox" ? undefined : n().title} from={n().folder === "inbox" ? undefined : n().folder} onPick={(t) => void file(n(), t)} onClose={() => setMoving(null)} />}
-      </Show>
-      <Show when={sheet()}>
-        {(n) => (
-          <Sheet
-            id={n().id}
-            copies={p.data?.copies[n().path] ?? 0}
-            aiReady={p.aiReady}
-            onClose={() => setSheet(null)}
-            onEdit={(i) => (setSheet(null), p.onEdit(i))}
-            onMove={(x) => (setSheet(null), setMoving(x))}
-            onFile={(x, sg) => (setSheet(null), void fileSuggested(x, sg))}
-            onDelete={(x) => (setSheet(null), void remove(x))}
-            onAiSetup={p.onAiSetup}
-          />
-        )}
       </Show>
       <Show when={facing()}>{(top) => <FacePicker top={top()} onClose={() => setFacing(null)} />}</Show>
       <Show when={settling()}>

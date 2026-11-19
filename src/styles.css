@@ -5117,3 +5117,311 @@ button.cap-top-text:hover {
 .margin-links h4:not(:first-child) {
   margin-top: var(--s-5);
 }
+
+/* ---- the picker, quieter (2026-11-19): a wide list, the preview on a slightly sunk page, no lines between them;
+   filling in happens inside the text itself (src/collection/InlineFill.tsx) ---------------------------------- */
+
+.picker .palette-field {
+  border-bottom: 0;
+  padding: 6px var(--s-5) 0;
+}
+.picker .palette-input {
+  font-size: 19px !important;
+}
+.picker-body {
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+}
+.picker-body .palette-list {
+  border-right: 0;
+  padding: 4px 10px 10px;
+}
+.picker .palette-row {
+  align-items: center;
+  padding: 7px 12px;
+  min-height: 46px;
+}
+.picker .palette-row.on {
+  background: var(--accent-wash);
+}
+.picker .row-label {
+  font-size: var(--t-rd);
+}
+.picker .row-used {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+}
+.picker-section {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: var(--t-sm);
+  color: var(--muted);
+  padding: 12px 12px 4px;
+}
+.picker-peek {
+  background: var(--sunk);
+  padding: var(--s-5) var(--s-5);
+  border-radius: var(--r-lg) 0 0 0;
+}
+.picker-peek .card-text {
+  font-size: var(--t-rd);
+  line-height: 1.7;
+  color: var(--ink-2);
+}
+.peek-blank {
+  color: var(--ink-2);
+  border-bottom: 1.5px dotted var(--faint);
+}
+.picker-foot {
+  border-top: 0;
+  padding: 10px var(--s-5) 12px;
+}
+
+.ifill {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+}
+.ifill-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-3);
+  padding: var(--s-5) var(--s-6) var(--s-2);
+}
+.ifill-back {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--t-md);
+  cursor: pointer;
+}
+.ifill-back:hover {
+  color: var(--ink);
+}
+.ifill-title {
+  font-size: var(--t-lg);
+  font-weight: 500;
+}
+.ifill-versions {
+  display: flex;
+  gap: var(--s-3);
+}
+.ifill-versions button {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: var(--t-sm);
+  color: var(--muted);
+  cursor: pointer;
+}
+.ifill-versions button.on {
+  color: var(--ink);
+  font-weight: 500;
+}
+.ifill-text {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--s-3) var(--s-6) var(--s-4);
+  font: 400 17px / 1.85 var(--font-write);
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ib {
+  border-radius: 3px 3px 0 0;
+  padding: 1px 2px;
+  outline: 0;
+}
+.ib.typed {
+  box-shadow: inset 0 -1.5px 0 var(--line-strong);
+  caret-color: var(--accent);
+}
+.ib.typed.unfilled::before {
+  content: attr(data-name);
+  color: var(--faint);
+}
+.ib.typed:focus {
+  background: var(--accent-soft);
+  box-shadow: inset 0 -1.5px 0 var(--accent);
+  color: var(--accent-ink);
+}
+.ib.typed.unfilled:focus::before {
+  color: color-mix(in srgb, var(--accent-ink) 55%, transparent);
+}
+/* A long blank (code, the clipboard) shows a few lines until you go into it. */
+.ib.typed.long:not(:focus) {
+  display: inline-block;
+  max-height: 5.5em;
+  overflow: hidden;
+  vertical-align: bottom;
+  max-width: 100%;
+  font-family: var(--font-mono);
+  font-size: 0.8em;
+  line-height: 1.7;
+  mask-image: linear-gradient(to bottom, #000 60%, transparent);
+}
+.ib.typed.long:focus {
+  font-family: var(--font-mono);
+  font-size: 0.8em;
+}
+.ib.echo {
+  color: var(--ink-2);
+  box-shadow: inset 0 -1px 0 var(--line);
+}
+.ib.choice {
+  display: inline;
+  cursor: default;
+}
+.ib-opt {
+  padding: 1px 3px;
+  border-radius: 3px;
+  color: var(--faint);
+  cursor: pointer;
+}
+.ib-opt + .ib-opt {
+  margin-left: 4px;
+}
+.ib-opt sup {
+  display: none;
+  font: 500 10px var(--font-ui);
+  color: var(--accent);
+  margin-right: 2px;
+}
+.ib.choice:focus .ib-opt sup {
+  display: inline;
+}
+.ib-opt.on {
+  color: var(--ink);
+  box-shadow: inset 0 -1.5px 0 var(--line-strong);
+}
+.ib.choice:focus .ib-opt.on {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  box-shadow: inset 0 -1.5px 0 var(--accent);
+}
+.ifill-hint {
+  display: flex;
+  gap: var(--s-3);
+  padding: 0 var(--s-6) var(--s-2);
+  font-size: var(--t-sm);
+  color: var(--muted);
+  min-height: 18px;
+}
+.ifill-count {
+  margin-left: auto;
+}
+.ifill-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  padding: 10px var(--s-5) 12px;
+  color: var(--muted);
+  font-size: var(--t-xs);
+}
+/* Ctrl C on a card in the library: the same filling in, over the page. */
+.ifill-dialog {
+  width: min(680px, calc(100vw - 48px));
+  height: min(460px, calc(100vh - 96px));
+  background: var(--paper);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+/* ---- New collection in the sidebar (src/collection/NewCollection.tsx): a name and its kind, nothing boxed ---- */
+
+.newcoll {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 4px 0 8px;
+  padding: 10px 10px 8px;
+  border-radius: var(--r-lg);
+  background: var(--raised);
+  box-shadow: var(--shadow-sm);
+}
+.newcoll-name {
+  border: 0 !important;
+  outline: 0;
+  background: transparent !important;
+  box-shadow: inset 0 -1.5px 0 var(--accent) !important;
+  border-radius: 0 !important;
+  padding: 2px 0 4px !important;
+  font: 500 var(--t-lg) var(--font-ui);
+  color: var(--ink);
+}
+.newcoll-kinds {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.newcoll-kind {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: none;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.newcoll-kind:hover {
+  background: var(--hover);
+}
+.newcoll-kind.on {
+  background: var(--accent-soft);
+}
+.newcoll-kind-name {
+  font-size: var(--t-md);
+  font-weight: 500;
+  color: var(--ink);
+}
+.newcoll-kind.on .newcoll-kind-name {
+  color: var(--accent-ink);
+}
+.newcoll-kind-what {
+  font-size: var(--t-xs);
+  line-height: 1.4;
+  color: var(--muted);
+}
+.newcoll-colors {
+  display: flex;
+  gap: 7px;
+  padding: 0 8px;
+}
+.newcoll-color {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--hue);
+  cursor: pointer;
+}
+.newcoll-color.on {
+  box-shadow: 0 0 0 2px var(--raised), 0 0 0 3.5px var(--hue);
+}
+.newcoll-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 0 0 8px;
+  font-size: var(--t-xs);
+}
+.newcoll-make {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: 500 var(--t-sm) var(--font-ui);
+  color: var(--accent);
+  cursor: pointer;
+}

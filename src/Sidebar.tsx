@@ -12,6 +12,7 @@ import { toCopy } from "./library/faces";
 import { folderName, Kbd, say } from "./ui";
 import { keyLabel } from "./keys";
 import { syncLine, syncStatus } from "./sync";
+import NewCollection, { type NewCollectionChoice } from "./collection/NewCollection";
 
 export type Place = "today" | "inbox" | "tasks" | "all" | `c:${string}` | null;
 
@@ -41,6 +42,8 @@ export default function Sidebar(p: {
   /** Every collection at once: the library's shelves. */
   onEverything(): void;
   onCollection(folder: string): void;
+  /** A collection was just made: start its first note. */
+  onNewIn?(folder: string): void;
   /** A collection was renamed or trashed: what is open may have moved. */
   onFolderChanged(from: string, to: string | null): void;
   onSettings(): void;
@@ -98,6 +101,20 @@ export default function Sidebar(p: {
       const made = await (await api()).createFolder(parent ? `${parent}/${n}` : n);
       void refetch();
       p.onCollection(made);
+    } catch (e) {
+      say(errText(e), { error: true });
+    }
+  }
+
+  /** A top collection from the panel: the folder, its kind and colour in `.petrel`, then its first note. */
+  async function makeTop(c: NewCollectionChoice) {
+    setMaking(null);
+    try {
+      const made = await (await api()).createFolder(c.name);
+      await saveFace(made, { color: c.color, mark: "", copy: c.copy ? "yes" : "no" });
+      void refetch();
+      if (p.onNewIn) p.onNewIn(made);
+      else p.onCollection(made);
     } catch (e) {
       say(errText(e), { error: true });
     }
@@ -260,8 +277,7 @@ export default function Sidebar(p: {
             </button>
           }
         >
-          <div class="side-row editing">{nameInput("", (v) => void make("", v), () => setMaking(null), "New collection")}</div>
-          <p class="side-hint">A collection is a folder. Enter makes it; pages or things to copy is in its ⋯ menu.</p>
+          <NewCollection onMake={(c) => void makeTop(c)} onCancel={() => setMaking(null)} />
         </Show>
       </div>
 

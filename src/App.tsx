@@ -27,6 +27,7 @@ import Destination, { type Target } from "./inbox/Destination";
 import { addDays, JOURNAL, today } from "./journal/days";
 import { typingSound } from "./joy/sound";
 import { loadFaces } from "./library/Mark";
+import { FillHost } from "./collection/copyWithFill";
 
 const Library = lazy(() => import("./library/Library"));
 const Settings = lazy(() => import("./settings/Settings"));
@@ -586,6 +587,7 @@ export default function App() {
           onTasks={() => void (page ? page.flush() : Promise.resolve(true)).then(() => ((panels.tasks = false), setTasks(true)))}
           onEverything={() => void library("all")}
           onCollection={(f) => void library(`c:${f}`)}
+          onNewIn={(f) => void newNote(f)}
           onFolderChanged={(from, to) => void folderMoved(from, to)}
           onSettings={() => setSettings("all")}
           onSync={() => setSettings("sync")}
@@ -736,6 +738,7 @@ export default function App() {
       <Show when={keysOpen()}>
         <Shortcuts onClose={() => (setKeysOpen(false), page?.focus())} onSettings={() => (setKeysOpen(false), setSettings("keys"))} />
       </Show>
+      <FillHost />
       <ToastView />
       <UpdateNotice />
     </div>

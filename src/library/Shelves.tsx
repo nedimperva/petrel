@@ -1,13 +1,14 @@
 // Ctrl L's first screen: every collection at once. The inbox is a strip on top; each collection is a shelf of
 // its first five: the most used for things to copy, the newest for pages. ↑ ↓ move between shelves, ← → along
-// one, Enter copies a card (its sheet, if it has blanks) or opens a page, "All n" opens the collection. Typing
+// one, Enter or a click opens a card as its note, Ctrl C copies a thing to copy (its blanks filled in its text),
+// "All n" opens the collection. Typing
 // filters every shelf at once.
 
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 import type { NoteSummary } from "../api";
 import CardText, { plain } from "./CardText";
 import { loadUsed, type Used } from "../collection/lastUsed";
-import { ago, folderName, KeyHints, typing } from "../ui";
+import { ago, copyKey, folderName, KeyHints, typing } from "../ui";
 import { kindOf } from "./Card";
 import { toCopy, topOf } from "./faces";
 import Mark, { faces, hueClass } from "./Mark";
@@ -95,13 +96,16 @@ export default function Shelves(p: {
     setAt({ row: r, col: c });
     queueMicrotask(() => shelvesEl?.querySelector(`[data-at="${r}:${c}"]`)?.scrollIntoView({ block: "nearest", inline: "nearest" }));
   };
-  const open = (n: NoteSummary | undefined) => {
-    if (!n) return;
-    if (toCopy(n.folder, faces())) p.onCopy(n);
-    else p.onEdit(n.id);
-  };
+  // Enter and a click open, whatever the card; Ctrl C (or c) copies a thing to copy.
+  const open = (n: NoteSummary | undefined) => n && p.onEdit(n.id);
 
   const key = (e: KeyboardEvent) => {
+    const n = current();
+    if (copyKey(e) && !p.busy && !document.querySelector(".scrim") && n && toCopy(n.folder, faces())) {
+      e.preventDefault();
+      e.stopPropagation();
+      return p.onCopy(n);
+    }
     if (p.busy || e.ctrlKey || e.metaKey || e.altKey || document.querySelector(".scrim")) return;
     if (typing(e)) {
       if (e.target === filterInput && (e.key === "ArrowDown" || e.key === "Enter")) {
@@ -294,7 +298,7 @@ export default function Shelves(p: {
       </div>
 
       <footer class="lib-foot">
-        <KeyHints hints={[["↑ ↓", "shelves"], ["← →", "along one"], ["Enter", "open or copy"], ["e", "edit"], inbox().length > 0 && ["r", "review the inbox"], ["/", "filter"]]} />
+        <KeyHints hints={[["↑ ↓", "shelves"], ["← →", "along one"], ["Enter", "open"], ["Ctrl C", "copy"], ["e", "edit"], inbox().length > 0 && ["r", "review the inbox"], ["/", "filter"]]} />
         <span class="grow" />
         <KeyHints hints={[["Esc", "back to writing"]]} />
       </footer>

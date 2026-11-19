@@ -7,13 +7,13 @@ import { createMemo, createResource, createSignal, For, onMount, Show } from "so
 import { api, type CaptureContext, type NoteSummary } from "./api";
 import { blanks, parts } from "./blanks";
 import { keepVersion, lastVersions } from "./collection/BlankFields";
-import FillBlanks from "./collection/FillBlanks";
+import InlineFill, { type PasteMode } from "./collection/InlineFill";
 import { copyFilled } from "./collection/copyItem";
 import { hasVersions, lastFirst, versionsOf, type Version } from "./collection/versions";
 import { applyPrefs, parsePrefs } from "./settings/prefs";
 import { ago, folderName, KeyHints } from "./ui";
 import { loadUsed, type Used } from "./collection/lastUsed";
-import { faces, loadFaces } from "./library/Mark";
+import Mark, { faces, loadFaces } from "./library/Mark";
 import { rest, whenOpened } from "./warm";
 import { toCopy } from "./library/faces";
 import { fold } from "./palette/match";
@@ -22,7 +22,8 @@ export default function Picker() {
   let input!: HTMLInputElement;
   const [q, setQ] = createSignal("");
   const [i, setI] = createSignal(0);
-  const [filling, setFilling] = createSignal<{ item: NoteSummary; text: string } | null>(null);
+  /** The card being filled in; its text is the version shown, or the whole body. */
+  const [filling, setFilling] = createSignal<{ item: NoteSummary; body: string } | null>(null);
   const [ctx, setCtx] = createSignal<CaptureContext | null>(null);
   const [here, setHere] = createSignal<Record<string, number>>({});
   const [used, setUsed] = createSignal<Used>({});
@@ -101,13 +102,15 @@ export default function Picker() {
     await close();
   }
 
-  async function pick(n: NoteSummary | undefined) {
+  /** Enter copies at once when there is nothing to fill; Tab (or a card with blanks) fills it in first. */
+  async function pick(n: NoteSummary | undefined, fillFirst = false) {
     if (!n) return;
     const full = n.id === sel()?.id && body() !== undefined ? body()! : (await (await api()).peekNote(n.id)).body.replace(/\n+$/, "");
     const text = n.id === sel()?.id && version() ? version()!.text : full;
-    if (blanks(text).length) return setFilling({ item: n, text });
+    if (fillFirst || blanks(text).length) return setFilling({ item: n, body: full });
     await copy(n, text);
   }
+  const fillText = () => version()?.text ?? filling()?.body ?? "";
 
   const key = async (e: KeyboardEvent) => {
     const n = rows().length;
@@ -118,7 +121,7 @@ export default function Picker() {
     else if (e.key === "Enter") {
       pasting = e.ctrlKey ? (e.shiftKey ? "shift" : "plain") : "";
       void pick(rows()[i()]);
-    }
+    } else if (e.key === "Tab" && !e.shiftKey && rows()[i()]) void pick(rows()[i()], true);
     else if (e.ctrlKey && e.key.toLowerCase() === "o") {
       const r = rows()[i()];
       if (r) await (await api()).showNoteInMain(r.id);
@@ -148,20 +151,30 @@ export default function Picker() {
     if (c?.app) setHere(await s.copyCountsIn(c.app).catch(() => ({})));
   }
 
-  const shown = () => version()?.text ?? sel()?.preview ?? "";
+  const shown = () => version()?.text ?? body() ?? sel()?.preview ?? "";
 
   return (
     <div class="picker">
       <Show
         when={!filling()}
         fallback={
-          <FillBlanks
-            inline
+          <InlineFill
             title={filling()!.item.title}
-            text={filling()!.text}
+            where={folderName(filling()!.item.folder)}
+            text={fillText()}
             selection={ctx()?.text}
-            onClose={() => setFilling(null)}
-            onCopy={(text) => void copy(filling()!.item, text)}
+            versions={versions()}
+            version={vi() % Math.max(1, versions().length)}
+            onVersion={setVi}
+            canPaste
+            onClose={() => {
+              setFilling(null);
+              setTimeout(() => input?.focus());
+            }}
+            onCopy={(text, paste: PasteMode) => {
+              pasting = paste;
+              void copy(filling()!.item, text);
+            }}
           />
         }
       >
@@ -192,20 +205,17 @@ export default function Picker() {
                 <button class="palette-row" classList={{ on: k() === i() }} onMouseMove={() => k() !== i() && (setI(k()), setVi(0))} onClick={() => pick(n)}>
                   <span class="row-two">
                     <span class="row-label">{n.folder === "inbox" ? n.preview.split("\n")[0] : n.title}</span>
-                    <Show when={used()[n.path]}>
-                      {(u) => (
-                        <span class="row-used">
-                          Used in {u()[0]} · {ago(u()[1])}
-                        </span>
-                      )}
-                    </Show>
+                    <span class="row-used">
+                      <Mark folder={n.folder} size={10} />
+                      {folderName(n.folder)}
+                      <Show when={used()[n.path]}>{(u) => ` · used in ${u()[0]} ${ago(u()[1])}`}</Show>
+                    </span>
                   </span>
                   <Show when={here()[n.path]}>
                     <span class="row-here" title={`Copied ${here()[n.path]} times with ${ctx()?.app} in front`}>
                       {here()[n.path]}× here
                     </span>
                   </Show>
-                  <span class="row-sub">{folderName(n.folder)}</span>
                 </button>
                 </>
               )}
@@ -222,13 +232,13 @@ export default function Picker() {
                 </div>
               </Show>
               <p class="card-text">
-                <For each={parts(shown())}>{(x) => (x.blank ? <span class="chip blank">{x.text}</span> : x.text)}</For>
+                <For each={parts(shown())}>{(x) => (x.blank ? <span class="peek-blank">{x.text}</span> : x.text)}</For>
               </p>
             </div>
           </Show>
         </div>
         <footer class="picker-foot">
-          <KeyHints hints={[["Enter", "copy and close"], ["Ctrl Enter", "paste it"], versions().length > 1 && ["Alt ← →", "version"], ["Ctrl O", "open in Petrel"]]} />
+          <KeyHints hints={[["Enter", "copy"], ["Tab", "fill in"], ["Ctrl Enter", "paste it"], versions().length > 1 && ["Alt ← →", "version"], ["Ctrl O", "open"]]} />
           <span class="grow" />
           <KeyHints hints={[["Esc", "close"]]} />
         </footer>

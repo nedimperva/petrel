@@ -4,7 +4,7 @@
 // mirrors crates/petrel-core/src/links.rs (which has the tests that count); this one only has to find links to
 // draw and follow them.
 
-import { autocompletion, type Completion, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
+import { autocompletion, type Completion, type CompletionContext, type CompletionResult, type CompletionSource } from "@codemirror/autocomplete";
 import { type Extension, RangeSetBuilder, StateEffect } from "@codemirror/state";
 import {
   Decoration,
@@ -34,6 +34,8 @@ export interface LinkOptions {
   create?(title: string): Promise<void>;
   /** Shift Enter on a link: open it beside the note. */
   beside?(inner: string): void;
+  /** Other suggestion lists in the same editor (one autocompletion per editor): `{{` blanks. */
+  more?: CompletionSource[];
 }
 
 const resolved = StateEffect.define<null>();
@@ -194,7 +196,7 @@ export function linkExtensions(o: LinkOptions): Extension {
   return [
     draw,
     hover,
-    autocompletion({ override: [complete], icons: false, activateOnTyping: true }),
+    autocompletion({ override: [complete, ...(o.more ?? [])], icons: false, activateOnTyping: true }),
     completionTheme,
     keymap.of([
       { key: "Alt-Enter", run: follow },

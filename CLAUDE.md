@@ -5,7 +5,18 @@ Markdown files in one folder; a Rust engine (`crates/petrel-core`) indexes them 
 (`src-tauri`) adds windows, tray, hotkeys and AI, and a SolidJS UI (`src`) draws it. The README covers setup and
 keys; `docs/design/petrel.md` is the design; this file covers state and decisions that aren't visible from the code.
 
-## Where things stand (2026-11-16)
+## Where things stand (2026-11-19)
+
+- **Picker and collections (owner picked A1, B1, C1, C4 on 2026-11-19 from board
+  https://claude.ai/artifact/LcRLCY8895iWTbHZEFr3yR), branch `claude/project-thread-k0lnv3`:** blanks are filled in
+  inside the text itself (`src/collection/InlineFill.tsx`), in the picker (Tab fills, Enter copies) and over the main
+  window (`copyWithFill.tsx`, host in App; FillBlanks is now that too). The picker is 720×460 with a wider list. In the
+  library Enter or a click opens a thing to copy as its note; Ctrl C (`copyKey` in `ui.tsx`) or `c` copies it, and
+  Ctrl C with nothing selected in such a note copies the note. The library no longer opens Sheet for copying (Sheet
+  stays for inbox cards). "New collection" is `src/collection/NewCollection.tsx` (name, things to copy or pages,
+  colour; then its first note). Typing `{{` in a thing to copy lists the kinds of blank (`src/editor/blankMenu.ts`).
+  Solid delegates `onKeyDown` to document, so a handler that must stop App's keys (Esc) uses `on:keydown`. Not picked
+  yet: C2 (starter kits built in), D (no boxes anywhere). Tried in a browser against the fake store.
 
 - **Review picks (owner asked 2026-11-16, list https://claude.ai/artifact/DwnzLPdrfqZobjj2mWSTwV), branch
   `claude/project-thread-gquwlx`, PR #14, one commit per batch:** items 1–11, 14–21, 23, 25–29, 35, 37, 45–50 and

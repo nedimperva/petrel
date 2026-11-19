@@ -7,7 +7,7 @@ import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Sh
 import type { NoteSummary } from "../api";
 import CardText, { plain } from "./CardText";
 import { loadUsed, type Used } from "../collection/lastUsed";
-import { ago, folderName, KeyHints, typing, undoLast } from "../ui";
+import { ago, copyKey, folderName, KeyHints, typing, undoLast } from "../ui";
 import { kindOf } from "./Card";
 import { toCopy } from "./faces";
 import Mark, { faces, hueClass } from "./Mark";
@@ -84,9 +84,16 @@ export default function Collection(p: {
     setSel(k);
     queueMicrotask(() => gridEl?.querySelector(`[data-i="${k}"]`)?.scrollIntoView({ block: "nearest" }));
   };
-  const open = (n: NoteSummary | undefined) => n && (copy() ? p.onCopy(n) : p.onRead(n.id));
+  // One meaning for Enter and a click: open it. A thing to copy opens as its note, to read and change in place;
+  // Ctrl C (or c) copies it. The picker is where Enter copies.
+  const open = (n: NoteSummary | undefined) => n && (copy() ? p.onEdit(n.id) : p.onRead(n.id));
 
   const key = (e: KeyboardEvent) => {
+    if (copyKey(e) && !p.busy && !document.querySelector(".scrim") && current() && copy()) {
+      e.preventDefault();
+      e.stopPropagation();
+      return p.onCopy(current()!);
+    }
     if (p.busy || e.ctrlKey || e.metaKey || e.altKey || document.querySelector(".scrim")) return;
     if (typing(e)) {
       if (e.target === filterInput && (e.key === "ArrowDown" || e.key === "Enter")) {
@@ -206,7 +213,7 @@ export default function Collection(p: {
           {(n, i) => {
             const on = () => i() === Math.min(sel(), shown().length - 1);
             return (
-              <button type="button" class="ccard" classList={{ on: on(), page: !copy(), code: copy() && code() }} data-i={i()} onMouseEnter={() => setSel(i())} onClick={() => open(n)} onDblClick={() => p.onEdit(n.id)}>
+              <button type="button" class="ccard" classList={{ on: on(), page: !copy(), code: copy() && code() }} data-i={i()} onMouseEnter={() => setSel(i())} onClick={() => open(n)}>
                 <Show
                   when={copy()}
                   fallback={
@@ -260,7 +267,7 @@ export default function Collection(p: {
                     <span class="grow" />
                     <Show when={on()}>
                       <span class="ccard-go">
-                        Copy <kbd>Enter</kbd>
+                        Copy <kbd>Ctrl</kbd> <kbd>C</kbd>
                       </span>
                     </Show>
                   </span>
@@ -278,7 +285,8 @@ export default function Collection(p: {
         <KeyHints
           hints={[
             ["← → ↑ ↓", copy() ? "cards" : "pages"],
-            ["Enter", copy() ? "copy" : "read"],
+            ["Enter", copy() ? "open" : "read"],
+            copy() && ["Ctrl C", "copy"],
             ["e", copy() ? "edit" : "write in it"],
             ["m", "move"],
             ["p", "pin"],

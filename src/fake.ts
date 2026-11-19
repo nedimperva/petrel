@@ -110,6 +110,13 @@ export function fakeApi(): Api {
   add("", "Week plan", "## Monday\n\n- [x] Tern changelog\n- [ ] Petrel inbox screen\n\n## Tuesday\n\n- [ ] Dentist 14:00\n", [], 30 * MIN);
 
   add("Prompts", "Code review", "Review this {{language}} code for bugs, unclear names and missing tests. Be direct and list the worst problem first.\n\n{{code}}\n", ["ai"], 4 * DAY);
+  add(
+    "Prompts",
+    "Review my branch",
+    "## Quick\nReview the changes on this branch against {{base|main}}. Look for {{focus: correctness / security / speed / simplicity}} problems first. List only real findings, most serious first, each with the file and line. Don't change any code.\n\n## Deep\nReview this branch against {{base|main}} as a strict senior reviewer. Read the diff, then the code around it. Focus on {{focus: correctness / security / speed / simplicity}}.\n",
+    ["ai"],
+    1 * DAY,
+  );
   add("Prompts", "Explain like a colleague", "Explain {{topic}} to me as a senior colleague would over coffee: the idea first, then one example, then the trap people fall into.\n", ["ai"], 9 * DAY);
   add(
     "Prompts",
@@ -197,7 +204,7 @@ export function fakeApi(): Api {
     showWindow: () => wait(undefined),
     closeCapture: () => wait(undefined).then(() => console.info("capture closed")),
     openCapture: () => wait(undefined).then(() => void window.open("/?capture", "_blank", "width=560,height=320")),
-    openPicker: () => wait(undefined).then(() => void window.open("/?picker", "_blank", "width=620,height=440")),
+    openPicker: () => wait(undefined).then(() => void window.open("/?picker", "_blank", "width=720,height=460")),
     closePicker: () => wait(undefined).then(() => console.info("picker closed")),
     pasteIntoFront: (shift) => wait(undefined).then(() => console.info(shift ? "pasted with Ctrl Shift V" : "pasted")),
     // Sync in the browser: a pretend Google account, so Settings › Sync and the sidebar can be worked on.
