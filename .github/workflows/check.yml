@@ -60,10 +60,10 @@ jobs:
       - name: tests
         run: cargo test --workspace
 
-      # The speed table at 50,000 drafts. Shared runners vary from run to run, so targets get 3x: this catches
-      # regressions of several times; the reference numbers come from the Omarchy laptop (and the sandbox the skeleton was built in).
-      - name: store_bench
+      # The notes speed table at 5,000 notes. Shared runners vary from run to run, so targets get 3x: this
+      # catches regressions of several times, not a slow day.
+      - name: notes_bench
         if: runner.os == 'Linux'
         env:
           PETREL_BENCH_SLACK: "3"
-        run: cargo run --release -p petrel-core --example store_bench
+        run: cargo run --release -p petrel-core --example notes_bench

@@ -90,8 +90,7 @@ npm run tauri dev       # the app, with hot reload for the UI
 npm run tauri build     # an installer: .msi/.exe on Windows, .deb/.rpm/.AppImage on Linux
 
 cargo test --workspace                                        # all tests
-cargo run --release -p petrel-core --example store_bench      # the speed table at 50,000 drafts
-cargo run --release -p petrel-core --example gen_store -- PATH # a 50,000-draft test library; PETREL_DB=PATH opens it
+cargo run --release -p petrel-core --example notes_bench      # the speed table on 5,000 generated notes
 scripts/kill-test.sh                                          # type, kill -9, see what survived
 ```
 
@@ -177,7 +176,7 @@ crates/petrel-core/      the engine (Rust, no UI)
   src/notes.rs           the notes folder: scan, index, save with conflict copies, move, merge, trash, versions
   src/links.rs           [[links]] and backlinks
   src/store.rs           SQLite schema, migrations with backup, settings, the old drafts tables
-  examples/store_bench.rs  timings on a 50,000-draft store
+  examples/notes_bench.rs  timings on a folder of 5,000 notes
 src-tauri/               the desktop shell and CLI: commands, windows (main, capture, picker), tray, hotkeys, AI
 src/                     the UI (SolidJS): title bar, card library, the writing page, command bar, picker
 ```

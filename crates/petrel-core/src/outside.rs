@@ -99,7 +99,11 @@ pub fn read(store: &Store, scope: &Scope, name: &str) -> Result<Note> {
             Resolved::Note { id } => store.peek_note(id)?,
             _ => {
                 // A loose name: the best title match.
-                let best = store.find_notes(name, 1)?.into_iter().next().ok_or_else(|| anyhow!("no note called {name}"))?;
+                let best = store
+                    .find_notes(name, 1)?
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| anyhow!("no note called {name}"))?;
                 store.peek_note(best.id)?
             }
         }
@@ -153,7 +157,10 @@ pub fn add(store: &mut Store, scope: &Scope, place: &str, text: &str) -> Result<
         return Ok(format!("added to {}", ch.note.path));
     }
     // A collection by name (any case).
-    if let Some(c) = collections(store, &Scope { write: true, ..scope.clone() })?.into_iter().find(|c| c.name.eq_ignore_ascii_case(place)) {
+    if let Some(c) = collections(store, &Scope { write: true, ..scope.clone() })?
+        .into_iter()
+        .find(|c| c.name.eq_ignore_ascii_case(place))
+    {
         let title = crate::title::title(text);
         let n = store.create_note(&c.name, &title, &format!("{text}\n"), &[])?;
         return Ok(format!("added as {}", n.path));
@@ -167,9 +174,18 @@ pub fn add(store: &mut Store, scope: &Scope, place: &str, text: &str) -> Result<
 
 /// A card's text with its `{{blanks}}` filled from `values` (a blank not given keeps its default, or stays as
 /// `{{name}}` so nothing silently vanishes). The rules are src/blanks.ts's.
-pub fn card(store: &Store, scope: &Scope, title: &str, values: &[(String, String)]) -> Result<(Note, String)> {
+pub fn card(
+    store: &Store,
+    scope: &Scope,
+    title: &str,
+    values: &[(String, String)],
+) -> Result<(Note, String)> {
     let n = read(store, scope, title)?;
-    let body = if top_name(&n.folder).eq_ignore_ascii_case("snippets") { drop_trigger(&n.body) } else { n.body.clone() };
+    let body = if top_name(&n.folder).eq_ignore_ascii_case("snippets") {
+        drop_trigger(&n.body)
+    } else {
+        n.body.clone()
+    };
     let text = fill(body.trim_end_matches('\n'), values);
     Ok((n, text))
 }
@@ -252,7 +268,11 @@ fn drop_trigger(body: &str) -> String {
 
 fn top_name(folder: &str) -> String {
     let top = folder.split('/').next().unwrap_or("");
-    if top.is_empty() { "Notes".into() } else { top.into() }
+    if top.is_empty() {
+        "Notes".into()
+    } else {
+        top.into()
+    }
 }
 
 /// `today`, `yesterday`, `tomorrow` or `YYYY-MM-DD`.

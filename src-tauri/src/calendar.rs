@@ -96,7 +96,8 @@ pub async fn calendar_set_on(app: tauri::AppHandle, on: bool) -> Result<CalStatu
     }
     let a = app.clone();
     tauri::async_runtime::spawn_blocking(move || -> Result<()> {
-        let id = setting(&a, CLIENT_ID).context("set up Google sync first: the calendar uses the same sign-in")?;
+        let id =
+            setting(&a, CLIENT_ID).context("set up Google sync first: the calendar uses the same sign-in")?;
         let opener = a.clone();
         let granted = google::sign_in(&id, true, move |url| {
             use tauri_plugin_opener::OpenerExt;

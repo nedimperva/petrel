@@ -234,7 +234,11 @@ const UNFINISHED: &str = "sync.unfinished";
 pub fn note_unfinished(app: &tauri::AppHandle) {
     let _ = set_setting(app, UNFINISHED, "1");
     if let Some(root) = root(app) {
-        write_log(app, &root, &[("not finished before Quit; continues at the next start".into(), String::new())]);
+        write_log(
+            app,
+            &root,
+            &[("not finished before Quit; continues at the next start".into(), String::new())],
+        );
     }
 }
 

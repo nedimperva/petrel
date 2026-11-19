@@ -294,7 +294,7 @@ const SWEEP_EVERY: std::time::Duration = std::time::Duration::from_secs(24 * 60 
 
 fn sweep(store: &mut Store) {
     match store.sweep() {
-        Ok(r) if r.tombstoned + r.purged + r.tags_removed + r.versions_thinned > 0 => {
+        Ok(r) if r.versions_thinned > 0 => {
             log::info!("sweep: {r:?}")
         }
         Ok(_) => {}

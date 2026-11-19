@@ -34,7 +34,9 @@ pub fn serve() -> Result<()> {
         }
         let reply = match serde_json::from_str::<Value>(&line) {
             Ok(msg) => answer(&db, &msg),
-            Err(e) => Some(json!({"jsonrpc": "2.0", "id": null, "error": {"code": -32700, "message": e.to_string()}})),
+            Err(e) => Some(
+                json!({"jsonrpc": "2.0", "id": null, "error": {"code": -32700, "message": e.to_string()}}),
+            ),
         };
         if let Some(r) = reply {
             writeln!(out, "{r}")?;
@@ -147,7 +149,11 @@ fn call(db: &std::path::Path, name: &str, args: &Value) -> Result<String> {
             if hits.is_empty() {
                 return Ok("Nothing found.".into());
             }
-            Ok(hits.iter().map(|h| format!("[[{}]] ({}, {})\n{}", h.title, h.collection, h.path, h.line)).collect::<Vec<_>>().join("\n\n"))
+            Ok(hits
+                .iter()
+                .map(|h| format!("[[{}]] ({}, {})\n{}", h.title, h.collection, h.path, h.line))
+                .collect::<Vec<_>>()
+                .join("\n\n"))
         }
         "read_note" => {
             let n = outside::read(&store, &scope, &s("name"))?;
@@ -184,9 +190,13 @@ mod tests {
         let r = answer(&db, &json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-03-26"}})).unwrap();
         assert_eq!(r["result"]["protocolVersion"], "2025-03-26");
         assert!(answer(&db, &json!({"jsonrpc": "2.0", "method": "notifications/initialized"})).is_none());
-        assert_eq!(answer(&db, &json!({"jsonrpc": "2.0", "id": 2, "method": "nope"})).unwrap()["error"]["code"], -32601);
+        assert_eq!(
+            answer(&db, &json!({"jsonrpc": "2.0", "id": 2, "method": "nope"})).unwrap()["error"]["code"],
+            -32601
+        );
         let list = answer(&db, &json!({"jsonrpc": "2.0", "id": 3, "method": "tools/list"})).unwrap();
-        let names: Vec<&str> = list["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
+        let names: Vec<&str> =
+            list["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
         // Adding is off until the owner turns it on.
         assert!(names.contains(&"search_notes") && !names.contains(&"add_to_notes"), "{names:?}");
         let _ = std::fs::remove_dir_all(db.parent().unwrap());

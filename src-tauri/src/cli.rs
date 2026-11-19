@@ -80,7 +80,8 @@ pub enum Command {
 
 /// `find`, `read`, `add`, `copy` and `mcp`: the words after the program name.
 fn parse_sub(sub: &str, rest: &[String]) -> Result<Command> {
-    let words = |from: &[String]| from.iter().filter(|w| w.as_str() != "--").cloned().collect::<Vec<_>>().join(" ");
+    let words =
+        |from: &[String]| from.iter().filter(|w| w.as_str() != "--").cloned().collect::<Vec<_>>().join(" ");
     match sub {
         "find" => {
             let mut limit = 10;
@@ -88,7 +89,10 @@ fn parse_sub(sub: &str, rest: &[String]) -> Result<Command> {
             let mut it = rest.iter();
             while let Some(a) = it.next() {
                 if a == "--limit" || a == "-l" {
-                    limit = it.next().and_then(|n| n.parse().ok()).ok_or_else(|| anyhow::anyhow!("--limit needs a number"))?;
+                    limit = it
+                        .next()
+                        .and_then(|n| n.parse().ok())
+                        .ok_or_else(|| anyhow::anyhow!("--limit needs a number"))?;
                 } else {
                     text.push(a.clone());
                 }
@@ -122,7 +126,9 @@ fn parse_sub(sub: &str, rest: &[String]) -> Result<Command> {
                     a.strip_prefix("--blank=").map(str::to_string)
                 };
                 if let Some(p) = pair {
-                    let (k, v) = p.split_once('=').ok_or_else(|| anyhow::anyhow!("--blank needs NAME=VALUE, not {p}"))?;
+                    let (k, v) = p
+                        .split_once('=')
+                        .ok_or_else(|| anyhow::anyhow!("--blank needs NAME=VALUE, not {p}"))?;
                     blanks.push((k.trim().to_string(), v.to_string()));
                 } else if a == "--print" || a == "-p" {
                     print = true;
@@ -142,7 +148,8 @@ fn parse_sub(sub: &str, rest: &[String]) -> Result<Command> {
 
 /// `args` includes the program name, as `std::env::args()` gives it.
 pub fn parse(args: &[String]) -> Result<Command> {
-    if let Some(sub) = args.get(1).filter(|a| matches!(a.as_str(), "find" | "read" | "add" | "copy" | "mcp")) {
+    if let Some(sub) = args.get(1).filter(|a| matches!(a.as_str(), "find" | "read" | "add" | "copy" | "mcp"))
+    {
         return parse_sub(sub, &args[2..]);
     }
     let mut rest = args.iter().skip(1);
@@ -239,10 +246,16 @@ pub fn run(command: Command) -> Result<String> {
             if hits.is_empty() {
                 return Ok(format!("Nothing found for {text}."));
             }
-            Ok(hits.iter().map(|h| format!("{}  ({})\n    {}", h.title, h.path, h.line)).collect::<Vec<_>>().join("\n"))
+            Ok(hits
+                .iter()
+                .map(|h| format!("{}  ({})\n    {}", h.title, h.path, h.line))
+                .collect::<Vec<_>>()
+                .join("\n"))
         }
         Command::Read { name } => Ok(outside::read(&store, &all, &name)?.body),
-        Command::Add { place, text } => outside::add(&mut store, &all, &place, &text).map(|w| format!("Petrel: {w}")),
+        Command::Add { place, text } => {
+            outside::add(&mut store, &all, &place, &text).map(|w| format!("Petrel: {w}"))
+        }
         Command::Copy { card, blanks, print } => {
             let (note, text) = outside::card(&store, &all, &card, &blanks)?;
             let left: Vec<String> = petrel_core::outside::blanks_left(&text);
@@ -270,7 +283,13 @@ fn put_on_clipboard(text: &str) -> Result<()> {
         use std::process::{Command as Run, Stdio};
         let tools: [(&str, &[&str]); 2] = [("wl-copy", &[]), ("xclip", &["-selection", "clipboard"])];
         for (tool, args) in tools {
-            let Ok(mut child) = Run::new(tool).args(args).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null()).spawn() else {
+            let Ok(mut child) = Run::new(tool)
+                .args(args)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+            else {
                 continue;
             };
             child.stdin.take().context("no pipe")?.write_all(text.as_bytes())?;
@@ -330,12 +349,25 @@ mod tests {
 
     #[test]
     fn terminal_commands() {
-        assert_eq!(parse(&args(&["find", "tern", "release", "-l", "3"])).unwrap(), Command::Find { text: "tern release".into(), limit: 3 });
-        assert_eq!(parse(&args(&["add", "@today", "call", "the", "bank"])).unwrap(), Command::Add { place: "today".into(), text: "call the bank".into() });
-        assert_eq!(parse(&args(&["add", "milk"])).unwrap(), Command::Add { place: "".into(), text: "milk".into() });
+        assert_eq!(
+            parse(&args(&["find", "tern", "release", "-l", "3"])).unwrap(),
+            Command::Find { text: "tern release".into(), limit: 3 }
+        );
+        assert_eq!(
+            parse(&args(&["add", "@today", "call", "the", "bank"])).unwrap(),
+            Command::Add { place: "today".into(), text: "call the bank".into() }
+        );
+        assert_eq!(
+            parse(&args(&["add", "milk"])).unwrap(),
+            Command::Add { place: "".into(), text: "milk".into() }
+        );
         assert_eq!(
             parse(&args(&["copy", "Meeting", "link", "--blank", "day=Friday", "--blank=room=a b"])).unwrap(),
-            Command::Copy { card: "Meeting link".into(), blanks: vec![("day".into(), "Friday".into()), ("room".into(), "a b".into())], print: false }
+            Command::Copy {
+                card: "Meeting link".into(),
+                blanks: vec![("day".into(), "Friday".into()), ("room".into(), "a b".into())],
+                print: false
+            }
         );
         assert_eq!(parse(&args(&["mcp"])).unwrap(), Command::Mcp);
         assert!(parse(&args(&["add", "@today"])).is_err());

@@ -24,8 +24,7 @@ use sha2::{Digest, Sha256};
 
 use crate::attachments;
 use crate::links::{self, same, Link, Target};
-use crate::store::{Folder, Store, UndoToken, VERSION_INTERVAL_MS};
-use crate::title;
+use crate::store::{Store, UndoToken, VERSION_INTERVAL_MS};
 
 mod conflicts;
 pub mod fold;
@@ -202,19 +201,6 @@ pub struct NoteChange {
     pub relinked: usize,
 }
 
-/// A draft that became (part of) a note.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Promotion {
-    pub note_path: String,
-    pub note_title: String,
-    /// The note's id while its file is indexed.
-    pub note_id: Option<i64>,
-    /// `promote` or `append`.
-    pub kind: String,
-    pub at: i64,
-}
-
 /// One row of the `[[` list.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -234,9 +220,6 @@ pub struct LinkTarget {
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Resolved {
     Note {
-        id: i64,
-    },
-    Draft {
         id: i64,
     },
     /// Nothing by that name. `draft` is true for `[[d:…]]` and `[[u:…]]`, which Petrel does not create.
@@ -313,18 +296,6 @@ enum UndoStep {
         path: String,
         before: String,
         after: String,
-    },
-    DraftText {
-        id: i64,
-        before: String,
-        after: String,
-    },
-    DraftBatch {
-        token: String,
-    },
-    Promotion {
-        draft_id: i64,
-        previous: Option<(String, String, i64)>,
     },
 }
 
@@ -461,10 +432,18 @@ fn rename_with_retry(from: &Path, to: &Path) -> Result<()> {
 
 /// `Title (conflict 2026-11-11 2114)`, as `conflict_copy` names the other side of a clash.
 pub fn is_conflict_copy(title: &str) -> bool {
-    title.ends_with(')') && title.rfind(" (conflict ").is_some_and(|at| {
-        let rest = &title[at + 11..];
-        rest.len() >= 10 && rest.as_bytes()[..10].iter().enumerate().all(|(i, b)| if i == 4 || i == 7 { *b == b'-' } else { b.is_ascii_digit() })
-    })
+    title.ends_with(')')
+        && title.rfind(" (conflict ").is_some_and(|at| {
+            let rest = &title[at + 11..];
+            rest.len() >= 10
+                && rest.as_bytes()[..10].iter().enumerate().all(|(i, b)| {
+                    if i == 4 || i == 7 {
+                        *b == b'-'
+                    } else {
+                        b.is_ascii_digit()
+                    }
+                })
+        })
 }
 
 /// A title that is a file name on Linux and Windows: no path or reserved characters, no dots or spaces at the
@@ -563,16 +542,6 @@ fn phrase(text: &str) -> Option<String> {
     (!words.is_empty()).then(|| format!("\"{}\"", words.join(" ")))
 }
 
-/// An FTS5 query for titles starting with the words of `text`.
-fn title_prefix(text: &str) -> Option<String> {
-    let words: Vec<String> = text
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|w| !w.is_empty())
-        .map(|w| format!("title : \"{w}\"*"))
-        .collect();
-    (!words.is_empty()).then(|| words.join(" AND "))
-}
-
 fn line_at(text: &str, at: usize) -> String {
     let start = text[..at].rfind('\n').map_or(0, |i| i + 1);
     let end = text[at..].find('\n').map_or(text.len(), |i| at + i);
@@ -622,7 +591,6 @@ struct Row {
 }
 
 struct Text {
-    kind: &'static str,
     id: i64,
     title: String,
     text: String,
@@ -1778,8 +1746,8 @@ impl Store {
             .collect())
     }
 
-    /// Rewrites links found by searching for `words`, in notes and drafts (Trash included: a link there may
-    /// come back). `map` gives the new target for a link that should change.
+    /// Rewrites links found by searching for `words` in notes. `map` gives the new target for a link that should
+    /// change.
     fn relink(
         &mut self,
         words: &str,
@@ -1788,14 +1756,14 @@ impl Store {
     ) -> Result<usize> {
         let root = self.root()?;
         let mut changed = 0;
-        for t in self.texts_with(words, REWRITE_MAX, true)? {
-            let (new, n) =
+        for t in self.texts_with(words, REWRITE_MAX)? {
+            let (_, n) =
                 links::rewrite(&t.text, |l| map(&l.target).map(|target| Link { target, ..l.clone() }.raw()));
             if n == 0 {
                 continue;
             }
             changed += 1;
-            if t.kind == "note" {
+            {
                 let row = self.row(t.id)?;
                 let path = abs(&root, &row.path);
                 let before = std::fs::read_to_string(&path)?;
@@ -1810,26 +1778,13 @@ impl Store {
                 write_atomic(&path, &after)?;
                 self.index_file(&root, &row.path)?;
                 steps.push(UndoStep::NoteText { path: row.path, before, after });
-            } else {
-                self.snapshot(t.id, "before_relink", self.now())?;
-                self.set_draft_text(t.id, &new)?;
-                steps.push(UndoStep::DraftText { id: t.id, before: t.text, after: new });
             }
         }
         Ok(changed)
     }
 
-    fn set_draft_text(&self, id: i64, text: &str) -> Result<()> {
-        self.conn.execute(
-            "UPDATE drafts SET content = ?2, title = ?3, preview = ?4, modified_at = ?5 \
-             WHERE id = ?1 AND deleted_at IS NULL",
-            params![id, text, title::title(text), title::preview(text), self.now()],
-        )?;
-        Ok(())
-    }
-
-    /// Notes and drafts whose text holds the words of `words` (by full-text search), newest first.
-    fn texts_with(&self, words: &str, limit: usize, with_trash: bool) -> Result<Vec<Text>> {
+    /// Notes whose text holds the words of `words` (by full-text search), newest first.
+    fn texts_with(&self, words: &str, limit: usize) -> Result<Vec<Text>> {
         let mut out = Vec::new();
         let Some(q) = phrase(words) else { return Ok(out) };
         let mut notes = self.conn.prepare_cached(
@@ -1838,18 +1793,7 @@ impl Store {
         )?;
         for r in notes.query_map(params![q, limit as i64], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))? {
             let (id, title, content): (i64, String, String) = r?;
-            out.push(Text { kind: "note", id, title, text: split_front(&content).1.to_string() });
-        }
-        let mut drafts = self.conn.prepare_cached(
-            "SELECT d.id, d.title, d.content FROM drafts_fts f JOIN drafts d ON d.id = f.rowid \
-             WHERE drafts_fts MATCH ?1 AND d.deleted_at IS NULL AND (?3 OR d.folder != 2) \
-             ORDER BY d.modified_at DESC LIMIT ?2",
-        )?;
-        for r in drafts
-            .query_map(params![q, limit as i64, with_trash], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
-        {
-            let (id, title, text): (i64, String, String) = r?;
-            out.push(Text { kind: "draft", id, title, text });
+            out.push(Text { id, title, text: split_front(&content).1.to_string() });
         }
         Ok(out)
     }
@@ -1865,162 +1809,12 @@ impl Store {
             .optional()?)
     }
 
-    fn draft_titled(&self, title: &str) -> Result<Option<i64>> {
-        let Some(q) = phrase(title) else { return Ok(None) };
-        let mut stmt = self.conn.prepare_cached(
-            "SELECT d.id, d.title FROM drafts_fts f JOIN drafts d ON d.id = f.rowid \
-             WHERE drafts_fts MATCH ?1 AND d.deleted_at IS NULL ORDER BY d.folder = 2, d.modified_at DESC LIMIT 200",
-        )?;
-        let rows = stmt.query_map(params![format!("title : {q}")], |r| {
-            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
-        })?;
-        for r in rows {
-            let (id, t) = r?;
-            if same(&t, title) {
-                return Ok(Some(id));
-            }
-        }
-        Ok(None)
-    }
-
-    // ---- drafts into notes -------------------------------------------------------------------------------------
-
-    /// Turns a draft into a new note: the text goes to a file (without its first line when that line is the
-    /// title), the draft goes to the Archive with its text untouched, and links to the draft now go to the note.
-    pub fn promote_draft(
-        &mut self,
-        draft_id: i64,
-        folder: &str,
-        title: &str,
-        keep_tags: bool,
-    ) -> Result<NoteChange> {
-        let d = self.peek(draft_id)?;
-        let wanted = if title.trim().is_empty() { d.title.clone() } else { title.to_string() };
-        let body = without_title_line(&d.content, &wanted);
-        let tags = if keep_tags { d.tags.clone() } else { Vec::new() };
-        // An unqualified `[[Title]]` meant the draft only while no note had that title.
-        let had_note = self.note_titled(&d.title)?.is_some();
-        let note = self.create_note(folder, &wanted, &body, &tags)?;
-        let mut steps = vec![UndoStep::FileCreated { path: note.path.clone() }];
-        self.finish_promotion(&d, &note, "promote", had_note, &mut steps)
-    }
-
-    /// Adds a draft's text to the end of a note, under a rule and the date and time.
-    pub fn append_to_note(&mut self, draft_id: i64, note_id: i64, keep_tags: bool) -> Result<NoteChange> {
-        let root = self.root()?;
-        let d = self.peek(draft_id)?;
-        let row = self.row(note_id)?;
-        let path = abs(&root, &row.path);
-        let before = std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
-        let (raw, body) = split_front(&before);
-        let mut front = parse_front(raw);
-        let mut front_text = raw.to_string();
-        if keep_tags {
-            let mut tags = front.tags.clone();
-            for t in &d.tags {
-                if !tags.iter().any(|x| same(x, t)) {
-                    tags.push(t.clone());
-                }
-            }
-            if tags != front.tags {
-                front.tags = tags;
-                front_text = render_front(&front);
-            }
-        }
-        let stamp = chrono::Local::now().format("%Y-%m-%d %H:%M");
-        let body = body.trim_end();
-        let glue = if body.is_empty() { String::new() } else { format!("{body}\n\n---\n\n") };
-        let after = format!("{front_text}{glue}_{stamp}_\n\n{}\n", d.content.trim_end());
-        self.note_version(note_id, &before, "before_append")?;
-        write_atomic(&path, &after)?;
-        self.index_file(&root, &row.path)?;
-        let had_note = self.note_titled(&d.title)?.is_some_and(|id| id != note_id);
-        let mut steps = vec![UndoStep::NoteText { path: row.path.clone(), before, after }];
-        let note = self.peek_note(note_id)?;
-        self.finish_promotion(&d, &note, "append", had_note, &mut steps)
-    }
-
-    fn finish_promotion(
-        &mut self,
-        d: &crate::store::Draft,
-        note: &Note,
-        kind: &str,
-        had_note: bool,
-        steps: &mut Vec<UndoStep>,
-    ) -> Result<NoteChange> {
-        let previous: Option<(String, String, i64)> = self
-            .conn
-            .query_row("SELECT note_path, kind, at FROM promotions WHERE draft_id = ?1", params![d.id], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
-            })
-            .optional()?;
-        self.conn.execute(
-            "INSERT INTO promotions (draft_id, note_path, kind, at) VALUES (?1, ?2, ?3, ?4) \
-             ON CONFLICT (draft_id) DO UPDATE SET note_path = excluded.note_path, kind = excluded.kind, at = excluded.at",
-            params![d.id, note.path, kind, self.now()],
-        )?;
-        steps.push(UndoStep::Promotion { draft_id: d.id, previous });
-        let moved = self.move_drafts(&[d.id], Folder::Archive)?;
-        if moved.count > 0 {
-            steps.push(UndoStep::DraftBatch { token: moved.token });
-        }
-        // Qualified when another note has the same title, so the link can't land on the wrong one.
-        let qualify = self
-            .conn
-            .query_row(
-                "SELECT COUNT(*) > 1 FROM notes WHERE title = ?1 COLLATE NOCASE",
-                params![note.title],
-                |r| r.get::<_, bool>(0),
-            )
-            .unwrap_or(false);
-        let target = Target::Note {
-            folder: Some(note.folder.clone()).filter(|f| qualify && !f.is_empty()),
-            title: note.title.clone(),
-        };
-        let (dtitle, uuid) = (d.title.clone(), d.uuid.clone());
-        let mut relinked = 0;
-        if !dtitle.is_empty() {
-            relinked += self.relink(&dtitle, steps, |t| match t {
-                Target::Draft { title } if same(title, &dtitle) => Some(target.clone()),
-                Target::Note { folder: None, title }
-                    if !had_note && same(title, &dtitle) && !same(title, &note.title) =>
-                {
-                    Some(target.clone())
-                }
-                _ => None,
-            })?;
-        }
-        relinked += self.relink(&uuid, steps, |t| match t {
-            Target::Uuid(u) if u.eq_ignore_ascii_case(&uuid) => Some(target.clone()),
-            _ => None,
-        })?;
-        let token = self.remember_notes(std::mem::take(steps));
-        Ok(NoteChange { note: self.peek_note(note.id)?, token, relinked })
-    }
-
-    /// The note a draft became, for the banner on an archived draft.
-    pub fn promotion(&self, draft_id: i64) -> Result<Option<Promotion>> {
-        let row: Option<(String, String, i64)> = self
-            .conn
-            .query_row(
-                "SELECT note_path, kind, at FROM promotions WHERE draft_id = ?1",
-                params![draft_id],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-            )
-            .optional()?;
-        let Some((note_path, kind, at)) = row else { return Ok(None) };
-        let note_id = self.id_of(&note_path)?;
-        let file = note_path.rsplit('/').next().unwrap_or(&note_path);
-        let note_title = file.strip_suffix(".md").unwrap_or(file).to_string();
-        Ok(Some(Promotion { note_path, note_title, note_id, kind, at }))
-    }
-
     // ---- links -------------------------------------------------------------------------------------------------
 
-    /// The `[[` list: notes whose title holds `text` (starting with it first), then drafts whose title starts
-    /// with its words. Empty `text`: the most recently opened notes and drafts.
+    /// The `[[` list: notes whose title holds `text` (starting with it first). Empty `text`: the most recently
+    /// opened notes.
     pub fn link_targets(&self, text: &str, limit: usize) -> Result<Vec<LinkTarget>> {
-        let mut out: Vec<LinkTarget> = self
+        let out: Vec<LinkTarget> = self
             .find_notes(text, limit)?
             .into_iter()
             .map(|n| LinkTarget {
@@ -2032,38 +1826,6 @@ impl Store {
                 modified_at: n.modified_at,
             })
             .collect();
-        let draft_rows = |r: &rusqlite::Row| -> rusqlite::Result<LinkTarget> {
-            let folder: i64 = r.get(3)?;
-            Ok(LinkTarget {
-                kind: "draft".into(),
-                id: r.get(0)?,
-                uuid: Some(r.get(1)?),
-                title: r.get(2)?,
-                folder: if folder == 1 { "archive".into() } else { "inbox".into() },
-                modified_at: r.get(4)?,
-            })
-        };
-        let drafts: Vec<LinkTarget> = match title_prefix(text) {
-            Some(q) => self
-                .conn
-                .prepare_cached(
-                    "SELECT d.id, d.uuid, d.title, d.folder, d.modified_at FROM drafts_fts f \
-                     JOIN drafts d ON d.id = f.rowid WHERE drafts_fts MATCH ?1 AND d.deleted_at IS NULL \
-                     AND d.folder != 2 AND d.title != '' ORDER BY d.modified_at DESC LIMIT ?2",
-                )?
-                .query_map(params![q, limit as i64], draft_rows)?
-                .collect::<rusqlite::Result<_>>()?,
-            None => self
-                .conn
-                .prepare_cached(
-                    "SELECT id, uuid, title, folder, modified_at FROM drafts INDEXED BY drafts_list \
-                     WHERE folder = 0 AND deleted_at IS NULL AND title != '' \
-                     ORDER BY modified_at DESC, id DESC LIMIT ?1",
-                )?
-                .query_map(params![limit as i64], draft_rows)?
-                .collect::<rusqlite::Result<_>>()?,
-        };
-        out.extend(drafts);
         Ok(out)
     }
 
@@ -2092,19 +1854,11 @@ impl Store {
             }
             Target::Note { folder: None, title } => match self.note_titled(&title)? {
                 Some(id) => Resolved::Note { id },
-                None => match self.draft_titled(&title)? {
-                    Some(id) => Resolved::Draft { id },
-                    None => Resolved::Missing { title, folder: None, draft: false },
-                },
+                None => Resolved::Missing { title, folder: None, draft: false },
             },
-            Target::Draft { title } => match self.draft_titled(&title)? {
-                Some(id) => Resolved::Draft { id },
-                None => Resolved::Missing { title, folder: None, draft: true },
-            },
-            Target::Uuid(u) => match self.find_by_uuid(&u)? {
-                Some(id) => Resolved::Draft { id },
-                None => Resolved::Missing { title: u, folder: None, draft: true },
-            },
+            // Links to the old drafts (`[[d:…]]`, `[[u:…]]`) lead nowhere now; the drafts are notes in drafts/.
+            Target::Draft { title } => Resolved::Missing { title, folder: None, draft: true },
+            Target::Uuid(u) => Resolved::Missing { title: u, folder: None, draft: true },
         })
     }
 
@@ -2112,15 +1866,15 @@ impl Store {
     pub fn backlinks(&self, note_id: i64) -> Result<Backlinks> {
         let row = self.row(note_id)?;
         let mut out = Backlinks::default();
-        for t in self.texts_with(&row.title, 500, false)? {
-            if t.kind == "note" && t.id == note_id {
+        for t in self.texts_with(&row.title, 500)? {
+            if t.id == note_id {
                 continue;
             }
             let found = links::parse(&t.text);
             if let Some(l) = found.iter().find(|l| note_matches(&l.target, &row.folder, &row.title)) {
                 if out.linked.len() < BACKLINKS_MAX {
                     out.linked.push(BackRef {
-                        kind: t.kind.into(),
+                        kind: "note".into(),
                         id: t.id,
                         title: t.title,
                         line: line_at(&t.text, l.start),
@@ -2131,7 +1885,7 @@ impl Store {
             if let Some(at) = find_mention(&t.text, &found, &row.title) {
                 if out.mentioned.len() < BACKLINKS_MAX {
                     out.mentioned.push(BackRef {
-                        kind: t.kind.into(),
+                        kind: "note".into(),
                         id: t.id,
                         title: t.title,
                         line: line_at(&t.text, at),
@@ -2154,7 +1908,10 @@ impl Store {
                 if written == title { format!("[[{title}]]") } else { format!("[[{title}|{written}]]") };
             Some(format!("{}{link}{}", &text[..at], &text[at + written.len()..]))
         };
-        if kind == "note" {
+        if kind != "note" {
+            bail!("only a note can be linked now");
+        }
+        {
             let root = self.root()?;
             let row = self.row(id)?;
             let path = abs(&root, &row.path);
@@ -2166,12 +1923,6 @@ impl Store {
             write_atomic(&path, &after)?;
             self.index_file(&root, &row.path)?;
             steps.push(UndoStep::NoteText { path: row.path, before, after });
-        } else {
-            let d = self.peek(id)?;
-            let Some(after) = edit(&d.content) else { bail!("“{title}” is no longer mentioned there") };
-            self.snapshot(id, "before_link", self.now())?;
-            self.set_draft_text(id, &after)?;
-            steps.push(UndoStep::DraftText { id, before: d.content, after });
         }
         Ok(self.remember_notes(steps))
     }
@@ -2245,32 +1996,6 @@ impl Store {
                         self.index_file(&root, &path)?;
                         n += 1;
                     }
-                }
-                UndoStep::DraftText { id, before, after } => {
-                    let current: Option<String> = self
-                        .conn
-                        .query_row(
-                            "SELECT content FROM drafts WHERE id = ?1 AND deleted_at IS NULL",
-                            params![id],
-                            |r| r.get(0),
-                        )
-                        .optional()?;
-                    if current.as_deref() == Some(after.as_str()) {
-                        self.set_draft_text(id, &before)?;
-                        n += 1;
-                    }
-                }
-                UndoStep::DraftBatch { token } => n += self.undo(&token).unwrap_or(0),
-                UndoStep::Promotion { draft_id, previous } => {
-                    match previous {
-                        Some((p, k, at)) => self.conn.execute(
-                            "UPDATE promotions SET note_path = ?2, kind = ?3, at = ?4 WHERE draft_id = ?1",
-                            params![draft_id, p, k, at],
-                        )?,
-                        None => self
-                            .conn
-                            .execute("DELETE FROM promotions WHERE draft_id = ?1", params![draft_id])?,
-                    };
                 }
             }
         }
@@ -2696,10 +2421,20 @@ mod tests {
     fn drafts_are_exported_once() {
         let dir = tmp();
         let mut s = store_in(&dir);
-        s.new_draft("Shopping\nmilk").unwrap();
-        let kept = s.new_draft("Book idea\nThe lighthouse").unwrap();
-        s.move_drafts(&[kept.id], Folder::Archive).unwrap();
-        s.new_draft("   ").unwrap();
+        // The drafts tables as an old Petrel left them: an inbox draft, an archived one, an empty one.
+        for (i, (title, content, folder)) in
+            [("Shopping", "Shopping\nmilk", 0), ("Book idea", "Book idea\nThe lighthouse", 1), ("", "   ", 0)]
+                .into_iter()
+                .enumerate()
+        {
+            s.raw()
+                .execute(
+                    "INSERT INTO drafts (uuid, content, title, folder, created_at, modified_at, accessed_at) \
+                     VALUES (?1, ?2, ?3, ?4, 0, 0, 0)",
+                    params![format!("u{i}"), content, title, folder],
+                )
+                .unwrap();
+        }
         assert_eq!(s.export_drafts_once().unwrap(), 2);
         assert_eq!(s.export_drafts_once().unwrap(), 0);
         assert!(dir.join("drafts/Book idea.md").exists());
@@ -2775,58 +2510,18 @@ mod tests {
         let mut s = store_in(&dir);
         let target = s.create_note("", "Omarchy", "Binds.\n", &[]).unwrap();
         let other = s.create_note("", "Laptop", "See [[Omarchy#Binds]] and [[Unrelated]].\n", &[]).unwrap();
-        let d = s.new_draft("Wifi\n\nSame machine as [[omarchy]].").unwrap();
+        let d = s.create_note("", "Wifi", "Same machine as [[omarchy]].\n", &[]).unwrap();
         let c = s.rename_note(target.id, "Omarchy setup").unwrap();
         assert_eq!(c.relinked, 2);
         assert!(dir.join("Omarchy setup.md").exists() && !dir.join("Omarchy.md").exists());
         assert_eq!(s.note(other.id).unwrap().body, "See [[Omarchy setup#Binds]] and [[Unrelated]].\n");
-        assert!(s.peek(d.id).unwrap().content.ends_with("[[Omarchy setup]]."));
+        assert!(s.note(d.id).unwrap().body.ends_with("[[Omarchy setup]].\n"));
         let back = s.backlinks(target.id).unwrap();
         assert_eq!(back.linked.len(), 2);
         s.undo(&c.token.token).unwrap();
         assert!(dir.join("Omarchy.md").exists());
-        assert!(s.peek(d.id).unwrap().content.ends_with("[[omarchy]]."));
+        assert!(s.note(d.id).unwrap().body.ends_with("[[omarchy]].\n"));
         assert_eq!(s.note(other.id).unwrap().body, "See [[Omarchy#Binds]] and [[Unrelated]].\n");
-        std::fs::remove_dir_all(dir).ok();
-    }
-
-    #[test]
-    fn promote_and_append_keep_the_draft_and_undo() {
-        let dir = tmp();
-        let mut s = store_in(&dir);
-        let d = s.new_draft("# Notes in Petrel\n\nFiles, folders, links.").unwrap();
-        s.set_tags(d.id, &["petrel".into()]).unwrap();
-        let linker = s.new_draft("Todo\n\nRead [[d:Notes in Petrel]] and [[u:".to_string().as_str()).unwrap();
-        s.save(linker.id, &format!("Todo\n\nRead [[d:Notes in Petrel]] and [[u:{}|this]].", d.uuid), 0)
-            .unwrap();
-        let c = s.promote_draft(d.id, "Projects", "", true).unwrap();
-        assert_eq!(c.note.path, "Projects/Notes in Petrel.md");
-        assert_eq!(c.note.body, "Files, folders, links.");
-        assert_eq!(c.note.tags, vec!["petrel"]);
-        let after = s.peek(d.id).unwrap();
-        assert_eq!(after.folder, Folder::Archive);
-        assert_eq!(after.content, "# Notes in Petrel\n\nFiles, folders, links.", "the draft keeps its text");
-        assert_eq!(s.promotion(d.id).unwrap().unwrap().note_id, Some(c.note.id));
-        assert_eq!(
-            s.peek(linker.id).unwrap().content,
-            "Todo\n\nRead [[Notes in Petrel]] and [[Notes in Petrel|this]]."
-        );
-        assert_eq!(s.resolve_link("Notes in Petrel").unwrap(), Resolved::Note { id: c.note.id });
-
-        s.undo(&c.token.token).unwrap();
-        assert_eq!(s.peek(d.id).unwrap().folder, Folder::Inbox);
-        assert!(s.promotion(d.id).unwrap().is_none());
-        assert!(!dir.join("Projects/Notes in Petrel.md").exists());
-        assert!(s.trash_items().unwrap().len() == 1, "undo trashes, never deletes");
-        assert!(s.peek(linker.id).unwrap().content.contains("[[d:Notes in Petrel]]"));
-
-        let journal = s.create_note("", "Journal", "Start.\n", &[]).unwrap();
-        let entry = s.new_draft("Tried the history panel.").unwrap();
-        let c = s.append_to_note(entry.id, journal.id, false).unwrap();
-        assert!(c.note.body.starts_with("Start.\n\n---\n\n_"));
-        assert!(c.note.body.ends_with("_\n\nTried the history panel.\n"));
-        s.undo(&c.token.token).unwrap();
-        assert_eq!(s.peek_note(journal.id).unwrap().body, "Start.\n");
         std::fs::remove_dir_all(dir).ok();
     }
 
@@ -2835,25 +2530,18 @@ mod tests {
         let dir = tmp();
         let mut s = store_in(&dir);
         let n = s.create_note("Home", "Omarchy setup", "x", &[]).unwrap();
-        let d = s.new_draft("Wifi fix\n\nsleep").unwrap();
-        s.new_draft("Laptop\n\nI should redo the omarchy setup soon.").unwrap();
+        let laptop = s.create_note("", "Laptop", "I should redo the omarchy setup soon.\n", &[]).unwrap();
         assert_eq!(s.resolve_link("Home/Omarchy setup").unwrap(), Resolved::Note { id: n.id });
         assert_eq!(s.resolve_link("Moved/Omarchy setup").unwrap(), Resolved::Note { id: n.id });
-        assert_eq!(s.resolve_link("wifi fix").unwrap(), Resolved::Draft { id: d.id });
-        assert_eq!(s.resolve_link("d:Wifi fix").unwrap(), Resolved::Draft { id: d.id });
+        assert!(matches!(s.resolve_link("d:Wifi fix").unwrap(), Resolved::Missing { draft: true, .. }));
         assert!(matches!(s.resolve_link("Nope").unwrap(), Resolved::Missing { draft: false, .. }));
         let t = s.link_targets("omar", 5).unwrap();
         assert_eq!(t[0].kind, "note");
-        let t = s.link_targets("wif", 5).unwrap();
-        assert_eq!((t.len(), t[0].kind.as_str()), (1, "draft"));
         let b = s.backlinks(n.id).unwrap();
         assert_eq!((b.linked.len(), b.mentioned.len()), (0, 1));
-        let tok = s.link_mention(n.id, "draft", b.mentioned[0].id).unwrap();
-        assert!(s
-            .peek(b.mentioned[0].id)
-            .unwrap()
-            .content
-            .contains("the [[Omarchy setup|omarchy setup]] soon"));
+        assert_eq!(b.mentioned[0].id, laptop.id);
+        let tok = s.link_mention(n.id, "note", laptop.id).unwrap();
+        assert!(s.note(laptop.id).unwrap().body.contains("the [[Omarchy setup|omarchy setup]] soon"));
         assert_eq!(s.backlinks(n.id).unwrap().linked.len(), 1);
         s.undo(&tok.token).unwrap();
         assert_eq!(s.backlinks(n.id).unwrap().linked.len(), 0);

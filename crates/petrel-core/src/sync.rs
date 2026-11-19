@@ -182,7 +182,11 @@ pub fn syncs(rel: &str) -> bool {
         return false;
     }
     rel.split('/').all(|part| {
-        !part.starts_with('.') || part == ".history" || part == ".scratch" || part == ".petrel" || part == ".petrel-keys.json"
+        !part.starts_with('.')
+            || part == ".history"
+            || part == ".scratch"
+            || part == ".petrel"
+            || part == ".petrel-keys.json"
     }) && !rel.starts_with(TRASH_DIR)
 }
 
@@ -551,7 +555,8 @@ fn rename_twins(
             Some(dot) if dot > p.rfind('/').map_or(0, |s| s + 1) => (&p[..dot], &p[dot..]),
             _ => (p.as_str(), ""),
         };
-        let Some(free) = (2..100).map(|n| format!("{stem} {n}{ext}")).find(|c| !known.contains_key(&c.to_lowercase()))
+        let Some(free) =
+            (2..100).map(|n| format!("{stem} {n}{ext}")).find(|c| !known.contains_key(&c.to_lowercase()))
         else {
             continue;
         };
