@@ -2,10 +2,15 @@
 // copies it and closes, so the paste goes where you were. Ctrl O opens it in Petrel instead. It lists the things
 // to copy (collections set so with `t`); once you type, the notes that match come after them. It knows which app
 // was in front: what you copied there before comes first ("3× here"). Alt ← → step through a card's versions.
+//
+// With text selected in that app, Ctrl J runs the highlighted prompt on it: the prompt and the selection are
+// shown, Enter sends them to Claude, and Enter again pastes the result over the selection (Ctrl C only copies
+// it). Nothing is sent until that Enter.
 
 import { copyBody } from "./collection/snippetText";
 import { createMemo, createResource, createSignal, For, onMount, Show } from "solid-js";
-import { api, type CaptureContext, type NoteSummary } from "./api";
+import { aiLive, api, errText, type CaptureContext, type NoteSummary } from "./api";
+import { fill } from "./blanks";
 import { blanks, parts } from "./blanks";
 import { keepVersion, lastVersions } from "./collection/BlankFields";
 import FillBlanks from "./collection/FillBlanks";
@@ -27,6 +32,8 @@ export default function Picker() {
   const [ctx, setCtx] = createSignal<CaptureContext | null>(null);
   const [here, setHere] = createSignal<Record<string, number>>({});
   const [used, setUsed] = createSignal<Used>({});
+  /** Ctrl J: a prompt run on the selection. */
+  const [run, setRun] = createSignal<{ item: NoteSummary; prompt: string; phase: "ready" | "running" | "done" | "error"; out: string } | null>(null);
   const [data, { refetch }] = createResource(async () => {
     const s = await api();
     const [all, counts] = await Promise.all([s.listNotes({ limit: 2000 }), s.copyCounts()]);
@@ -110,8 +117,56 @@ export default function Picker() {
     await copy(n, text);
   }
 
+  /** The prompt with its own blanks filled by their defaults; the selection is the text it works on. */
+  async function readyRun(n: NoteSummary | undefined) {
+    if (!n) return;
+    if (!ctx()?.text?.trim()) return void setRun({ item: n, prompt: "", phase: "error", out: "Nothing was selected in the app you were in. Select some text there first, then open the picker." });
+    const full = n.id === sel()?.id && body() !== undefined ? body()! : copyBody(await (await api()).peekNote(n.id));
+    const prompt = fill(n.id === sel()?.id && version() ? version()!.text : full, { selection: "the text", text: "the text", clipboard: "" });
+    setRun({ item: n, prompt, phase: "ready", out: "" });
+  }
+
+  async function go() {
+    const r = run();
+    if (!r || r.phase !== "ready") return;
+    const s = await api();
+    const st = await s.aiStatus().catch(() => null);
+    if (!st?.ready) return void setRun({ ...r, phase: "error", out: "Claude needs your API key first: Settings › AI in Petrel." });
+    setRun({ ...r, phase: "running" });
+    try {
+      const live = aiLive((soFar) => run()?.phase === "running" && setRun({ ...run()!, out: soFar }));
+      const res = await s.aiWrite({ task: "prompt", text: ctx()!.text!, instruction: r.prompt }, live);
+      setRun({ ...run()!, phase: "done", out: res.text });
+    } catch (e) {
+      setRun({ ...run()!, phase: "error", out: errText(e) });
+    }
+  }
+
+  /** Enter: paste over the selection; Ctrl C: copy only. Counted as a use of the prompt either way. */
+  async function useResult(paste: boolean) {
+    const r = run();
+    if (r?.phase !== "done") return;
+    pasting = paste ? "plain" : "";
+    await copy(r.item, r.out);
+  }
+
+  const runKey = (e: KeyboardEvent) => {
+    const r = run()!;
+    if (e.key === "Escape") setRun(null);
+    else if (e.key === "Enter" && r.phase === "ready") void go();
+    else if (e.key === "Enter" && r.phase === "done") void useResult(true);
+    else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c" && r.phase === "done" && !getSelection()?.toString()) void useResult(false);
+    else return;
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
   const key = async (e: KeyboardEvent) => {
     const n = rows().length;
+    if (e.ctrlKey && e.key.toLowerCase() === "j") {
+      e.preventDefault();
+      return void readyRun(rows()[i()]);
+    }
     if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) (setI((i() + 1) % Math.max(1, n)), setVi(0));
     else if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p")) (setI((i() + n - 1) % Math.max(1, n)), setVi(0));
     else if (e.altKey && (e.key === "ArrowRight" || e.key === "ArrowLeft") && versions().length > 1)
@@ -130,6 +185,7 @@ export default function Picker() {
   };
 
   onMount(async () => {
+    window.addEventListener("keydown", (e) => run() && runKey(e), true);
     void loadFaces();
     await whenOpened(start);
   });
@@ -143,7 +199,7 @@ export default function Picker() {
     loadUsed().then(setUsed, () => {});
     await s.showWindow();
     // Losing focus means the person went back to what they were doing: get out of the way.
-    window.addEventListener("blur", () => !filling() && setTimeout(() => !document.hasFocus() && void close(), 150));
+    window.addEventListener("blur", () => !filling() && run()?.phase !== "running" && setTimeout(() => !document.hasFocus() && void close(), 150));
     const c = await s.pickerContext().catch(() => null);
     setCtx(c);
     if (c?.app) setHere(await s.copyCountsIn(c.app).catch(() => ({})));
@@ -153,9 +209,39 @@ export default function Picker() {
 
   return (
     <div class="picker">
+      <Show when={run()}>
+        {(r) => (
+          <div class="picker-run" role="dialog" aria-label={`Run ${r().item.title} on the selection`}>
+            <div class="run-head">
+              <span class="row-label">{r().item.title}</span>
+              <span class="muted small">on what you selected{ctx()?.app ? ` in ${ctx()!.app}` : ""}</span>
+            </div>
+            <Show when={r().phase === "ready"}>
+              <p class="run-text run-prompt">{r().prompt}</p>
+              <p class="run-text run-sel">{(ctx()?.text ?? "").slice(0, 1200)}</p>
+            </Show>
+            <Show when={r().phase !== "ready"}>
+              <p class="run-text run-out" classList={{ bad: r().phase === "error", live: r().phase === "running" }} aria-live="polite">
+                {r().out || "Claude is working on it…"}
+              </p>
+            </Show>
+            <footer class="picker-foot">
+              <Show when={r().phase === "ready"}>
+                <KeyHints hints={[["Enter", "send to Claude"]]} />
+              </Show>
+              <Show when={r().phase === "done"}>
+                <KeyHints hints={[["Enter", "paste over the selection"], ["Ctrl C", "copy only"]]} />
+              </Show>
+              <span class="grow" />
+              <KeyHints hints={[["Esc", "back"]]} />
+            </footer>
+          </div>
+        )}
+      </Show>
       <Show
-        when={!filling()}
+        when={!filling() && !run()}
         fallback={
+          <Show when={filling()}>
           <FillBlanks
             inline
             title={filling()!.item.title}
@@ -164,6 +250,7 @@ export default function Picker() {
             onClose={() => setFilling(null)}
             onCopy={(text) => void copy(filling()!.item, text)}
           />
+          </Show>
         }
       >
         <div class="palette-field">
@@ -229,7 +316,7 @@ export default function Picker() {
           </Show>
         </div>
         <footer class="picker-foot">
-          <KeyHints hints={[["Enter", "copy and close"], ["Ctrl Enter", "paste it"], versions().length > 1 && ["Alt ← →", "version"], ["Ctrl O", "open in Petrel"]]} />
+          <KeyHints hints={[["Enter", "copy and close"], ["Ctrl Enter", "paste it"], !!ctx()?.text?.trim() && ["Ctrl J", "run on the selection"], versions().length > 1 && ["Alt ← →", "version"], ["Ctrl O", "open in Petrel"]]} />
           <span class="grow" />
           <KeyHints hints={[["Esc", "close"]]} />
         </footer>

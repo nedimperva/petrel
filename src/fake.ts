@@ -194,7 +194,7 @@ export function fakeApi(): Api {
   };
 
   const self: Api = {
-    appInfo: () => wait({ version: "dev", dbPath: "(browser, nothing saved)", debug: true }),
+    appInfo: () => wait({ version: "dev", dbPath: "(browser, nothing saved)", debug: true, exePath: "C:\\Program Files\\Petrel\\petrel.exe" }),
     rescueText: () => wait("(nowhere)"),
     closeWindow: () => wait(undefined),
     showWindow: () => wait(undefined),

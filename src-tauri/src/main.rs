@@ -9,6 +9,7 @@ mod desktop;
 mod drive;
 mod google;
 mod hypr;
+mod mcp;
 mod notes;
 mod paste;
 mod sync;
@@ -91,7 +92,17 @@ pub fn show_main(app: &tauri::AppHandle) {
     }
 }
 
-/// Handles `--new TEXT`, `--stdin` and `--help` without a window. `None` means start the app.
+/// A release build on Windows is a window program with no console: printing from a terminal goes nowhere unless
+/// it joins the terminal it was started from. A pipe (`petrel find x | more`, Claude's MCP pipes) needs nothing.
+fn attach_console() {
+    #[cfg(all(windows, not(debug_assertions)))]
+    unsafe {
+        use windows::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
+        let _ = AttachConsole(ATTACH_PARENT_PROCESS);
+    }
+}
+
+/// Handles `--new TEXT`, `--stdin`, `--help` and the terminal commands without a window. `None` means start the app.
 fn run_cli() -> Option<i32> {
     let args: Vec<String> = std::env::args().collect();
     let command = match cli::parse(&args) {
@@ -101,6 +112,9 @@ fn run_cli() -> Option<i32> {
             return Some(2);
         }
     };
+    if !matches!(command, cli::Command::App | cli::Command::Mcp) {
+        attach_console();
+    }
     let (text, tags) = match command {
         cli::Command::App => return None,
         cli::Command::Help => {
@@ -108,6 +122,28 @@ fn run_cli() -> Option<i32> {
             return Some(0);
         }
         cli::Command::Write { text, tags } => (text, tags),
+        cli::Command::Mcp => {
+            // stdout is the protocol: anything else goes to stderr, which Claude keeps as the server's log.
+            return Some(match mcp::serve() {
+                Ok(()) => 0,
+                Err(e) => {
+                    eprintln!("petrel mcp: {e:#}");
+                    1
+                }
+            });
+        }
+        other => {
+            return Some(match cli::run(other) {
+                Ok(out) => {
+                    println!("{out}");
+                    0
+                }
+                Err(e) => {
+                    eprintln!("petrel: {e:#}");
+                    1
+                }
+            });
+        }
     };
     let saved = (|| {
         let text = match text {

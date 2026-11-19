@@ -21,6 +21,8 @@ pub struct AppInfo {
     version: &'static str,
     db_path: String,
     debug: bool,
+    /// This program, for the lines Settings › Claude gives to Claude Desktop and Claude Code.
+    exe_path: String,
 }
 
 #[tauri::command]
@@ -29,6 +31,7 @@ pub fn app_info(state: State<AppState>) -> AppInfo {
         version: env!("CARGO_PKG_VERSION"),
         db_path: state.db_path.display().to_string(),
         debug: cfg!(debug_assertions),
+        exe_path: std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_else(|_| "petrel".into()),
     }
 }
 

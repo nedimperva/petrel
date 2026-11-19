@@ -10,6 +10,7 @@ export interface AppInfo {
   version: string;
   dbPath: string;
   debug: boolean;
+  exePath: string;
 }
 
 export interface Note {

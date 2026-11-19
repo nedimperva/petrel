@@ -68,6 +68,7 @@ export const SHORTCUTS: Shortcut[] = [
   { id: "pickPaste", label: "Copy and paste into the app (Shift for a terminal)", group: "Quick picker", keys: both("Ctrl+Enter") },
   { id: "pickVersion", label: "Other versions", group: "Quick picker", keys: both("Alt+← / Alt+→") },
   { id: "pickOpen", label: "Open in Petrel", group: "Quick picker", keys: both("Ctrl+O") },
+  { id: "pickRun", label: "Run the prompt on the text selected in the app (Enter sends it)", group: "Quick picker", keys: both("Ctrl+J") },
   { id: "doIt", label: "Do it", group: "Lists and menus", keys: both("Enter") },
   { id: "backStep", label: "Back one step", group: "Lists and menus", keys: both("Esc") },
   { id: "nextField", label: "The next field", group: "Lists and menus", keys: both("Tab") },

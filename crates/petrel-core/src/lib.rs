@@ -11,6 +11,7 @@ pub mod gen;
 pub mod links;
 pub mod merge;
 pub mod notes;
+pub mod outside;
 pub mod query;
 pub mod retention;
 pub mod store;
