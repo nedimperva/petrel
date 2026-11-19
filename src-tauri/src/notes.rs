@@ -433,3 +433,14 @@ mod tests {
         assert!(super::percent_decode("%zz").is_err());
     }
 }
+
+/// The capture window's scratch pages (`<folder>/.scratch/1.md` to `5.md`).
+#[tauri::command]
+pub async fn scratch_page(state: State<'_, AppState>, n: u8) -> R<String> {
+    with(&state, |s| s.scratch(n))
+}
+
+#[tauri::command]
+pub async fn save_scratch_page(state: State<'_, AppState>, n: u8, text: String) -> R<()> {
+    with(&state, |s| s.set_scratch(n, &text))
+}

@@ -33,6 +33,7 @@ mod folders;
 pub mod history;
 pub mod passages;
 mod paths;
+pub mod scratch;
 mod tasks;
 pub mod trash;
 

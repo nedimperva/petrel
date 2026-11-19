@@ -3201,6 +3201,7 @@ dependencies = [
  "anyhow",
  "arboard",
  "base64 0.22.1",
+ "chrono",
  "dirs 7.0.0",
  "env_logger",
  "getrandom 0.3.4",

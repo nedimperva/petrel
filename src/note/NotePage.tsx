@@ -18,6 +18,7 @@ import { pictureExtensions } from "../editor/pictures";
 import { addDays, clock, dayTally, dayTitle, dropBareStamps, dueOf, isDayNote, JOURNAL, monthGrid, tallyLine, today, weekOf } from "../journal/days";
 import { dayExtensions } from "../journal/stamps";
 import { linkExtensions } from "../notes/links";
+import { snippetCompletions } from "../editor/snippets";
 import { parseLinks } from "../notes/parse";
 import { createNoteSaver, type NoteSaver, type SaveState } from "../notes/saver";
 import { prefs } from "../settings/prefs";
@@ -715,6 +716,7 @@ export default function NotePage(p: Props) {
       pictureExtensions(() => note()?.folder ?? p.folder),
       dayExtensions(() => dayPage() === today()),
       linkExtensions({
+        more: [snippetCompletions],
         open: async (inner) => {
           const r = await (await api()).resolveLink(inner);
           if (r.kind === "note") p.onOpen(r.id);

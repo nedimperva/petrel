@@ -3,6 +3,7 @@
 
 import { api, errText, type NoteSummary } from "../api";
 import { blanks } from "../blanks";
+import { copyBody } from "./snippetText";
 import { say } from "../ui";
 import { stepDone } from "../firstSteps";
 import { noteUse } from "./lastUsed";
@@ -11,7 +12,7 @@ import { hasVersions, versionsOf } from "./versions";
 /** The item's text, and whether it needs the sheet before copying: blanks to fill, or versions to choose. */
 export async function itemText(id: number): Promise<{ text: string; title: string; hasBlanks: boolean }> {
   const n = await (await api()).peekNote(id);
-  const text = n.body.replace(/\n+$/, "");
+  const text = copyBody(n);
   const versions = hasVersions(n.folder) && versionsOf(text).length > 1;
   return { text, title: n.title, hasBlanks: versions || blanks(text).length > 0 };
 }

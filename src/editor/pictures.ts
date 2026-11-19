@@ -1,5 +1,6 @@
 // Pictures in a note: paste or drop one and it is saved next to the note (`<folder>/attachments/`) and linked as
-// `![](attachments/<name>)`; a link like that shows the picture under its line. Big photos are made smaller
+// `![](attachments/<name>)`; a link like that shows the picture under its line, at the width after `|` and with
+// the rest of the alt text as its caption. Big photos are made smaller
 // first (2000 px wide at most) unless Shift was held, as in Ctrl Shift V. The text stays plain Markdown.
 
 import { type Extension, type Range, StateField, type EditorState } from "@codemirror/state";
@@ -10,15 +11,40 @@ import { say } from "../ui";
 const WIDEST = 2000;
 const KINDS: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" };
 
-/** Picture links in a text, with where each line ends (the picture is drawn there). */
-export function pictureLinks(text: string): { link: string; at: number }[] {
-  const out: { link: string; at: number }[] = [];
-  const re = /!\[[^\]\n]*\]\((attachments\/[A-Za-z0-9._-]+\.(?:png|jpe?g|gif|webp))\)/gi;
+/** A picture link: `![caption|320](attachments/x.png)`. The number after `|` is the width it is drawn at (as
+ * Obsidian writes it); the rest is shown under the picture as its caption. */
+export interface PictureLink {
+  link: string;
+  caption: string;
+  width: number | null;
+  /** Where the whole `![…](…)` starts and ends, and where the line ends (the picture is drawn there). */
+  from: number;
+  to: number;
+  at: number;
+}
+
+const LINK = /!\[([^\]\n]*)\]\((attachments\/[A-Za-z0-9._-]+\.(?:png|jpe?g|gif|webp))\)/gi;
+
+export function splitAlt(alt: string): { caption: string; width: number | null } {
+  const m = /^(.*?)\s*\|\s*(\d{2,4})\s*$/.exec(alt);
+  return m ? { caption: m[1].trim(), width: Number(m[2]) } : { caption: alt.trim(), width: null };
+}
+
+/** Picture links in a text. */
+export function pictureLinks(text: string): PictureLink[] {
+  const out: PictureLink[] = [];
+  const re = new RegExp(LINK.source, LINK.flags);
   for (let m = re.exec(text); m; m = re.exec(text)) {
     const end = text.indexOf("\n", m.index);
-    out.push({ link: m[1], at: end < 0 ? text.length : end });
+    out.push({ link: m[2], ...splitAlt(m[1]), from: m.index, to: m.index + m[0].length, at: end < 0 ? text.length : end });
   }
   return out;
+}
+
+/** The link written with a new width. */
+export function withWidth(p: Pick<PictureLink, "link" | "caption">, width: number | null): string {
+  const alt = width ? (p.caption ? `${p.caption}|${width}` : `|${width}`) : p.caption;
+  return `![${alt}](${p.link})`;
 }
 
 const urls = new Map<string, Promise<string>>();
@@ -44,28 +70,68 @@ const mimeOf = (link: string) => {
 class Picture extends WidgetType {
   constructor(
     readonly folder: string,
-    readonly link: string,
+    readonly p: PictureLink,
   ) {
     super();
   }
   eq(o: Picture) {
-    return o.folder === this.folder && o.link === this.link;
+    return o.folder === this.folder && o.p.link === this.p.link && o.p.caption === this.p.caption && o.p.width === this.p.width;
   }
-  toDOM() {
+  toDOM(view: EditorView) {
     const box = document.createElement("span");
     box.className = "cm-picture";
+    const frame = document.createElement("span");
+    frame.className = "cm-picture-frame";
+    if (this.p.width) frame.style.width = `${this.p.width}px`;
     const img = document.createElement("img");
-    img.alt = "";
+    img.alt = this.p.caption;
     img.draggable = false;
-    urlOf(this.folder, this.link).then(
+    urlOf(this.folder, this.p.link).then(
       (u) => (img.src = u),
       () => {
         box.classList.add("missing");
-        box.textContent = `${this.link.slice("attachments/".length)} is not in the folder`;
+        box.textContent = `${this.p.link.slice("attachments/".length)} is not in the folder`;
       },
     );
-    box.appendChild(img);
+    // The handle on the right edge: drag to make the picture narrower or wider; the width goes into the link.
+    const grip = document.createElement("span");
+    grip.className = "cm-picture-grip";
+    grip.title = "Drag to resize. Double-click for full width.";
+    grip.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      grip.setPointerCapture(e.pointerId);
+      const start = e.clientX;
+      const w0 = frame.getBoundingClientRect().width;
+      const most = box.getBoundingClientRect().width;
+      const move = (m: PointerEvent) => (frame.style.width = `${Math.round(Math.max(80, Math.min(most, w0 + m.clientX - start)))}px`);
+      const up = () => {
+        grip.removeEventListener("pointermove", move);
+        grip.removeEventListener("pointerup", up);
+        const w = Math.round(frame.getBoundingClientRect().width);
+        this.write(view, box, w >= most - 4 ? null : w);
+      };
+      grip.addEventListener("pointermove", move);
+      grip.addEventListener("pointerup", up);
+    });
+    grip.addEventListener("dblclick", (e) => (e.preventDefault(), this.write(view, box, null)));
+    frame.append(img, grip);
+    box.appendChild(frame);
+    if (this.p.caption) {
+      const cap = document.createElement("span");
+      cap.className = "cm-picture-caption";
+      cap.textContent = this.p.caption;
+      box.appendChild(cap);
+    }
     return box;
+  }
+  /** Finds this picture's link on its line again (the text may have moved) and writes the width into it. */
+  write(view: EditorView, box: HTMLElement, width: number | null) {
+    const pos = view.posAtDOM(box);
+    const line = view.state.doc.lineAt(Math.max(0, Math.min(pos, view.state.doc.length)));
+    const hit = pictureLinks(line.text).find((l) => l.link === this.p.link);
+    if (!hit || hit.width === width) return;
+    view.dispatch({ changes: { from: line.from + hit.from, to: line.from + hit.to, insert: withWidth(hit, width) }, userEvent: "input.picture" });
   }
   ignoreEvent() {
     return false;
@@ -74,7 +140,7 @@ class Picture extends WidgetType {
 
 function build(state: EditorState, folder: string): DecorationSet {
   const ds: Range<Decoration>[] = pictureLinks(state.doc.toString()).map((p) =>
-    Decoration.widget({ widget: new Picture(folder, p.link), side: 1 }).range(p.at),
+    Decoration.widget({ widget: new Picture(folder, p), side: 1 }).range(p.at),
   );
   return Decoration.set(ds, true);
 }

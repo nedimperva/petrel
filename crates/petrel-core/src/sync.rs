@@ -9,7 +9,8 @@
 //! and changed on the other is kept. Files deleted from the remote go to `.trash/` here, never away.
 //!
 //! What syncs: every file in the folder except `.trash/`, Petrel's temporary files and other dot files; the
-//! history (`.history/`), the collections' looks (`.petrel`) and the keys (`.petrel-keys.json`) do sync.
+//! history (`.history/`), the capture window's scratch pages (`.scratch/`), the collections' looks (`.petrel`)
+//! and the keys (`.petrel-keys.json`) do sync.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
@@ -181,7 +182,7 @@ pub fn syncs(rel: &str) -> bool {
         return false;
     }
     rel.split('/').all(|part| {
-        !part.starts_with('.') || part == ".history" || part == ".petrel" || part == ".petrel-keys.json"
+        !part.starts_with('.') || part == ".history" || part == ".scratch" || part == ".petrel" || part == ".petrel-keys.json"
     }) && !rel.starts_with(TRASH_DIR)
 }
 
@@ -886,6 +887,7 @@ mod tests {
     fn what_syncs() {
         assert!(syncs("Travel/Rome.md"));
         assert!(syncs("Travel/.history/Rome/1-edit.md"));
+        assert!(syncs(".scratch/3.md"));
         assert!(syncs("Prompts/.petrel"));
         assert!(syncs("inbox/attachments/a.png"));
         assert!(!syncs(".trash/x.md"));

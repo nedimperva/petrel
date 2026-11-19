@@ -3,6 +3,7 @@
 // to copy (collections set so with `t`); once you type, the notes that match come after them. It knows which app
 // was in front: what you copied there before comes first ("3× here"). Alt ← → step through a card's versions.
 
+import { copyBody } from "./collection/snippetText";
 import { createMemo, createResource, createSignal, For, onMount, Show } from "solid-js";
 import { api, type CaptureContext, type NoteSummary } from "./api";
 import { blanks, parts } from "./blanks";
@@ -74,7 +75,7 @@ export default function Picker() {
   // The selected card's full text, for its versions.
   const [body] = createResource(
     () => sel()?.id,
-    async (id) => (await (await api()).peekNote(id)).body.replace(/\n+$/, ""),
+    async (id) => copyBody(await (await api()).peekNote(id)),
   );
   const versions = createMemo((): Version[] => {
     const n = sel();
@@ -103,7 +104,7 @@ export default function Picker() {
 
   async function pick(n: NoteSummary | undefined) {
     if (!n) return;
-    const full = n.id === sel()?.id && body() !== undefined ? body()! : (await (await api()).peekNote(n.id)).body.replace(/\n+$/, "");
+    const full = n.id === sel()?.id && body() !== undefined ? body()! : copyBody(await (await api()).peekNote(n.id));
     const text = n.id === sel()?.id && version() ? version()!.text : full;
     if (blanks(text).length) return setFilling({ item: n, text });
     await copy(n, text);

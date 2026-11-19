@@ -4,7 +4,7 @@
 // page on a wide window; on a narrow one it slides over and closes after a pick. Ctrl 0 shows or hides it.
 
 import { createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
-import { api, errText, type NoteFolder } from "./api";
+import { api, errText, type NoteFolder, type NoteSummary } from "./api";
 import { clock } from "./journal/days";
 import FacePicker from "./library/FacePicker";
 import Mark, { faces, loadFaces, saveFace } from "./library/Mark";
@@ -19,18 +19,27 @@ interface Data {
   folders: NoteFolder[];
   inbox: number;
   tasks: number;
+  /** Pinned notes, under Today: the few pages you go back to every day. */
+  pins: NoteSummary[];
 }
 
 async function load(): Promise<Data> {
-  const { folders, inbox, tasks, loose } = await (await api()).sidebarCounts();
+  const s = await api();
+  const [{ folders, inbox, tasks, loose }, pinned] = await Promise.all([s.sidebarCounts(), s.listNotes({ pinned: true, limit: 12 }).catch(() => [])]);
+  const pins = pinned.filter((n) => !n.folder.startsWith("."));
   const shown = folders.filter((f) => f.path && f.path !== "inbox" && !f.path.startsWith("."));
   // Notes at the top of the folder are a collection of pages too: "Notes".
   if (loose) shown.unshift({ path: "", name: "Notes", depth: 0, count: loose });
-  return { folders: shown, inbox, tasks };
+  return { folders: shown, inbox, tasks, pins };
 }
 
 export default function Sidebar(p: {
   rev: number;
+  /** Bumped when a note is pinned or unpinned from the page. */
+  pinRev: number;
+  /** The open note, to mark it among the pinned ones. */
+  noteId: number | null;
+  onNote(id: number): void;
   here: Place;
   docked: boolean;
   root: string;
@@ -52,7 +61,7 @@ export default function Sidebar(p: {
   const [tick, setTick] = createSignal(0);
   const ticker = setInterval(() => setTick((n) => n + 1), 30_000);
   onCleanup(() => clearInterval(ticker));
-  const [data, { refetch }] = createResource(() => p.rev, load);
+  const [data, { refetch }] = createResource(() => `${p.rev}:${p.pinRev}`, load);
   const [now, setNow] = createSignal(clock());
   const [renaming, setRenaming] = createSignal<string | null>(null);
   // Making a collection: at the top (`parent: null`) or inside one.
@@ -238,6 +247,18 @@ export default function Sidebar(p: {
           <span class="side-name">Everything</span>
           <span class="side-count">{data()?.folders.reduce((k, f) => k + (f.depth === 0 && f.path !== "inbox" ? f.count : 0), 0) || ""}</span>
         </button>
+        <Show when={data()?.pins.length}>
+          <div class="side-pins" aria-label="Pinned">
+            <For each={data()?.pins}>
+              {(n) => (
+                <button type="button" class="side-row side-pin" classList={{ on: p.noteId === n.id }} onClick={pick(() => p.onNote(n.id))} title={`${n.title}, pinned. Unpin with p in the library or from Ctrl K.`}>
+                  <span class="side-slot pin-mark" aria-hidden="true" />
+                  <span class="side-name">{n.title || "Untitled"}</span>
+                </button>
+              )}
+            </For>
+          </div>
+        </Show>
       </div>
 
       <div class="side-scroll">

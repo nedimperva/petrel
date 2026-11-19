@@ -125,6 +125,7 @@ export default function App() {
   const [ai, setAi] = createSignal<AiStatus>({ ready: false, model: "", fastModel: "", error: null });
   const [root, setRoot] = createSignal("");
   const [rev, setRev] = createSignal(0);
+  const [pinRev, setPinRev] = createSignal(0);
   // The library's data (every note's summary) is read only while the library is open.
   const [lib] = createResource(() => (view().kind === "library" ? rev() + 1 : false), loadLibrary);
   let page: NotePageHandle | undefined;
@@ -329,7 +330,8 @@ export default function App() {
     if (!n) return;
     await (await api()).pinNote(n.id, !n.pinned);
     await page?.reload();
-    say(n.pinned ? "Unpinned" : "Pinned to the front of its collection");
+    setPinRev(pinRev() + 1);
+    say(n.pinned ? "Unpinned" : "Pinned: it is in the sidebar under Today");
   }
 
   const commands: Command[] = [
@@ -593,6 +595,9 @@ export default function App() {
         </Show>
         <Sidebar
           rev={rev()}
+          pinRev={pinRev()}
+          noteId={view().kind === "note" ? current()?.id ?? null : null}
+          onNote={(id) => void openNote(id)}
           here={here()}
           docked={docked()}
           root={root()}

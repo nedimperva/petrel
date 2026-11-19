@@ -330,6 +330,9 @@ export interface Api {
   setNotesRoot(root: string): Promise<ScanReport>;
   scanNotes(): Promise<ScanReport>;
   listNotes(query: NoteQuery): Promise<NoteSummary[]>;
+  /** The capture window's scratch pages, 1 to 5 (`.scratch/` in the folder). */
+  scratchPage(n: number): Promise<string>;
+  saveScratchPage(n: number, text: string): Promise<void>;
   /** By title. */
   findNotes(text: string, limit: number): Promise<NoteSummary[]>;
   /** By the words in the text. */
@@ -490,6 +493,8 @@ async function tauriApi(): Promise<Api> {
     setNotesRoot: (root) => invoke("set_notes_root", { root }),
     scanNotes: () => invoke("scan_notes"),
     listNotes: (query) => invoke("list_notes", { query }),
+    scratchPage: (n) => invoke("scratch_page", { n }),
+    saveScratchPage: (n, text) => invoke("save_scratch_page", { n, text }),
     findNotes: (text, limit) => invoke("find_notes", { text, limit }),
     searchNotes: (text, limit) => invoke("search_notes", { text, limit }),
     noteFolders: () => invoke("note_folders"),

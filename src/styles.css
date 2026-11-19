@@ -1858,12 +1858,51 @@ kbd {
   display: block;
   margin: var(--s-2) 0 var(--s-3);
 }
+.cm-picture-frame {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: top;
+}
 .cm-picture img {
   display: block;
-  max-width: 100%;
+  width: 100%;
   max-height: 420px;
+  object-fit: contain;
+  object-position: left top;
   border-radius: var(--r-md);
   box-shadow: 0 0 0 1px var(--line);
+}
+.cm-picture-frame:not([style]) img {
+  width: auto;
+  max-width: 100%;
+}
+.cm-picture-frame[style] img {
+  max-height: none;
+}
+/* A short bar on the right edge, seen on hover: drag it to size the picture. */
+.cm-picture-grip {
+  position: absolute;
+  top: 50%;
+  right: -7px;
+  width: 6px;
+  height: 36px;
+  margin-top: -18px;
+  border-radius: 3px;
+  background: var(--ink-2);
+  opacity: 0;
+  cursor: ew-resize;
+  transition: opacity var(--d-fast, 120ms) var(--ease);
+}
+.cm-picture-frame:hover .cm-picture-grip,
+.cm-picture-grip:active {
+  opacity: 0.55;
+}
+.cm-picture-caption {
+  display: block;
+  margin-top: var(--s-1);
+  font: italic var(--t-sm) / 1.4 var(--font-ui);
+  color: var(--muted, var(--ink-2));
 }
 .cm-picture.missing {
   font: var(--t-sm) / 1.4 var(--font-ui);
@@ -5458,4 +5497,68 @@ button.cap-top-text:hover {
   margin: 0;
   font-size: var(--t-sm);
   color: var(--faint);
+}
+
+/* Pinned notes under Today: a quiet list, a small dot where an icon would be. */
+.side-pins {
+  margin-top: var(--s-1, 4px);
+  padding-top: var(--s-1, 4px);
+  border-top: 1px solid var(--line);
+}
+.side-pin .side-name {
+  color: var(--ink-2);
+}
+.side-pin.on .side-name {
+  color: var(--ink);
+}
+.pin-mark {
+  display: inline-grid;
+  place-items: center;
+}
+.pin-mark::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.7;
+}
+
+/* ---- scratch pages in the capture window ------------------------------------------------------------------- */
+
+.capture-text-host.away,
+.cap-place.away {
+  display: none;
+}
+/* A scratch page is the capture's paper with its colour as a thin edge on the left. */
+.scratch-host {
+  box-shadow: inset 3px 0 0 var(--hue);
+}
+.cap-page {
+  color: var(--muted);
+}
+.cap-dots {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+.cap-dot {
+  width: 9px;
+  height: 9px;
+  padding: 0;
+  border: 1.5px solid var(--hue);
+  border-radius: 50%;
+  background: transparent;
+  opacity: 0.55;
+  cursor: pointer;
+}
+.cap-dot.filled {
+  background: var(--hue);
+}
+.cap-dot.on {
+  opacity: 1;
+  box-shadow: 0 0 0 2px var(--paper), 0 0 0 3.5px var(--hue);
+}
+.cap-dot:hover {
+  opacity: 1;
 }

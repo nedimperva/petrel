@@ -474,6 +474,8 @@ fn main() {
             notes::set_notes_root,
             notes::scan_notes,
             notes::list_notes,
+            notes::scratch_page,
+            notes::save_scratch_page,
             notes::find_notes,
             notes::search_notes,
             notes::note_folders,
