@@ -5,7 +5,16 @@ Markdown files in one folder; a Rust engine (`crates/petrel-core`) indexes them 
 (`src-tauri`) adds windows, tray, hotkeys and AI, and a SolidJS UI (`src`) draws it. The README covers setup and
 keys; `docs/design/petrel.md` is the design; this file covers state and decisions that aren't visible from the code.
 
-## Where things stand (2026-11-16)
+## Where things stand (2026-11-19)
+
+- **The 17 November list (owner picked 2026-11-19, list https://claude.ai/artifact/PJA2vRcgFnSSPGLYob8tVy), branch
+  `claude/project-thread-uvzutg`, one commit per batch:** items 1–11, 13–21, 24, 26–28, 35, 42–44, 46; summary in
+  `docs/design/petrel.md` › The 17 November list. The drafts engine is gone (only `export_drafts_once` reads the
+  old tables). Styles live in `src/styles/` by window: shared ones in `main.tsx`, main-window ones in `App.tsx`;
+  a rule the capture window or picker needs must be in a shared file. `petrel mcp` and the terminal commands go
+  through `petrel_core::outside` and its `Scope`. Calendar needs the Calendar API on in the owner's Google project
+  and a new sign-in. Not tried: Claude Desktop against a real install, the calendar against Google, the picker's
+  prompt run with a real key, the AUR package build.
 
 - **Review picks (owner asked 2026-11-16, list https://claude.ai/artifact/DwnzLPdrfqZobjj2mWSTwV), branch
   `claude/project-thread-gquwlx`, PR #14, one commit per batch:** items 1–11, 14–21, 23, 25–29, 35, 37, 45–50 and
@@ -124,7 +133,7 @@ documented in the README), global shortcuts are the compositor's job on Wayland 
 - Rust: `anyhow::Result` in the engine; commands return `Result<T, String>`; serde `camelCase` on the wire; store
   methods synchronous behind a `Mutex`, `spawn_blocking` when slow.
 - UI: SolidJS signals, no state library; keyboard handling in `App.tsx`; tokens only; JS bundle budget 300 kB gz
-  including CodeMirror (225 kB on 2026-11-10, 270 kB on 2026-11-11 after the twenty more, 276 kB with the fake store).
+  including CodeMirror (225 kB on 2026-11-10, 270 kB on 2026-11-11 after the twenty more, 276 kB with the fake store; on 2026-11-19 every JS chunk together is 331 kB gz at level 9, main was 320 kB by the same count).
 - Comments explain why, not what. Short, plain sentences in docs and UI text.
 
 ## Roadmap
