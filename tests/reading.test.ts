@@ -2,7 +2,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isSong, songLines } from "../src/note/reading.ts";
+import { isSong, songLines } from "../src/note/songs.ts";
 
 test("a note with chords is a song, and chords sit over their words", () => {
   const body = "## Verse\n[Am]Kad ja [C]pođoh\nna Bembašu\n\n[G]Chorus:\n";

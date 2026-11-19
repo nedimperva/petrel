@@ -5,7 +5,7 @@
 import { For, Match, onCleanup, onMount, Show, Switch } from "solid-js";
 import ReadNote from "../library/ReadNote";
 import { folderName } from "../ui";
-import { isSong, songLines } from "./reading";
+import { isSong, songLines } from "./songs";
 
 export default function Reading(p: { title: string; folder: string; body: string; onClose(): void; onLink(inner: string): void; onTick(line: number, done: boolean): void }) {
   let box!: HTMLDivElement;
