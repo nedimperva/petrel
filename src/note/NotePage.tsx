@@ -15,8 +15,8 @@ import { toggleTask } from "../editor/commands";
 import { createEditor, type EditorHandle } from "../editor/editor";
 import { cleanPaste } from "../editor/paste";
 import { pictureExtensions } from "../editor/pictures";
-import { clock, dayTally, dayTitle, dropBareStamps, isDayNote, JOURNAL, tallyLine, today } from "../journal/days";
-import { dayExtensions } from "../journal/stamps";
+import { clock, dayTally, dayTitle, dropBareStamps, isDayNote, JOURNAL, shouldStartFreshEntry, tallyLine, today } from "../journal/days";
+import { dayExtensions, refreshBareTail, startFreshEntry } from "../journal/stamps";
 import { linkExtensions } from "../notes/links";
 import { snippetCompletions } from "../editor/snippets";
 import { parseLinks } from "../notes/parse";
@@ -246,13 +246,18 @@ export default function NotePage(p: Props) {
         editor.view.dispatch({ selection: { anchor: found }, effects: EditorView.scrollIntoView(found, { y: "center" }) });
         return;
       }
-      // Coming back to today's page starts a new entry under the last one, the time already there. It is not
-      // written until something is typed after it.
+      // Coming back to today's page after a gap (≥ 5 min) starts a fresh live entry; quick returns stay in the current one.
       if (editor && n.folder === JOURNAL && n.title === today() && n.body.trim()) {
-        const t = `${n.body.replace(/\s+$/, "")}\n\n${clock()} `;
-        saver.load({ ...n, body: t });
-        editor.select(t.length, t.length);
-        requestAnimationFrame(() => editor?.view.dispatch({ effects: EditorView.scrollIntoView(t.length, { y: "center" }) }));
+        if (shouldStartFreshEntry(n.body, new Date(), 5)) {
+          const t = `${n.body.replace(/\s+$/, "")}\n\n${clock()} `;
+          saver.load({ ...n, body: t });
+          editor.select(t.length, t.length);
+          requestAnimationFrame(() => editor?.view.dispatch({ effects: EditorView.scrollIntoView(t.length, { y: "center" }) }));
+        } else {
+          const end = n.body.replace(/\s+$/, "").length;
+          editor.select(end, end);
+          requestAnimationFrame(() => editor?.view.dispatch({ effects: EditorView.scrollIntoView(end, { y: "center" }) }));
+        }
         return;
       }
       // Coming back to a note (Back, a link, the library) finds the cursor and the scroll where they were.
@@ -713,6 +718,18 @@ export default function NotePage(p: Props) {
     if (editor && (id !== (note()?.id ?? null) || day !== prev?.[1])) void load(id);
   }, { defer: true }));
 
+  // Keep a trailing empty live entry's clock fresh while Today's page stays open or regains focus.
+  createEffect(() => {
+    if (dayPage() !== today()) return;
+    const syncClock = () => editor?.view && refreshBareTail(editor.view);
+    const id = setInterval(syncClock, 30_000);
+    window.addEventListener("focus", syncClock);
+    onCleanup(() => {
+      clearInterval(id);
+      window.removeEventListener("focus", syncClock);
+    });
+  });
+
   onCleanup(() => {
     keepPlace();
     void saver?.flush();
@@ -784,7 +801,17 @@ export default function NotePage(p: Props) {
     <div class="page" classList={{ "day-page": !!dayPage(), "beside-open": !!p.besideOpen }}>
       <div class="page-main">
         <div class="sheet">
-          <Show when={dayPage()}>{(d) => <DayHead day={d()} state={day} onDay={(x) => p.onDay?.(x)} />}</Show>
+          <Show when={dayPage()}>
+            {(d) => (
+              <DayHead
+                day={d()}
+                tally={tally()}
+                state={day}
+                onDay={(x) => p.onDay?.(x)}
+                onNewEntry={() => editor?.view && startFreshEntry(editor.view)}
+              />
+            )}
+          </Show>
           <input
             ref={titleInput}
             hidden={!!dayPage()}
@@ -821,7 +848,9 @@ export default function NotePage(p: Props) {
           </Show>
         </div>
         <aside class="note-margin" classList={{ quiet: typingNow() }} aria-label="About this note">
-          <Show when={dayPage()}>{(d) => <DayMargin day={d()} state={day} onDay={(x) => p.onDay?.(x)} onOpen={p.onOpen} />}</Show>
+          <Show when={dayPage()}>
+            {(d) => <DayMargin day={d()} state={day} onDay={(x) => p.onDay?.(x)} onOpen={p.onOpen} onInbox={() => p.onFolder("inbox")} />}
+          </Show>
           {/* Only what the note has: a new page is only the page (the shortcuts sheet explains # and [[). */}
           <Show when={!dayPage() && heads().length}>
             <section aria-label="On this page">
@@ -919,10 +948,19 @@ export default function NotePage(p: Props) {
       </div>
       <footer class="page-foot">
         <span>{dayPage() ? "Journal" : folderName(note()?.folder ?? p.folder)}</span>
-        <Show when={dayPage() && tally()} fallback={<Show when={words()}><span>{words()} words</span></Show>}>
-          <span class="day-tally">{tally()}</span>
+        <Show when={!dayPage() && words()}>
+          <span>{words()} words</span>
         </Show>
-        <KeyHints hints={[!!dayPage() && ["Alt ← →", "other days"], [chips("find"), "find"], [chips("ai"), "AI"], [chips("library"), "library"], [chips("shortcuts"), "all keys"]]} />
+        <KeyHints
+          hints={[
+            !!dayPage() && ["Alt ← →", "other days"],
+            dayPage() === today() && ["Ctrl Enter", "new entry"],
+            [chips("find"), "find"],
+            [chips("ai"), "AI"],
+            [chips("library"), "library"],
+            [chips("shortcuts"), "all keys"],
+          ]}
+        />
         <Show when={p.notice}>
           <span class="notice">{p.notice}</span>
         </Show>

@@ -1,6 +1,7 @@
-/* A day's page: the timeline, the week, the calendar, the tally. The main window only. */
+/* A day's page (Option B — Quiet Entry Header): clean editorial date heading, flush-left entries with hairline
+   timestamp headers, and a simple calendar chooser + tasks/schedule in the right margin. */
 
-/* ---- the day's page -------------------------------------------------------------------------------------- */
+/* ---- day header --------------------------------------------------------------------------------------------- */
 
 .page {
   position: relative;
@@ -10,44 +11,83 @@
   max-width: var(--editor-max);
   margin: 0 auto;
   box-sizing: border-box;
-  padding: var(--s-7) var(--s-5) 0;
+  padding: var(--s-7) var(--s-5) var(--s-2);
+}
+.day-heading-row {
   display: flex;
-  align-items: baseline;
-  gap: var(--s-4);
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s-3);
+}
+.day-heading-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 .day-title {
   margin: 0;
-  font: 600 30px/1.25 var(--font-write);
+  font: 600 30px / 1.2 var(--font-write);
   letter-spacing: -0.015em;
 }
+.day-sub {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+  font-size: var(--t-sm);
+  color: var(--muted);
+}
 .day-nav {
-  margin-left: auto;
+  flex: none;
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  padding-top: 2px;
   color: var(--muted);
 }
-.cm-stamp {
-  font-family: var(--font-ui);
-  font-size: 0.72em;
-  font-variant-numeric: tabular-nums;
-  color: var(--faint);
-  letter-spacing: 0.02em;
+.day-new-entry {
+  margin-right: 4px;
+  color: var(--ink-2);
 }
-.day-month {
-  position: absolute;
-  top: var(--s-7);
-  right: var(--s-6);
-  width: 196px;
+
+/* ---- simple calendar chooser in the right margin ------------------------------------------------------------ */
+
+.day-month-box {
   display: flex;
   flex-direction: column;
   gap: var(--s-2);
   font-size: var(--t-sm);
   color: var(--muted);
 }
+.day-month-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+}
 .day-month-name {
   font-weight: 600;
   color: var(--ink-2);
+}
+.day-month-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.day-month-step {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+}
+.day-month-step:hover {
+  background: var(--hover);
+  color: var(--ink);
 }
 .day-grid {
   display: grid;
@@ -58,6 +98,7 @@
 .day-wd {
   font-size: var(--t-xs);
   color: var(--faint);
+  padding-bottom: 2px;
 }
 .day-cell {
   position: relative;
@@ -88,6 +129,10 @@
   border-radius: 50%;
   background: var(--accent);
 }
+.day-cell.today {
+  color: var(--accent);
+  font-weight: 600;
+}
 .day-cell.future {
   color: var(--faint);
 }
@@ -97,12 +142,6 @@
 }
 .day-cell.on::after {
   background: var(--accent-fg);
-}
-/* The month only fits beside the text on a wide window; the text comes first. */
-@media (max-width: 1180px) {
-  .day-month {
-    display: none;
-  }
 }
 
 /* Saved is a tick that fades in, not a word that blinks. */
@@ -114,173 +153,84 @@
   animation: fade var(--d-slow) var(--ease);
 }
 
-/* ---- today's page as a timeline: the times in the gutter, what is still open in the margin -------------------- */
+/* ---- Option B: Quiet Entry Header inside CodeMirror (no blockquote line, flush-left prose) ------------------ */
 
-.day-page .cm-line {
-  position: relative;
-}
-.day-page .cm-stamp {
-  position: absolute;
-  left: -64px;
-  width: 48px;
-  text-align: right;
-  top: 0.35em;
-  font-size: var(--t-sm);
-  color: var(--muted);
-}
-.day-carried {
+.cm-entry-head {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.carried-row {
-  display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
-  font-size: var(--t-md);
-  line-height: 1.45;
-  color: var(--ink);
-}
-.carried-row input {
-  margin-top: 3px;
-  accent-color: var(--accent);
-}
-.carried-text {
-  flex: 1;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-.carried-day {
-  flex: none;
-  font-size: var(--t-xs);
-  color: var(--muted);
-  padding: 1px 6px;
-  border-radius: 999px;
-}
-.carried-day:hover {
-  background: var(--hover);
-  color: var(--ink);
-}
-/* The times hang to the left of the text. When the window leaves less than 64 px there, the text and the title move
-   right just enough to keep them whole; on a very narrow window the time stays at the start of the line. */
-.day-page .page-main {
-  --main-w: 100cqi;
-  --gutter-need: max(0px, 40px - max(0px, (var(--main-w) - var(--editor-max)) / 2));
-}
-@container (min-width: 960px) {
-  .day-page:not(.beside-open) .page-main {
-    --main-w: calc(100cqi - var(--margin-w));
-  }
-}
-.day-page .cm-content,
-.day-page .day-head {
-  padding-left: calc(var(--s-5) + var(--gutter-need)) !important;
-}
-@container (max-width: 479px) {
-  .day-page .page-main {
-    --gutter-need: 0px;
-  }
-  .day-page .cm-stamp {
-    position: static;
-    font-size: 0.72em;
-  }
-}
-
-/* ---- a day's page as a day: the week over the title, the times on a thread, the calendar, the tally ---------- */
-
-.day-head {
-  flex-wrap: wrap;
-  row-gap: var(--s-3);
-}
-.day-week {
-  flex: 1 0 100%;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  margin-bottom: 2px;
-}
-.week-day {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1px;
-  min-width: 40px;
-  padding: 5px 6px 6px;
-  border-radius: var(--r-md);
-  color: var(--muted);
-  font: 500 var(--t-xs) / 1.2 var(--font-ui);
-  position: relative;
-}
-.week-day .week-n {
-  font: 600 var(--t-rd) / 1.2 var(--font-ui);
-  color: var(--ink-2);
+  margin: 20px 0 4px;
+  font: 500 11.5px / 1.3 var(--font-ui);
   font-variant-numeric: tabular-nums;
-}
-.week-day.future .week-n {
   color: var(--faint);
+  user-select: none;
 }
-.week-day.has::after {
-  content: "";
-  position: absolute;
-  bottom: 2px;
-  left: 50%;
-  width: 4px;
-  height: 4px;
-  margin-left: -2px;
-  border-radius: 50%;
-  background: var(--faint);
+.cm-entry-head.first {
+  margin-top: 4px;
 }
-.week-day.today .week-n {
+.cm-entry-head.live {
   color: var(--accent);
 }
-.week-day:hover,
-.week-day:focus-visible {
-  background: var(--hover);
-  outline: none;
-}
-.week-day.on {
-  background: var(--ink);
-  color: var(--paper);
-}
-.week-day.on .week-n {
-  color: var(--paper);
-}
-.week-day.on.has::after {
-  background: var(--paper);
-}
-.week-month {
-  margin-left: auto;
-  color: var(--muted);
-}
-
-/* The thread: a hairline down the left of the text, a dot where an entry starts at its time. */
-.day-page .cm-line::after {
-  content: "";
-  position: absolute;
-  left: -10px;
-  top: 0;
-  bottom: 0;
-  border-left: 1px solid var(--line);
-  pointer-events: none;
-}
-.day-page .cm-line:has(.cm-stamp)::before {
-  content: "";
-  position: absolute;
-  left: -13px;
-  top: calc(var(--editor-leading) * 0.5em - 3.5px);
-  width: 5px;
-  height: 5px;
+.cm-entry-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  background: var(--paper);
-  border: 1.5px solid var(--faint);
-  z-index: 1;
+  background: var(--accent);
+  animation: entry-live-dot 2s ease-in-out infinite;
 }
-@container (max-width: 479px) {
-  .day-page .cm-line::after,
-  .day-page .cm-line:has(.cm-stamp)::before {
-    display: none;
+@keyframes entry-live-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
   }
 }
+.cm-entry-time {
+  flex: none;
+  letter-spacing: 0.02em;
+}
+.cm-entry-live {
+  flex: none;
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--faint);
+}
+.cm-entry-tag {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--sunk);
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+.cm-entry-rule {
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+  opacity: 0.75;
+}
+/* Quiet placeholder on a fresh pending entry line before anything is typed. */
+.day-page .cm-entry-pending::after {
+  content: "Write an entry…";
+  color: var(--faint);
+  opacity: 0.65;
+  pointer-events: none;
+}
+/* `_from capture_` is shown as a subtle badge in the entry header; keep the raw line ultra-quiet. */
+.day-page .cm-from-capture {
+  font-size: 1px;
+  line-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* ---- right margin: schedule, unified carry-over & due, captured today --------------------------------------- */
 
 .day-cal {
   display: flex;
@@ -289,10 +239,10 @@
 }
 .cal-row {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   align-items: baseline;
-  padding: 4px 6px;
-  margin: 0 -6px;
+  padding: 5px 7px;
+  margin: 0 -7px;
   border-radius: var(--r-sm);
   text-align: left;
   font-size: var(--t-md);
@@ -306,13 +256,121 @@
 }
 .cal-time {
   flex: none;
-  width: 52px;
+  width: 46px;
   font-variant-numeric: tabular-nums;
-  color: var(--muted);
+  color: var(--faint);
   font-size: var(--t-sm);
 }
-.day-tally {
-  color: var(--muted);
+.cal-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+.cal-add {
+  flex: none;
+  font-size: var(--t-xs);
+  color: var(--accent-ink);
+  opacity: 0;
+  transition: opacity var(--d-fast) var(--ease);
+}
+.cal-row:hover .cal-add,
+.cal-row:focus-visible .cal-add {
+  opacity: 1;
+}
+
+.day-carried {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.day-sec-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-2);
+}
+.day-sec-head h4 {
+  margin: 0;
+}
+.carried-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: var(--t-md);
+  line-height: 1.45;
+  color: var(--ink);
+}
+.carried-item input {
+  margin-top: 3px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.carried-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.carried-text {
+  overflow-wrap: anywhere;
+}
+.carried-text.overdue {
+  color: var(--bad);
+}
+.carried-sub {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: var(--t-xs);
+}
+.carried-src {
+  color: var(--faint);
+  padding: 0;
+}
+.carried-src:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+.carried-src.overdue {
+  color: var(--bad);
+}
+.carried-bring {
+  color: var(--accent-ink);
+  font-weight: 500;
+  padding: 0;
+}
+.carried-bring:hover {
+  text-decoration: underline;
+}
+
+.day-inbox-card {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--r-md);
+  background: var(--sunk);
+  border: 1px solid var(--line);
+  font-size: var(--t-sm);
+  color: var(--ink-2);
+  text-align: left;
+  transition: background var(--d-fast) var(--ease), border-color var(--d-fast) var(--ease);
+}
+.day-inbox-card:hover {
+  background: var(--hover);
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+.day-inbox-card b {
+  color: var(--ink);
+  font-weight: 600;
 }
 
 /* First steps on the empty page: a quiet list, not a dialog. */

@@ -8,7 +8,14 @@ export interface Version {
 }
 
 /** Only collections of things to copy have versions; elsewhere `##` is just a heading. */
-export const hasVersions = (folder: string) => /prompt|snippet/i.test(folder.split("/")[0]);
+export function hasVersions(folder: string, faces?: Record<string, { copy?: string }>): boolean {
+  const top = folder.split("/")[0];
+  if (!top || top === "inbox" || top === "journal") return false;
+  const set = faces?.[top]?.copy;
+  if (set === "yes") return true;
+  if (set === "no") return false;
+  return /prompt|snippet|template|repl|command|signature|boilerplate|copy/i.test(top);
+}
 
 /** The versions in a text, or none when it has fewer than two `## ` headings. Text before the first heading is
  * a version of its own when it says anything. Headings inside code fences do not count. */

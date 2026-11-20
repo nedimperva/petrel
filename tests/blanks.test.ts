@@ -93,6 +93,8 @@ test("versions on one card", async () => {
     ["Long", "Short"],
   );
   assert.ok(hasVersions("Prompts") && hasVersions("snippets/shell") && !hasVersions("Travel"));
+  assert.ok(hasVersions("Replies", { Replies: { copy: "yes" } }));
+  assert.ok(!hasVersions("Prompts", { Prompts: { copy: "no" } }));
 });
 
 test("collections are pages or things to copy", async () => {
