@@ -33,3 +33,20 @@ test("AltGr keys are flagged; Hyprland gets a bind line", () => {
   assert.equal(hyprBind(picker, "Super+V"), "bind = SUPER, V, exec, petrel --picker");
   assert.equal(hyprBind(picker, "Ctrl+Shift+Space"), "bind = CTRL SHIFT, SPACE, exec, petrel --picker");
 });
+
+test("no stock editor key shares a press with a Petrel key", async () => {
+  const { stockKeys, asCombo } = await import("../src/editor/stockKeys.ts");
+  const arrows: Record<string, string> = { "←": "ArrowLeft", "→": "ArrowRight", "↑": "ArrowUp", "↓": "ArrowDown" };
+  const ours = new Map<string, string>();
+  for (const s of SHORTCUTS) {
+    if (s.global || s.id === "findHere" || s.id === "moveLine") continue;
+    for (const on of ["win", "linux"] as const)
+      for (const k of s.keys[on].split(" / ")) {
+        const c = k.trim().replace(/[←→↑↓]/g, (a) => arrows[a]);
+        if (c.includes("+")) ours.set(c.toLowerCase(), s.id);
+      }
+  }
+  const clash = stockKeys.filter((b) => b.key && /Mod|Ctrl|Alt/.test(b.key) && ours.has(asCombo(b.key).toLowerCase())).map((b) => `${b.key} = ${ours.get(asCombo(b.key!).toLowerCase())}`);
+  assert.deepEqual(clash, []);
+  assert.ok(!stockKeys.some((b) => b.key === "Mod-/"), "Ctrl / never comments a line out");
+});

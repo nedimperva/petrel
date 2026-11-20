@@ -30,9 +30,13 @@ export async function keepVersion(path: string, name: string) {
   await (await api()).setUiSetting(VERSIONS, JSON.stringify(all)).catch(() => {});
 }
 
+export type BlankKind = "unfilled" | "auto" | "typed";
+
 export interface BlankState {
   list(): Blank[];
   value(b: Blank): string;
+  /** Distinguishes empty, auto/default/remembered, and explicitly typed values for chip styling. */
+  kind(b: Blank): BlankKind;
   set(name: string, v: string): void;
   /** The text with the blanks filled. */
   out(): string;
@@ -57,14 +61,21 @@ export function createBlanks(text: () => string, selection?: () => string | null
         .then((s) => s.readClipboard())
         .then((c) => setAuto((a) => ({ ...a, clipboard: c.replace(/\s+$/, "") })), () => {});
     }
-    const sel = selection?.();
-    if (sel) setAuto((a) => (a.selection === sel ? a : { ...a, selection: sel }));
+    const sel = selection?.() ?? "";
+    setAuto((a) => ((a.selection ?? "") === sel ? a : { ...a, selection: sel }));
   });
   const value = (b: Blank) => typed()[b.name] ?? startValue(b, memory()[b.name], auto());
+  const kind = (b: Blank): BlankKind => {
+    const v = value(b);
+    if (!v) return "unfilled";
+    if (typed()[b.name] !== undefined) return "typed";
+    return "auto";
+  };
   const values = () => Object.fromEntries(list().map((b) => [b.name, value(b)]));
   return {
     list,
     value,
+    kind,
     set: (name, v) => setTyped((t) => ({ ...t, [name]: v })),
     out: () => fill(text(), values()),
     memory,
@@ -78,7 +89,16 @@ export function createBlanks(text: () => string, selection?: () => string | null
 
 const LONG = /^(code|text|diff|commits|body|notes|clipboard|selection)$/i;
 
-export default function BlankFields(p: { state: BlankState; side?: boolean; focusFirst?: boolean }) {
+export default function BlankFields(p: {
+  state: BlankState;
+  side?: boolean;
+  focusFirst?: boolean;
+  initialBlank?: string | null;
+  activeBlank?: string | null;
+  onActiveBlank?: (name: string | null) => void;
+  selectionApp?: string | null;
+  onClearSelection?: () => void;
+}) {
   // How far back Up has gone, per field.
   const [back, setBack] = createSignal<Record<string, number>>({});
   const step = (b: Blank, by: number) => {
@@ -89,13 +109,57 @@ export default function BlankFields(p: { state: BlankState; side?: boolean; focu
     p.state.set(b.name, i < 0 ? "" : past[i]);
     return true;
   };
-  const focus = (i: number) => (el: HTMLElement) => i === 0 && p.focusFirst !== false && setTimeout(() => el.focus());
+  const shouldFocus = (b: Blank, i: number) => (p.initialBlank ? b.name === p.initialBlank : i === 0 && p.focusFirst !== false);
+  const focus = (b: Blank, i: number) => (el: HTMLElement) =>
+    shouldFocus(b, i) &&
+    setTimeout(() => {
+      el.focus();
+      p.onActiveBlank?.(b.name);
+    });
 
   return (
     <For each={p.state.list()}>
       {(b, i) => (
-        <div class={p.side ? "side-field" : "fill-field"}>
-          {p.side ? <span>{b.name}</span> : <span class="chip blank">{b.name}</span>}
+        <div
+          class={p.side ? "side-field" : "fill-field"}
+          classList={{ active: p.activeBlank === b.name }}
+          data-blank-field={b.name}
+          onMouseEnter={() => p.onActiveBlank?.(b.name)}
+        >
+          <Show
+            when={p.side}
+            fallback={<span class="chip blank">{b.name}</span>}
+          >
+            <div class="side-field-head">
+              <span>{b.name}</span>
+              <Show when={b.choices}>
+                <span class="blank-meta">1–{b.choices!.length}</span>
+              </Show>
+              <Show when={b.auto === "selection" && p.state.value(b)}>
+                <Show
+                  when={p.onClearSelection}
+                  fallback={<span class="blank-meta accent">{p.selectionApp ? `from ${p.selectionApp}` : "selected"}</span>}
+                >
+                  <button
+                    type="button"
+                    class="blank-meta-btn"
+                    onClick={() => {
+                      p.state.set(b.name, "");
+                      p.onClearSelection?.();
+                    }}
+                  >
+                    {p.selectionApp ? `from ${p.selectionApp} · Clear` : "Clear"}
+                  </button>
+                </Show>
+              </Show>
+              <Show when={b.auto && b.auto !== "selection"}>
+                <span class="blank-meta accent">{b.auto === "today" ? "today" : "clipboard"}</span>
+              </Show>
+              <Show when={!b.auto && !b.choices && b.value}>
+                <span class="blank-meta">default: {b.value}</span>
+              </Show>
+            </div>
+          </Show>
           <div class="blank-control">
             <Show
               when={!b.choices}
@@ -105,7 +169,9 @@ export default function BlankFields(p: { state: BlankState; side?: boolean; focu
                   tabIndex={0}
                   role="radiogroup"
                   aria-label={b.name}
-                  ref={focus(i())}
+                  data-blank-input={b.name}
+                  ref={focus(b, i())}
+                  onFocus={() => p.onActiveBlank?.(b.name)}
                   onKeyDown={(e) => {
                     const n = Number(e.key);
                     if (n >= 1 && n <= b.choices!.length) {
@@ -124,7 +190,10 @@ export default function BlankFields(p: { state: BlankState; side?: boolean; focu
                         aria-checked={p.state.value(b) === c}
                         classList={{ on: p.state.value(b) === c }}
                         tabIndex={-1}
-                        onClick={() => p.state.set(b.name, c)}
+                        onClick={() => {
+                          p.state.set(b.name, c);
+                          p.onActiveBlank?.(b.name);
+                        }}
                       >
                         <kbd>{k() + 1}</kbd> {c}
                       </button>
@@ -136,8 +205,11 @@ export default function BlankFields(p: { state: BlankState; side?: boolean; focu
               {LONG.test(b.name) ? (
                 <textarea
                   rows={3}
+                  data-blank-input={b.name}
                   value={p.state.value(b)}
-                  ref={focus(i())}
+                  placeholder={b.value || `Type ${b.name}…`}
+                  ref={focus(b, i())}
+                  onFocus={() => p.onActiveBlank?.(b.name)}
                   onInput={(e) => p.state.set(b.name, e.currentTarget.value)}
                   onKeyDown={(e) => {
                     // In a long field Up moves the caret; it steps back only from the very start.
@@ -146,15 +218,18 @@ export default function BlankFields(p: { state: BlankState; side?: boolean; focu
                 />
               ) : (
                 <input
+                  data-blank-input={b.name}
                   value={p.state.value(b)}
-                  ref={focus(i())}
+                  placeholder={b.value || `Type ${b.name}…`}
+                  ref={focus(b, i())}
+                  onFocus={() => p.onActiveBlank?.(b.name)}
                   onInput={(e) => p.state.set(b.name, e.currentTarget.value)}
                   onKeyDown={(e) => {
                     if ((e.key === "ArrowUp" && step(b, 1)) || (e.key === "ArrowDown" && step(b, -1))) e.preventDefault();
                   }}
                 />
               )}
-              <Show when={b.auto}>
+              <Show when={!p.side && b.auto}>
                 <span class="blank-hint">
                   {b.auto === "today" ? "today's date" : b.auto === "clipboard" ? "from the clipboard" : "what you had selected"}
                 </span>
@@ -163,7 +238,15 @@ export default function BlankFields(p: { state: BlankState; side?: boolean; focu
                 <div class="blank-past" title="Earlier answers (↑ ↓)">
                   <For each={(p.state.memory()[b.name] ?? []).filter((m) => m !== p.state.value(b))}>
                     {(m) => (
-                      <button type="button" class="chip small" tabIndex={-1} onClick={() => p.state.set(b.name, m)}>
+                      <button
+                        type="button"
+                        class="chip small"
+                        tabIndex={-1}
+                        onClick={() => {
+                          p.state.set(b.name, m);
+                          p.onActiveBlank?.(b.name);
+                        }}
+                      >
                         {m.length > 40 ? `${m.slice(0, 40)}…` : m}
                       </button>
                     )}

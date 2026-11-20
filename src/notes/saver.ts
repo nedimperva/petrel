@@ -27,6 +27,9 @@ export function createNoteSaver(o: {
   /** A new note's folder and title, read when its file is made. */
   fresh(): { folder: string; title: string };
   conflict(path: string): void;
+  /** The text as it is written to the file, when that differs from the editor (a day's page leaves out a time
+   * with nothing after it). A text that comes out empty does not make a file. */
+  clean?(body: string): string;
 }): NoteSaver {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let rev = 0;
@@ -57,14 +60,15 @@ export function createNoteSaver(o: {
     if (!editor || rev === saved) return true;
     const mine = session;
     const at = rev;
-    const body = editor.text();
+    const raw = editor.text();
+    const body = o.clean ? o.clean(raw) : raw;
     const current = o.note();
     o.setSave("saving");
     try {
       const store = await o.store();
       if (!current) {
         const f = o.fresh();
-        if (!body && !f.title.trim()) {
+        if (!body.trim() && (!f.title.trim() || body !== raw)) {
           saved = at;
           o.setSave("saved");
           return true;
@@ -72,6 +76,12 @@ export function createNoteSaver(o: {
         const n = await store.createNote(f.folder, f.title.trim() || "Untitled", body, []);
         if (mine === session) o.setNote(n);
       } else {
+        if (body === current.body) {
+          saved = Math.max(saved, at);
+          failure = null;
+          o.setSave(rev === saved ? "saved" : "dirty");
+          return true;
+        }
         const r = await store.saveNote(current.id, body, current.hash);
         if (mine === session) o.setNote({ ...current, hash: r.hash, modifiedAt: r.modifiedAt, body });
         if (r.conflict) o.conflict(r.conflict);

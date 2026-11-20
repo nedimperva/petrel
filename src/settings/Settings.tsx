@@ -2,6 +2,7 @@
 // (the folder, start at login), Writing, Look, Capture, Keys (every shortcut on this computer, changeable), AI and
 // About. Each change is saved at once; Esc goes back.
 
+import { forgetKeys, keysUsed } from "../learned";
 import { createResource, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { api, errText, type AiStatus, type DesktopSettings } from "../api";
 import { comboOf, conflicts, customKeys, hyprBind, keyOf, platform, setCustomKeys, setSystemKeys, SHORTCUTS, typesCharacter, type Shortcut } from "../keys";
@@ -11,10 +12,11 @@ import { tick } from "../joy/sound";
 import { canUpdate, checkForUpdate } from "../updates";
 import { applyPrefs, FONTS, KEEP_GOING, prefs, setPrefs, SIZES, storedValue, THEMES, type Prefs } from "./prefs";
 import SyncSection from "./SyncSection";
+import ClaudeSection from "./ClaudeSection";
 
 export { typesCharacter };
 
-export type Section = "general" | "sync" | "writing" | "look" | "capture" | "keys" | "ai" | "about";
+export type Section = "general" | "sync" | "writing" | "look" | "capture" | "keys" | "ai" | "claude" | "about";
 
 const SECTIONS: { id: Section; label: string; icon: string }[] = [
   { id: "general", label: "General", icon: "M3 7h18M3 12h18M3 17h18" },
@@ -24,6 +26,7 @@ const SECTIONS: { id: Section; label: string; icon: string }[] = [
   { id: "capture", label: "Capture", icon: "M4 13h4l2 3h4l2-3h4M4 13l2-8h12l2 8v6H4z" },
   { id: "keys", label: "Keys", icon: "M3 7h18v10H3zM7 11h1M11 11h1M15 11h2M7 14h10" },
   { id: "ai", label: "AI", icon: "M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6" },
+  { id: "claude", label: "Claude apps", icon: "M4 6h16v10H8l-4 4zM8 10h8M8 13h5" },
   { id: "about", label: "About", icon: "M12 8h.01M11 12h1v5h1M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z" },
 ];
 
@@ -295,7 +298,7 @@ export default function Settings(p: { section?: Section | "all"; onClose(): void
             <Toggle label="A quiet page" hint="The title bar, sidebar, margin and footer fade while you type. Move the mouse and they come back." on={prefs().quiet} onChange={(on) => void pref("quiet", on)} />
             <Toggle label="Quiet Markdown" hint="The marks (#, **, [[ ]]) hide on every line but the one you are on, so bold reads as bold. The file stays plain Markdown." on={prefs().quietMarks} onChange={(on) => void pref("quietMarks", on)} />
             <Toggle label="Paragraph focus" hint="The other paragraphs fade while you type." on={prefs().focus} onChange={(on) => void pref("focus", on)} />
-            <Toggle label="Typewriter scrolling" hint="The line you type stays in the middle of the window." on={prefs().typewriter} onChange={(on) => void pref("typewriter", on)} />
+            <Toggle label="Typewriter scrolling" hint="The line you type stays a third of the way down the window, not at its bottom edge." on={prefs().typewriter} onChange={(on) => void pref("typewriter", on)} />
             <Toggle
               label="A pencil sound as you type"
               hint="Soft, and only while the window is in front."
@@ -369,6 +372,14 @@ export default function Settings(p: { section?: Section | "all"; onClose(): void
           <p class="muted">
             The shortcuts on this computer ({platform === "linux" ? "Omarchy" : "Windows"}). Click one and press the new keys; <kbd>Esc</kbd> cancels. All of them, with the fixed ones, are on <kbd>Shift</kbd> <kbd>?</kbd>.
           </p>
+          <p class="muted small set-note">
+            A key you have pressed ten times leaves the key line at the foot of the screens.{" "}
+            <Show when={Object.keys(keysUsed()).length} fallback={"None is learned yet."}>
+              <button type="button" class="link" onClick={() => void forgetKeys().then(() => say("Every key hint is back."))}>
+                Show every hint again
+              </button>
+            </Show>
+          </p>
           <section class="set-card">
             <For each={SHORTCUTS.filter((s) => s.editable)}>
               {(s) => (
@@ -424,6 +435,9 @@ export default function Settings(p: { section?: Section | "all"; onClose(): void
           <SyncSection onOpen={p.onOpen} />
         </Show>
 
+        <Show when={at() === "claude"}>
+          <ClaudeSection />
+        </Show>
         <Show when={at() === "ai"}>
           <h1>
             <span class="spark">✦</span> AI

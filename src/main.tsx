@@ -7,8 +7,13 @@ import "@fontsource/jetbrains-mono/400.css";
 import "@fontsource/ia-writer-quattro/400.css";
 import "@fontsource/ia-writer-quattro/400-italic.css";
 import "@fontsource/ia-writer-quattro/700.css";
+// Every window's styles; the main window's own come with App.tsx, so the capture window and the picker load less.
 import "./styles/tokens.css";
-import "./styles.css";
+import "./styles/base.css";
+import "./styles/page.css";
+import "./styles/overlays.css";
+import "./styles/windows.css";
+import "./styles/looks.css";
 
 // The capture and picker windows are the same page with a flag set by their window builders; `?capture` and
 // `?picker` stand in for them in `npm run dev`.

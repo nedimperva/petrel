@@ -1,0 +1,27 @@
+# Maintainer: Nedim Perva
+# Petrel from its GitHub release (.deb), for Arch and Omarchy. Updated by ./update.sh VERSION after each release.
+pkgname=petrel-bin
+pkgver=0.3.0
+pkgrel=1
+pkgdesc="Quick capture and notes, as Markdown files in one folder"
+arch=('x86_64')
+url="https://github.com/nedimperva/petrel"
+license=('MIT')
+depends=('webkit2gtk-4.1' 'gtk3' 'libayatana-appindicator' 'librsvg' 'libsecret' 'hicolor-icon-theme')
+optdepends=(
+  'gnome-keyring: a keyring for the Claude key and the Google sign-in'
+  'wl-clipboard: petrel copy on Wayland'
+  'xclip: petrel copy on X11'
+)
+provides=('petrel')
+conflicts=('petrel')
+source=("Petrel_${pkgver}_amd64.deb::${url}/releases/download/v${pkgver}/Petrel_${pkgver}_amd64.deb"
+        "LICENSE::https://raw.githubusercontent.com/nedimperva/petrel/v${pkgver}/LICENSE")
+sha256sums=('SKIP'
+            'SKIP')
+
+package() {
+  # makepkg has unpacked the .deb; its files are in data.tar.*.
+  bsdtar -xf data.tar.* -C "$pkgdir"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

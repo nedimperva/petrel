@@ -1,0 +1,302 @@
+/* The writing page: the text, pictures, and the page made calmer. Every window loads it (the capture window writes too). */
+
+/* ---- the writing page: the text and nothing else -------------------------------------------------------------- */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.page-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+.state {
+  font-size: var(--t-xs);
+  color: var(--faint);
+}
+.state.bad {
+  color: var(--bad);
+  font-weight: 600;
+}
+.sheet {
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+.title-input {
+  width: 100%;
+  max-width: var(--editor-max);
+  margin: 0 auto;
+  padding: var(--s-7) var(--s-5) 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  font: 600 30px/1.25 var(--font-write) !important;
+  letter-spacing: -0.015em;
+}
+.title-input::placeholder {
+  color: var(--faint);
+}
+.writer {
+  flex: 1;
+  min-height: 240px;
+  --editor-top: var(--s-3);
+}
+.page-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  height: 36px;
+  padding: 0 var(--s-4);
+  color: var(--faint);
+  font-size: var(--t-xs);
+  transition: opacity var(--d-slow) var(--ease);
+}
+/* Typing: the footer steps back, like Tern's writing mode. */
+.page-foot > span {
+  white-space: nowrap;
+}
+.page:has(.cm-focused) .page-foot:not(:hover) {
+  opacity: 0.45;
+}
+.link-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-3);
+  width: 100%;
+  padding: 6px 8px;
+  margin: 0 -8px;
+  border-radius: var(--r-md);
+  text-align: left;
+}
+.link-row:hover {
+  background: var(--hover);
+}
+.link-title {
+  flex: none;
+  font: 600 var(--t-rd) / 1.4 var(--font-write);
+}
+.link-line {
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--t-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* AI in the text: the bar, the slash menu, the suggestion in place. */
+
+.menu,
+.explain {
+  position: fixed;
+  z-index: 30;
+  min-width: 300px;
+  padding: 6px;
+  border-radius: var(--r-lg);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-lg);
+  animation: rise var(--d-base) var(--ease);
+}
+.menu-head {
+  padding: 6px 10px 4px;
+  color: var(--accent-ink);
+  font-size: var(--t-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.menu-item {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: var(--r-md);
+}
+.menu-item .muted {
+  font-size: var(--t-xs);
+}
+.menu-item.on {
+  background: var(--accent-soft);
+}
+.explain {
+  width: 360px;
+  padding: var(--s-3);
+}
+.explain p {
+  margin: var(--s-2) 0 var(--s-3);
+  font: 400 var(--t-rd) / 1.55 var(--font-write);
+}
+.ai-struck {
+  text-decoration: line-through;
+  text-decoration-color: var(--strike);
+  color: var(--faint);
+}
+.ai-suggest {
+  margin: 10px 0 14px;
+  padding: 12px 14px;
+  border-radius: var(--r-lg);
+  background: var(--accent-wash);
+  border: 1px solid var(--accent-soft);
+  font-family: var(--font-ui);
+  font-size: var(--t-md);
+  line-height: 1.5;
+}
+.ai-suggest-head {
+  color: var(--accent-ink);
+  font-size: var(--t-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.ai-suggest-head::before {
+  content: "✦ ";
+}
+.ai-suggest-text {
+  margin: 6px 0 10px;
+  font: 400 var(--editor-size) / var(--editor-leading) var(--font-write);
+  color: var(--ink);
+  white-space: pre-wrap;
+  padding-left: 12px;
+  border-left: 3px solid var(--accent);
+}
+.ai-suggest-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ai-suggest-note {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: var(--t-xs);
+}
+/* What the call cost: quiet, after everything else. */
+.ai-usage {
+  color: var(--faint);
+  font-size: var(--t-xs);
+  font-variant-numeric: tabular-nums;
+}
+.ai-suggest-bar .ai-usage {
+  margin-left: 10px;
+}
+.ai-thinking {
+  color: var(--muted) !important;
+  background: none !important;
+  font-style: italic;
+  animation: breathe 1.4s ease-in-out infinite;
+}
+.ai-error {
+  color: var(--bad) !important;
+  background: none !important;
+  font: 500 var(--t-md) / 1.5 var(--font-ui) !important;
+}
+
+/* `[[links]]` in the editor. */
+.cm-wikilink {
+  color: var(--accent-ink);
+  background: var(--accent-wash);
+  border-radius: 3px;
+  box-shadow: 0 1px 0 var(--accent-soft);
+}
+.cm-wikilink-missing {
+  background: none;
+  color: var(--muted);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+.link-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 360px;
+  padding: var(--s-3) var(--s-4);
+  font: var(--t-md) / 1.45 var(--font-ui);
+  color: var(--ink);
+}
+.cm-tooltip:has(.link-card),
+.cm-tooltip-autocomplete {
+  border: none !important;
+  border-radius: var(--r-lg);
+  background: var(--raised) !important;
+  box-shadow: var(--shadow-lg), 0 0 0 1px var(--line);
+  overflow: hidden;
+}
+.cm-tooltip-autocomplete > ul > li[aria-selected] {
+  background: var(--accent-soft) !important;
+  color: var(--ink) !important;
+}
+.link-card-where,
+.link-card-hint {
+  font-size: var(--t-xs);
+  color: var(--faint);
+}
+.link-card-title {
+  font: 600 var(--t-rd) / 1.3 var(--font-write);
+}
+.link-card-text {
+  color: var(--ink-2);
+  font-family: var(--font-write);
+}
+
+/* ---- pictures in a note ---------------------------------------------------------------------------------- */
+
+.cm-picture {
+  display: block;
+  margin: var(--s-2) 0 var(--s-3);
+}
+.cm-picture-frame {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: top;
+}
+.cm-picture img {
+  display: block;
+  width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+  object-position: left top;
+  border-radius: var(--r-md);
+  box-shadow: 0 0 0 1px var(--line);
+}
+.cm-picture-frame:not([style]) img {
+  width: auto;
+  max-width: 100%;
+}
+.cm-picture-frame[style] img {
+  max-height: none;
+}
+/* A short bar on the right edge, seen on hover: drag it to size the picture. */
+.cm-picture-grip {
+  position: absolute;
+  top: 50%;
+  right: -7px;
+  width: 6px;
+  height: 36px;
+  margin-top: -18px;
+  border-radius: 3px;
+  background: var(--ink-2);
+  opacity: 0;
+  cursor: ew-resize;
+  transition: opacity var(--d-fast, 120ms) var(--ease);
+}
+.cm-picture-frame:hover .cm-picture-grip,
+.cm-picture-grip:active {
+  opacity: 0.55;
+}
+.cm-picture-caption {
+  display: block;
+  margin-top: var(--s-1);
+  font: italic var(--t-sm) / 1.4 var(--font-ui);
+  color: var(--muted, var(--ink-2));
+}
+.cm-picture.missing {
+  font: var(--t-sm) / 1.4 var(--font-ui);
+  color: var(--bad);
+}

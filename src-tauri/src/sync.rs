@@ -18,7 +18,7 @@ use crate::drive::{Drive, Offline};
 use crate::google::{self, SignInAgain};
 use crate::AppState;
 
-const CLIENT_ID: &str = "sync.client_id";
+pub(crate) const CLIENT_ID: &str = "sync.client_id";
 const FOLDER_ID: &str = "sync.folder_id";
 const ACCOUNT: &str = "sync.account";
 const ON: &str = "sync.on";
@@ -85,13 +85,13 @@ pub fn state() -> Sync {
     Sync { nudge: Mutex::new(None), status: Mutex::new(Status::default()) }
 }
 
-fn setting(app: &tauri::AppHandle, key: &str) -> Option<String> {
+pub(crate) fn setting(app: &tauri::AppHandle, key: &str) -> Option<String> {
     let st = app.state::<AppState>();
     let s = st.store.lock().ok()?;
     s.setting(key).ok().flatten().filter(|v| !v.is_empty())
 }
 
-fn set_setting(app: &tauri::AppHandle, key: &str, value: &str) -> Result<()> {
+pub(crate) fn set_setting(app: &tauri::AppHandle, key: &str, value: &str) -> Result<()> {
     let st = app.state::<AppState>();
     let s = st.store.lock().map_err(|_| anyhow::anyhow!("store lock poisoned"))?;
     s.set_setting(key, value)
@@ -171,6 +171,9 @@ pub fn status(app: &tauri::AppHandle) -> Status {
     st.signed_in = signed_in;
     st.account = setting(app, ACCOUNT).unwrap_or_default();
     st.on = on;
+    if on && st.message.is_none() && unfinished(app) {
+        st.message = Some("The last sync before Quit did not finish. It continues now.".into());
+    }
     if !on && st.state != "signin" {
         st.state = "off".into();
     }
@@ -192,7 +195,20 @@ fn tell(app: &tauri::AppHandle, f: impl FnOnce(&mut Status)) {
     if let Ok(mut s) = sync.status.lock() {
         f(&mut s);
     }
-    let _ = app.emit("petrel-sync", status(app));
+    let st = status(app);
+    let settle = {
+        let s = app.state::<AppState>();
+        let store = s.store.lock();
+        store.ok().and_then(|st| st.conflicts().ok()).is_some_and(|c| !c.is_empty())
+    };
+    let mark = match st.state.as_str() {
+        "signin" | "error" | "blocked" => crate::tray::Mark::Needs,
+        "offline" => crate::tray::Mark::Waiting,
+        _ if settle => crate::tray::Mark::Waiting,
+        _ => crate::tray::Mark::None,
+    };
+    crate::tray::mark_sync(app, mark);
+    let _ = app.emit("petrel-sync", st);
 }
 
 /// Asks for a sync now, looking at the whole folder.
@@ -208,6 +224,27 @@ pub fn nudge_paths(app: &tauri::AppHandle, paths: Vec<PathBuf>) {
 /// Whether sync is on, so Quit gives it a last run.
 pub fn is_on(app: &tauri::AppHandle) -> bool {
     status(app).on
+}
+
+/// Set when Quit could not wait for the last sync; cleared by the next sync that finishes.
+const UNFINISHED: &str = "sync.unfinished";
+
+/// Quit closed Petrel before the last sync was done: a line in the sync log, so a half sync never looks like a
+/// whole one, and the next start says so until a sync finishes.
+pub fn note_unfinished(app: &tauri::AppHandle) {
+    let _ = set_setting(app, UNFINISHED, "1");
+    if let Some(root) = root(app) {
+        write_log(
+            app,
+            &root,
+            &[("not finished before Quit; continues at the next start".into(), String::new())],
+        );
+    }
+}
+
+/// Whether the last Quit left a sync unfinished that no sync has finished since.
+pub fn unfinished(app: &tauri::AppHandle) -> bool {
+    setting(app, UNFINISHED).is_some_and(|v| v == "1")
 }
 
 /// One last sync before Quit: waits for it at most `limit`, so a slow network never holds Petrel open.
@@ -323,6 +360,11 @@ fn run_once(app: &tauri::AppHandle, todo: Pending) -> Result<()> {
                 }
             }
             write_log(app, &root, &report.log);
+            // The sync Quit could not finish is done now: say so once, in the log.
+            if report.failed.is_empty() && setting(app, UNFINISHED).is_some() {
+                let _ = set_setting(app, UNFINISHED, "");
+                write_log(app, &root, &[("finished what was left at Quit".into(), String::new())]);
+            }
             let words = describe(&report);
             let failed = report.failed.first().map(|(p, e)| format!("{p}: {e}"));
             if !report.failed.is_empty() {
@@ -439,7 +481,8 @@ pub async fn sync_sign_in(app: tauri::AppHandle) -> R<Status> {
     tauri::async_runtime::spawn_blocking(move || -> Result<()> {
         let id = setting(&a, CLIENT_ID).context("add the client ID first")?;
         let opener = a.clone();
-        google::sign_in(&id, move |url| {
+        let calendar = setting(&a, crate::calendar::ON).is_some_and(|v| v == "1");
+        google::sign_in(&id, calendar, move |url| {
             use tauri_plugin_opener::OpenerExt;
             opener
                 .opener()

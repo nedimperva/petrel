@@ -1,0 +1,433 @@
+/* A day's page (Option B — Quiet Entry Header): clean editorial date heading, flush-left entries with hairline
+   timestamp headers, and a simple calendar chooser + tasks/schedule in the right margin. */
+
+/* ---- day header --------------------------------------------------------------------------------------------- */
+
+.page {
+  position: relative;
+}
+.day-head {
+  width: 100%;
+  max-width: var(--editor-max);
+  margin: 0 auto;
+  box-sizing: border-box;
+  padding: var(--s-7) var(--s-5) var(--s-2);
+}
+.day-heading-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s-3);
+}
+.day-heading-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.day-title {
+  margin: 0;
+  font: 600 30px / 1.2 var(--font-write);
+  letter-spacing: -0.015em;
+}
+.day-sub {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+  font-size: var(--t-sm);
+  color: var(--muted);
+}
+.day-nav {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding-top: 2px;
+  color: var(--muted);
+}
+.day-new-entry {
+  margin-right: 4px;
+  color: var(--ink-2);
+}
+
+/* ---- simple calendar chooser in the right margin ------------------------------------------------------------ */
+
+.day-month-box {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  font-size: var(--t-sm);
+  color: var(--muted);
+}
+.day-month-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+}
+.day-month-name {
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.day-month-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.day-month-step {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+}
+.day-month-step:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.day-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 2px;
+  text-align: center;
+}
+.day-wd {
+  font-size: var(--t-xs);
+  color: var(--faint);
+  padding-bottom: 2px;
+}
+.day-cell {
+  position: relative;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.day-cell:hover {
+  background: var(--hover);
+}
+.day-cell.has {
+  color: var(--ink);
+}
+.day-cell.has::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 2px;
+  width: 3px;
+  height: 3px;
+  margin-left: -1.5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.day-cell.today {
+  color: var(--accent);
+  font-weight: 600;
+}
+.day-cell.future {
+  color: var(--faint);
+}
+.day-cell.on {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.day-cell.on::after {
+  background: var(--accent-fg);
+}
+
+/* Saved is a tick that fades in, not a word that blinks. */
+.state.saved::before {
+  content: "✓ ";
+  color: var(--ok);
+}
+.state.saved {
+  animation: fade var(--d-slow) var(--ease);
+}
+
+/* ---- Option B: Quiet Entry Header inside CodeMirror (no blockquote line, flush-left prose) ------------------ */
+
+.cm-entry-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 20px 0 4px;
+  font: 500 11.5px / 1.3 var(--font-ui);
+  font-variant-numeric: tabular-nums;
+  color: var(--faint);
+  user-select: none;
+}
+.cm-entry-head.first {
+  margin-top: 4px;
+}
+.cm-entry-head.live {
+  color: var(--accent);
+}
+.cm-entry-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: entry-live-dot 2s ease-in-out infinite;
+}
+@keyframes entry-live-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+.cm-entry-time {
+  flex: none;
+  letter-spacing: 0.02em;
+}
+.cm-entry-live {
+  flex: none;
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--faint);
+}
+.cm-entry-tag {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--sunk);
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+.cm-entry-rule {
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+  opacity: 0.75;
+}
+/* Quiet placeholder on a fresh pending entry line before anything is typed. */
+.day-page .cm-entry-pending::after {
+  content: "Write an entry…";
+  color: var(--faint);
+  opacity: 0.65;
+  pointer-events: none;
+}
+/* `_from capture_` is shown as a subtle badge in the entry header; keep the raw line ultra-quiet. */
+.day-page .cm-from-capture {
+  font-size: 1px;
+  line-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* ---- right margin: schedule, unified carry-over & due, captured today --------------------------------------- */
+
+.day-cal {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cal-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 5px 7px;
+  margin: 0 -7px;
+  border-radius: var(--r-sm);
+  text-align: left;
+  font-size: var(--t-md);
+  color: var(--ink-2);
+}
+.cal-row:hover,
+.cal-row:focus-visible {
+  background: var(--hover);
+  color: var(--ink);
+  outline: none;
+}
+.cal-time {
+  flex: none;
+  width: 46px;
+  font-variant-numeric: tabular-nums;
+  color: var(--faint);
+  font-size: var(--t-sm);
+}
+.cal-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+.cal-add {
+  flex: none;
+  font-size: var(--t-xs);
+  color: var(--accent-ink);
+  opacity: 0;
+  transition: opacity var(--d-fast) var(--ease);
+}
+.cal-row:hover .cal-add,
+.cal-row:focus-visible .cal-add {
+  opacity: 1;
+}
+
+.day-carried {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.day-sec-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-2);
+}
+.day-sec-head h4 {
+  margin: 0;
+}
+.carried-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: var(--t-md);
+  line-height: 1.45;
+  color: var(--ink);
+}
+.carried-item input {
+  margin-top: 3px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.carried-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.carried-text {
+  overflow-wrap: anywhere;
+}
+.carried-text.overdue {
+  color: var(--bad);
+}
+.carried-sub {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: var(--t-xs);
+}
+.carried-src {
+  color: var(--faint);
+  padding: 0;
+}
+.carried-src:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+.carried-src.overdue {
+  color: var(--bad);
+}
+.carried-bring {
+  color: var(--accent-ink);
+  font-weight: 500;
+  padding: 0;
+}
+.carried-bring:hover {
+  text-decoration: underline;
+}
+
+.day-inbox-card {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--r-md);
+  background: var(--sunk);
+  border: 1px solid var(--line);
+  font-size: var(--t-sm);
+  color: var(--ink-2);
+  text-align: left;
+  transition: background var(--d-fast) var(--ease), border-color var(--d-fast) var(--ease);
+}
+.day-inbox-card:hover {
+  background: var(--hover);
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+.day-inbox-card b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* First steps on the empty page: a quiet list, not a dialog. */
+.first-steps {
+  max-width: var(--editor-max);
+  margin: var(--s-6) auto 0;
+  padding: var(--s-4) var(--s-5);
+  box-sizing: border-box;
+  font-size: var(--t-md);
+  color: var(--ink-2);
+}
+.first-steps-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-3);
+  margin-bottom: var(--s-3);
+  font-weight: 600;
+  color: var(--ink);
+}
+.first-steps-head .link {
+  margin-left: auto;
+}
+.first-steps ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.first-steps li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.first-box {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 4px;
+}
+.first-steps li.done .first-box {
+  background: var(--ok);
+  border-color: var(--ok);
+  box-shadow: inset 0 0 0 2px var(--paper);
+}
+.first-steps li.done .first-text {
+  color: var(--faint);
+  text-decoration: line-through;
+  text-decoration-color: var(--line-strong);
+}
+.first-text {
+  flex: 1;
+  min-width: 0;
+}
+.first-steps .keys {
+  flex: none;
+  opacity: 0.8;
+}

@@ -1,16 +1,16 @@
 /* Design tokens. Components use these, never raw colours, sizes or durations. Tern's colours, so the two apps read as one family; dark follows the system unless a theme is set on <html data-theme>. */
 
 :root {
-  --paper: #fcfbf9;
-  --sheet: #fcfbf9;
-  --raised: #ffffff;
-  --sunk: #f5f3ef;
-  --hover: #eeebe5;
+  --paper: #fbf9f4;
+  --sheet: #fbf9f4;
+  --raised: #fffefb;
+  --sunk: #f4f1ea;
+  --hover: #ece8df;
   --ink: #1f1e1b;
   --ink-2: #57534b;
   --muted: #66625a;
   --faint: #8a857b;
-  --line: #e9e5dd;
+  --line: #e7e2d7;
   --line-strong: #d8d3c9;
   --accent: #2f4f9a;
   --accent-ink: #223a73;
@@ -62,19 +62,21 @@
   --editor-leading: 1.7;
   --editor-max: 680px;
   --titlebar-h: 40px;
+  /* A grain you only see up close, so the page reads as paper rather than a screen. */
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .45 0 0 0 0 .38 0 0 0 0 .26 0 0 0 .05 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
 :root[data-theme="dark"] {
-  --paper: #201f1d;
-  --sheet: #201f1d;
-  --raised: #252422;
-  --sunk: #1a1918;
-  --hover: #2a2926;
-  --ink: #ece8e1;
-  --ink-2: #b5b0a6;
+  --paper: #1f1d1a;
+  --sheet: #1f1d1a;
+  --raised: #25231f;
+  --sunk: #191815;
+  --hover: #2b2924;
+  --ink: #ede6d9;
+  --ink-2: #b9b1a3;
   --muted: #a29d93;
   --faint: #7f7a71;
-  --line: #302e2a;
+  --line: #322f29;
   --line-strong: #403d38;
   --accent: #7b97de;
   --accent-ink: #9db2e8;
@@ -113,16 +115,16 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]):not([data-theme="linen"]) {
-    --paper: #201f1d;
-    --sheet: #201f1d;
-    --raised: #252422;
-    --sunk: #1a1918;
-    --hover: #2a2926;
-    --ink: #ece8e1;
-    --ink-2: #b5b0a6;
+    --paper: #1f1d1a;
+    --sheet: #1f1d1a;
+    --raised: #25231f;
+    --sunk: #191815;
+    --hover: #2b2924;
+    --ink: #ede6d9;
+    --ink-2: #b9b1a3;
     --muted: #a29d93;
     --faint: #7f7a71;
-    --line: #302e2a;
+    --line: #322f29;
     --line-strong: #403d38;
     --accent: #7b97de;
     --accent-ink: #9db2e8;

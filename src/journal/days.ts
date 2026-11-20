@@ -143,3 +143,89 @@ export function dueGroup(due: string, today: string): DueGroup {
   if (due === today) return "today";
   return due <= addDays(today, 6) ? "week" : "later";
 }
+
+const BARE_STAMP = /^\d{1,2}:\d{2}[ \t]*$/;
+const ANY_STAMP = /^(\d{1,2}):(\d{2})(?=\s|$)/;
+
+/** Minutes since midnight for a `HH:MM` stamp, or null if invalid. */
+export function stampMinutes(text: string): number | null {
+  const m = ANY_STAMP.exec(text.trim());
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  return h >= 0 && h < 24 && min >= 0 && min < 60 ? h * 60 + min : null;
+}
+
+/** A day's page as it is saved: a time with nothing after it (followed by blank line or EOF) is left out,
+ * while a standalone time immediately above a content line (like a task `- [ ] …`) is kept. */
+export function dropBareStamps(text: string): string {
+  if (!/^\d{1,2}:\d{2}[ \t]*$/m.test(text)) return text;
+  const lines = text.split("\n");
+  const kept = lines.filter((l, idx) => {
+    if (!BARE_STAMP.test(l)) return true;
+    const next = lines[idx + 1];
+    return next !== undefined && next.trim().length > 0 && !ANY_STAMP.test(next);
+  });
+  const out = kept.join("\n").replace(/\n{3,}/g, "\n\n").replace(/\s+$/, "");
+  return out ? `${out}\n` : "";
+}
+
+/** Minutes since midnight of the last non-bare entry stamp in a day's body, or null if none. */
+export function lastEntryMinutes(body: string): number | null {
+  const lines = body.split("\n");
+  let last: number | null = null;
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    const m = ANY_STAMP.exec(l);
+    if (!m) continue;
+    const hasInline = l.slice(m[0].length).trim().length > 0;
+    const next = lines[i + 1];
+    const hasBelow = !hasInline && next !== undefined && next.trim().length > 0 && !ANY_STAMP.test(next);
+    if (hasInline || hasBelow) {
+      const mins = stampMinutes(m[0]);
+      if (mins !== null) last = mins;
+    }
+  }
+  return last;
+}
+
+/** Whether returning to today's page should open a fresh live entry: true when no entry exists yet or at least
+ * `gapMinutes` have elapsed since the last entry's stamp (default 5 min). */
+export function shouldStartFreshEntry(body: string, now = new Date(), gapMinutes = 5): boolean {
+  if (!body.trim()) return true;
+  const last = lastEntryMinutes(body);
+  if (last === null) return true;
+  const cur = now.getHours() * 60 + now.getMinutes();
+  const diff = cur - last;
+  return diff < 0 || diff >= gapMinutes;
+}
+
+/** The seven days of the week `day` is in, Monday first. */
+export function weekOf(day: string): string[] {
+  const d = parseDay(day) ?? new Date();
+  const monday = new Date(d.getFullYear(), d.getMonth(), d.getDate() - ((d.getDay() + 6) % 7));
+  return Array.from({ length: 7 }, (_, i) => dayOf(new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i)));
+}
+
+/** What a day's page holds, for the line under its heading: entries written (a time with words after it, or
+ * immediately above a content line), tasks ticked, and captures filed onto it. From the text alone. */
+export function dayTally(text: string): { entries: number; done: number; captures: number } {
+  let entries = 0;
+  let done = 0;
+  let captures = 0;
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\d{1,2}:\d{2}\s+\S/.test(line)) entries++;
+    else if (BARE_STAMP.test(line) && lines[i + 1]?.trim() && !ANY_STAMP.test(lines[i + 1])) entries++;
+    if (/^\s*[-*+] \[[xX]\]/.test(line)) done++;
+    if (line.trim() === "_from capture_") captures++;
+  }
+  return { entries, done, captures };
+}
+
+/** `3 entries · 2 tasks done · 1 capture`, leaving out what is none. */
+export function tallyLine(t: { entries: number; done: number; captures: number }): string {
+  const n = (k: number, one: string, many: string) => (k ? `${k} ${k === 1 ? one : many}` : "");
+  return [n(t.entries, "entry", "entries"), n(t.done, "task done", "tasks done"), n(t.captures, "capture", "captures")].filter(Boolean).join(" · ");
+}

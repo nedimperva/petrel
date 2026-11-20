@@ -73,6 +73,7 @@ pub fn quit(app: &tauri::AppHandle) {
             std::thread::sleep(std::time::Duration::from_millis(400));
             if !crate::sync::last(&app, std::time::Duration::from_secs(5)) {
                 log::warn!("quit: the last sync took longer than five seconds; it runs at the next start");
+                crate::sync::note_unfinished(&app);
             }
             let again = app.clone();
             let _ = app.run_on_main_thread(move || close_windows(&again));
@@ -96,6 +97,64 @@ fn close_windows(app: &tauri::AppHandle) {
         }
         if let Err(e) = app.emit_to(label.as_str(), "petrel-quit", ()) {
             log::warn!("asking {label} to close: {e}");
+        }
+    }
+}
+
+/// What the tray icon says about sync: nothing when all is well, an amber dot for a note to settle or a sync
+/// waiting on the network, a red dot when sync needs you (sign in again, or it failed).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Mark {
+    None,
+    Waiting,
+    Needs,
+}
+
+static SHOWN: std::sync::Mutex<Option<Mark>> = std::sync::Mutex::new(None);
+
+/// Puts the mark on the tray icon, once per change.
+pub fn mark_sync(app: &tauri::AppHandle, mark: Mark) {
+    {
+        let Ok(mut shown) = SHOWN.lock() else { return };
+        if *shown == Some(mark) {
+            return;
+        }
+        *shown = Some(mark);
+    }
+    let Some(tray) = app.tray_by_id("petrel") else { return };
+    let Some(base) = app.default_window_icon() else { return };
+    let (w, h) = (base.width(), base.height());
+    let mut rgba = base.rgba().to_vec();
+    let tip = match mark {
+        Mark::None => "Petrel",
+        Mark::Waiting => "Petrel · sync is waiting, or a note waits to be settled",
+        Mark::Needs => "Petrel · sync needs you: open Settings › Sync",
+    };
+    let colour = match mark {
+        Mark::None => None,
+        Mark::Waiting => Some([0xe0, 0xa2, 0x3a]),
+        Mark::Needs => Some([0xd2, 0x4b, 0x3f]),
+    };
+    if let Some(c) = colour {
+        dot(&mut rgba, w, h, c);
+    }
+    let _ = tray.set_icon(Some(tauri::image::Image::new_owned(rgba, w, h)));
+    let _ = tray.set_tooltip(Some(tip));
+}
+
+/// A filled dot with a light ring in the lower right corner, a third of the icon wide.
+fn dot(rgba: &mut [u8], w: u32, h: u32, c: [u8; 3]) {
+    let r = w.min(h) as f32 / 6.0;
+    let (cx, cy) = (w as f32 - r - 1.0, h as f32 - r - 1.0);
+    for y in 0..h {
+        for x in 0..w {
+            let d = ((x as f32 + 0.5 - cx).powi(2) + (y as f32 + 0.5 - cy).powi(2)).sqrt();
+            let i = ((y * w + x) * 4) as usize;
+            if d <= r {
+                rgba[i..i + 4].copy_from_slice(&[c[0], c[1], c[2], 255]);
+            } else if d <= r + r * 0.35 {
+                rgba[i..i + 4].copy_from_slice(&[255, 255, 255, 255]);
+            }
         }
     }
 }

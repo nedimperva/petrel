@@ -13,7 +13,11 @@
 // Ctrl D sends it to today's page and back to the inbox, as Ctrl D opens today's page in the main window. The line
 // at the top then shows the page's last entry, so you see where the words land.
 //
-// The bar under the text holds only the place and Esc; `?` lists the window's keys.
+// Scratch pages: Ctrl 1 to 5 open five pages that stay in this window (the phone number, the shop list), shown as
+// dots in the bar. They are files in `.scratch/` that sync but are never filed or found; the same Ctrl number
+// again goes back to the capture. Ctrl Enter on one makes its text a capture and empties the page.
+//
+// The bar under the text holds only the place, the pages and Esc; `?` lists the window's keys.
 
 import { autocompletion, startCompletion, type Completion, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
 import { EditorState, RangeSetBuilder, StateEffect, StateField, type Extension } from "@codemirror/state";
@@ -28,6 +32,7 @@ import { fileCapture } from "./inbox/file";
 import { lastLine, quoteBlock, titleLine } from "./inbox/quote";
 import { titleFrom } from "./copy";
 import { pickRoute, strip, tokens, typingToken } from "./inbox/route";
+import { snippetCompletions } from "./editor/snippets";
 import { dayOptions, dayTitle, dayWord, today } from "./journal/days";
 import Mark, { loadFaces } from "./library/Mark";
 import { completionTheme } from "./notes/links";
@@ -38,6 +43,8 @@ import { folderName, Kbd, say, ToastView } from "./ui";
 import { rest, whenOpened } from "./warm";
 
 const LAST = "ui.capture.last";
+/** Each scratch page has a colour of its own, from the collections' colours. */
+const PAGE_HUES = ["ochre", "teal", "rose", "green", "plum"];
 
 /** Top folders a capture can be filed in by name. */
 async function places(): Promise<string[]> {
@@ -134,6 +141,63 @@ export default function Capture() {
   const [leaving, setLeaving] = createSignal(false);
   let closing = false;
   let folders: string[] = [];
+
+  // ---- scratch pages ----
+  let scratchHost!: HTMLDivElement;
+  let scratchEd: EditorHandle | undefined;
+  /** 0 is the capture; 1 to 5 a scratch page. */
+  const [page, setPage] = createSignal(0);
+  /** Which pages have words, for the dots. */
+  const [filled, setFilled] = createSignal<boolean[]>([false, false, false, false, false]);
+  let scratchTimer: ReturnType<typeof setTimeout> | undefined;
+  let scratchDirty = false;
+
+  async function saveScratch(): Promise<void> {
+    clearTimeout(scratchTimer);
+    const n = page();
+    if (!scratchDirty || !n || !scratchEd) return;
+    scratchDirty = false;
+    const text = scratchEd.text();
+    setFilled((f) => f.map((x, i) => (i === n - 1 ? !!text.trim() : x)));
+    await (await api()).saveScratchPage(n, text).catch((e) => setMsg(`Scratch page not saved: ${e}`));
+  }
+
+  function scratchChanged() {
+    scratchDirty = true;
+    clearTimeout(scratchTimer);
+    scratchTimer = setTimeout(() => void saveScratch(), 400);
+  }
+
+  /** Ctrl 1 to 5: that page; its own number again, the capture. */
+  async function openPage(n: number) {
+    await saveScratch();
+    const to = page() === n ? 0 : n;
+    if (to && !scratchEd) {
+      scratchEd = createEditor(scratchHost, scratchChanged, { placeholder: "A scratch page. It stays here, is never filed, and syncs." });
+      scratchEd.setExtra([pictureExtensions(() => "inbox"), cleanPaste(() => say("Pasted as Markdown. Ctrl Z for plain text.")), autocompletion({ override: [snippetCompletions], icons: false }), completionTheme]);
+    }
+    if (to) {
+      const text = await (await api()).scratchPage(to).catch(() => "");
+      scratchEd!.load(text, text.length);
+    }
+    setPage(to);
+    (to ? scratchEd : editor)?.view.focus();
+  }
+
+  /** Ctrl Enter on a scratch page: its text goes to the capture (under what is there), and the page is empty. */
+  async function scratchToCapture() {
+    if (!scratchEd || !editor) return;
+    const text = scratchEd.text().replace(/\s+$/, "");
+    if (!text) return void openPage(page());
+    scratchEd.load("", 0);
+    scratchDirty = true;
+    await saveScratch();
+    setPage(0);
+    const now = editor.text();
+    editor.insert(now.trim() ? `\n\n${text}` : text, false);
+    editor.view.focus();
+    say("Made a capture from the page. Esc files it.");
+  }
 
   const saver = createNoteSaver({
     // A capture is made by the engine, in inbox/, named by the time.
@@ -290,6 +354,7 @@ export default function Capture() {
     // The text is put back and filed while the window closes: none of that needs to be seen.
     setLeaving(true);
     const s = await api();
+    await saveScratch();
     dropEmptyTail();
     await routeFromText().catch((e) => console.error(e));
     const text = editor?.text() ?? "";
@@ -329,6 +394,18 @@ export default function Capture() {
       e.preventDefault();
       e.stopPropagation();
       setHelp(false);
+    } else if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && /^Digit[1-5]$/.test(e.code)) {
+      e.preventDefault();
+      e.stopPropagation();
+      void openPage(Number(e.code.slice(5)));
+    } else if (page() && (e.ctrlKey || e.metaKey) && e.key === "Enter") {
+      e.preventDefault();
+      e.stopPropagation();
+      void scratchToCapture();
+    } else if (page() && (matches(e, "capToday") || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k"))) {
+      // Places are for the capture; a scratch page stays where it is.
+      e.preventDefault();
+      e.stopPropagation();
     } else if (matches(e, "capToday")) {
       e.preventDefault();
       e.stopPropagation();
@@ -405,7 +482,7 @@ export default function Capture() {
       quoteCard,
       pictureExtensions(() => "inbox"),
       cleanPaste(() => say("Pasted as Markdown. Ctrl Z for plain text.")),
-      autocompletion({ override: [suggest], activateOnTyping: true, icons: false, closeOnBlur: true }),
+      autocompletion({ override: [suggest, snippetCompletions], activateOnTyping: true, icons: false, closeOnBlur: true }),
       completionTheme,
     ];
     editor.setExtra(extra);
@@ -432,6 +509,7 @@ export default function Capture() {
     await s.showWindow();
     editor.view.focus();
     places().then((f) => (folders = f), () => {});
+    void Promise.all([1, 2, 3, 4, 5].map((n) => s.scratchPage(n).then((t) => !!t.trim(), () => false))).then(setFilled);
     window.addEventListener("keydown", onKey, true);
     const c = await ctx;
     const quote = c ? quoteBlock(c) : "";
@@ -457,6 +535,7 @@ export default function Capture() {
   onCleanup(() => {
     window.removeEventListener("keydown", onKey, true);
     editor?.destroy();
+    scratchEd?.destroy();
   });
 
 
@@ -498,9 +577,13 @@ export default function Capture() {
           <span data-tauri-drag-region>start fresh</span>
         </div>
       </Show>
-      <div class="capture-text-host" ref={host} />
+      <div class="capture-text-host" ref={host} classList={{ away: page() > 0 }} />
+      <div class={`capture-text-host scratch-host hue-${PAGE_HUES[page() - 1] ?? "slate"}`} ref={scratchHost} classList={{ away: page() === 0 }} />
       <footer class="capture-foot" data-tauri-drag-region>
-        <span class="cap-place" classList={{ on: !!(target() ?? implied()), implied: !target() && !!implied() }}>
+        <Show when={page()}>
+          <span class="cap-page">Scratch page {page()}</span>
+        </Show>
+        <span class="cap-place" classList={{ away: page() > 0, on: !!(target() ?? implied()), implied: !target() && !!implied() }}>
           <button class="chip" classList={{ on: !!(target() ?? implied()) }} onClick={() => setChoosing(true)} title={`Choose a place (${keyLabel("capChoose")})`}>
             <Mark folder={targetFolder(target() ?? implied(), targetHome())} size={12} />
             {target()?.kind === "note" ? "Add to " : ""}
@@ -532,6 +615,22 @@ export default function Capture() {
           </span>
         </Show>
         <span class="grow" data-tauri-drag-region />
+        <span class="cap-dots" role="tablist" aria-label="Scratch pages">
+          <For each={[1, 2, 3, 4, 5]}>
+            {(n) => (
+              <button
+                type="button"
+                role="tab"
+                class={`cap-dot hue-${PAGE_HUES[n - 1]}`}
+                classList={{ on: page() === n, filled: filled()[n - 1] }}
+                aria-selected={page() === n}
+                aria-label={`Scratch page ${n}`}
+                title={`Scratch page ${n} (Ctrl ${n})`}
+                onClick={() => void openPage(n)}
+              />
+            )}
+          </For>
+        </span>
         <Show when={msg()} fallback={<Show when={saveLabel()}><span class={`save-dot ${save()}`} role="status" aria-label={saveLabel()} title={saveLabel()} /></Show>}>
           <span class="bad">{msg()}</span>
         </Show>

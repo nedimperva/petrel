@@ -1,5 +1,6 @@
 // Small pieces every screen uses: the toast (with Undo), relative times, key hints.
 
+import { learned } from "./learned";
 import { createSignal, For, type JSX, Show } from "solid-js";
 
 export interface Toast {
@@ -45,11 +46,13 @@ export function ToastView() {
 
 /** The one-line key footer every screen ends with: `[keys, what]` pairs, in the same look everywhere. A false
  * entry is left out, so a screen can list keys that only apply now. */
+/** The key line at the foot of a screen. A modifier key pressed ten times has been learned and leaves it
+ * (`learned.ts`); Ctrl / still shows them all. */
 export function KeyHints(p: { hints: ([string, string] | false | null | undefined)[] }) {
   // One line only: on a narrow window the hints at the end wrap out of sight (see .key-hints) instead of crowding.
   return (
     <span class="key-hints">
-      <For each={p.hints.filter((h): h is [string, string] => !!h)}>
+      <For each={p.hints.filter((h): h is [string, string] => !!h && !learned(h[0]))}>
         {([keys, what]) => (
           <span class="key-hint">
             <Kbd keys={keys} /> {what}

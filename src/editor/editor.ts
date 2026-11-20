@@ -13,10 +13,12 @@ import {
   ViewPlugin,
   type ViewUpdate,
 } from "@codemirror/view";
-import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
-import { search, searchKeymap } from "@codemirror/search";
+import { history } from "@codemirror/commands";
+import { search } from "@codemirror/search";
+import { stockKeys } from "./stockKeys";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
-import { syntaxHighlighting, HighlightStyle } from "@codemirror/language";
+import { syntaxHighlighting, syntaxTree, HighlightStyle } from "@codemirror/language";
+import type { SyntaxNode } from "@lezer/common";
 import { tags } from "@lezer/highlight";
 import { insertLink, toggleBold, toggleItalic, toggleList, toggleTask } from "./commands";
 import { taskExtensions } from "./tasks";
@@ -88,14 +90,59 @@ const focusDim = ViewPlugin.fromClass(
 );
 
 /** After each edit or move, scroll so the cursor's line sits mid-window. Next frame: not inside an update. */
-const typewriterScroll = EditorView.updateListener.of((u) => {
-  if (!u.docChanged && !u.selectionSet) return;
-  const view = u.view;
-  requestAnimationFrame(() => {
-    if (!view.dom.isConnected) return;
-    view.dispatch({ effects: EditorView.scrollIntoView(view.state.selection.main.head, { y: "center" }) });
-  });
-});
+// Typewriter scrolling: the line being typed sits about a third of the way down, as on paper in a typewriter.
+// Only typing and the keys move it; a click never scrolls the page under the mouse. The space under the text
+// lets the last line reach that height too.
+const typewriterScroll = [
+  EditorView.updateListener.of((u) => {
+    if (!u.docChanged && !u.selectionSet) return;
+    if (u.transactions.some((t) => t.isUserEvent("select.pointer"))) return;
+    const view = u.view;
+    requestAnimationFrame(() => {
+      if (!view.dom.isConnected) return;
+      const margin = Math.round(innerHeight * 0.36);
+      view.dispatch({ effects: EditorView.scrollIntoView(view.state.selection.main.head, { y: "start", yMargin: margin }) });
+    });
+  }),
+  EditorView.editorAttributes.of({ class: "cm-typewriter" }),
+];
+
+// A blank line between paragraphs is drawn half as tall, as the space between paragraphs in a book: short
+// paragraphs sit together instead of floating apart. Not inside code blocks, where a blank line is content.
+const blankLine = Decoration.line({ class: "cm-blank" });
+const blankLines = ViewPlugin.fromClass(
+  class {
+    decorations: DecorationSet;
+    constructor(view: EditorView) {
+      this.decorations = this.build(view);
+    }
+    update(u: ViewUpdate) {
+      if (u.docChanged || u.viewportChanged) this.decorations = this.build(u.view);
+    }
+    build(view: EditorView): DecorationSet {
+      const b = new RangeSetBuilder<Decoration>();
+      const tree = syntaxTree(view.state);
+      for (const r of view.visibleRanges) {
+        for (let pos = r.from; pos <= r.to; ) {
+          const line = view.state.doc.lineAt(pos);
+          if (!line.text.trim() && line.number > 1) {
+            let inCode = false;
+            for (let n: SyntaxNode | null = tree.resolveInner(line.from, 1); n; n = n.parent) {
+              if (n.name === "FencedCode" || n.name === "CodeBlock") {
+                inCode = true;
+                break;
+              }
+            }
+            if (!inCode) b.add(line.from, line.from, blankLine);
+          }
+          pos = line.to + 1;
+        }
+      }
+      return b.finish();
+    }
+  },
+  { decorations: (v) => v.decorations },
+);
 
 // Headings are heavier, not bigger: the first line is the title whether or not it starts with '#'.
 const markdownHighlight = HighlightStyle.define([
@@ -165,6 +212,7 @@ export function createEditor(
       typewriter.of([]),
       marks.of([]),
       blocks,
+      blankLines,
       extra.of([]),
       markdown({ base: markdownLanguage }),
       syntaxHighlighting(markdownHighlight),
@@ -180,7 +228,7 @@ export function createEditor(
         { key: "Mod-i", run: toggleItalic },
         { key: "Mod-Shift-k", run: insertLink },
       ]),
-      keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
+      keymap.of(stockKeys),
       theme,
       EditorView.updateListener.of((u) => {
         if (u.docChanged) onChange();

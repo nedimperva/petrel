@@ -74,3 +74,10 @@ test("case, Bosnian letters and one typo do not matter", () => {
   assert.ok(score("recpie", "Bread recipe") > 0);
   assert.equal(score("xyzzy", "Bread recipe"), 0);
 });
+
+test("letters strewn across a long name are not a match", async () => {
+  const { score } = await import("../src/palette/match.ts");
+  assert.equal(score("petrel", "Trash: put back a deleted note, or empty the old ones"), 0);
+  assert.ok(score("sttngs", "Settings") > 0);
+  assert.ok(score("cpmd", "Copy as Markdown") > 0);
+});

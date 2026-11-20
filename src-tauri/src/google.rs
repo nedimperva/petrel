@@ -22,6 +22,8 @@ const SECRET_USER: &str = "google-client-secret";
 const AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 pub const SCOPE: &str = "https://www.googleapis.com/auth/drive.file";
+/// Read-only access to calendar events, asked for only when today's calendar is turned on (Settings › Sync).
+pub const CALENDAR_SCOPE: &str = "https://www.googleapis.com/auth/calendar.events.readonly";
 /// How long the browser has to come back.
 const SIGN_IN_WAIT: Duration = Duration::from_secs(300);
 
@@ -86,7 +88,8 @@ fn random(n: usize) -> Result<String> {
 }
 
 /// Opens Google's sign-in in the browser (`open`) and waits for it to come back. Saves the refresh token.
-pub fn sign_in(client_id: &str, open: impl FnOnce(&str) -> Result<()>) -> Result<()> {
+/// `calendar` adds read-only calendar events to the Drive scope. Returns the scopes Google granted.
+pub fn sign_in(client_id: &str, calendar: bool, open: impl FnOnce(&str) -> Result<()>) -> Result<String> {
     let secret = client_secret()?.context("add the client secret first")?;
     let listener = TcpListener::bind("127.0.0.1:0").context("opening a port for the sign-in")?;
     let port = listener.local_addr()?.port();
@@ -99,7 +102,7 @@ pub fn sign_in(client_id: &str, open: impl FnOnce(&str) -> Result<()>) -> Result
          &code_challenge_method=S256&access_type=offline&prompt=consent&state={state}",
         enc(client_id),
         enc(&redirect),
-        enc(SCOPE),
+        enc(&if calendar { format!("{SCOPE} {CALENDAR_SCOPE}") } else { SCOPE.to_string() }),
     );
     open(&url)?;
     let code = wait_for_code(&listener, &state)?;
@@ -125,7 +128,7 @@ pub fn sign_in(client_id: &str, open: impl FnOnce(&str) -> Result<()>) -> Result
     let refresh = v["refresh_token"].as_str().context("Google sent no refresh token")?;
     write(REFRESH_USER, Some(refresh))?;
     remember(&v);
-    Ok(())
+    Ok(v["scope"].as_str().unwrap_or(SCOPE).to_string())
 }
 
 /// Waits for the browser to come back with `?code=…&state=…`, and tells it it can close.
@@ -203,6 +206,11 @@ impl std::fmt::Display for SignInAgain {
 impl std::error::Error for SignInAgain {}
 
 /// An access token, refreshed when it is about to run out.
+/// A plain HTTP agent that does not turn statuses into errors, for the Google APIs beside Drive.
+pub fn http() -> ureq::Agent {
+    agent()
+}
+
 pub fn access_token(client_id: &str) -> Result<String> {
     if let Ok(slot) = TOKEN.lock() {
         if let Some((t, until)) = slot.as_ref() {

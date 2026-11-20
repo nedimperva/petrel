@@ -5,6 +5,17 @@
 // go back to Ctrl K on Esc. The title bar is Petrel's own (TitleBar.tsx).
 // Ctrl Tab goes back to the note before (held, it lists the last few); Ctrl Shift Enter opens a second note beside.
 
+// The main window's own styles (the shared ones are in main.tsx).
+import "./styles/library.css";
+import "./styles/review.css";
+import "./styles/day.css";
+import "./styles/margin.css";
+import "./styles/panels.css";
+import "./styles/sidebar.css";
+import "./styles/settings.css";
+import Reading from "./note/Reading";
+import { learnKeys, USED_KEY } from "./learned";
+import { showSteps, startSteps, stepDone, STEPS_KEY } from "./firstSteps";
 import { createResource, createSignal, For, lazy, onCleanup, onMount, Show, Suspense } from "solid-js";
 import { api, errText, inTauri, type AiStatus, type Note, type NoteSummary, type ScanReport } from "./api";
 import { plainText } from "./copy";
@@ -99,6 +110,14 @@ export default function App() {
   const [switcher, setSwitcher] = createSignal<{ ids: number[]; i: number; shown: boolean; notes: NoteSummary[] } | null>(null);
   const [settings, setSettings] = createSignal<false | Section | "all">(false);
   const [history, setHistory] = createSignal(false);
+  /** The reading view (Ctrl E): the open note, read-only, set like a book. */
+  const [reading, setReading] = createSignal<{ id: number; title: string; folder: string; body: string } | null>(null);
+  async function openReading() {
+    const n = current();
+    if (!n || !page) return;
+    await page.flush();
+    setReading({ id: n.id, title: n.title, folder: n.folder, body: page.text() });
+  }
   const [moving, setMoving] = createSignal(false);
   const [week, setWeek] = createSignal(false);
   const [tasks, setTasks] = createSignal(false);
@@ -114,6 +133,7 @@ export default function App() {
   const [ai, setAi] = createSignal<AiStatus>({ ready: false, model: "", fastModel: "", error: null });
   const [root, setRoot] = createSignal("");
   const [rev, setRev] = createSignal(0);
+  const [pinRev, setPinRev] = createSignal(0);
   // The library's data (every note's summary) is read only while the library is open.
   const [lib] = createResource(() => (view().kind === "library" ? rev() + 1 : false), loadLibrary);
   let page: NotePageHandle | undefined;
@@ -318,7 +338,8 @@ export default function App() {
     if (!n) return;
     await (await api()).pinNote(n.id, !n.pinned);
     await page?.reload();
-    say(n.pinned ? "Unpinned" : "Pinned to the front of its collection");
+    setPinRev(pinRev() + 1);
+    say(n.pinned ? "Unpinned" : "Pinned: it is in the sidebar under Today");
   }
 
   const commands: Command[] = [
@@ -365,7 +386,9 @@ export default function App() {
     { id: "history", label: "History", get keys() { return keyLabel("history"); }, when: onNote, run: () => openPanel("history", setHistory) },
     { id: "delete", label: "Delete this note", when: onNote, run: () => void trash() },
     { id: "rescan", label: "Look for changes in the folder", run: () => void rescan(true) },
+    { id: "read", label: "Read the note, set like a book", get keys() { return keyLabel("read"); }, when: onNote, run: () => void openReading() },
     { id: "settings", label: "Settings", get keys() { return keyLabel("settings"); }, run: () => setSettings("all") },
+    { id: "first-steps", label: "First steps: five things to try", run: () => (showSteps(), void newNote()) },
     { id: "shortcuts", label: "All shortcuts", get keys() { return keyLabel("shortcuts"); }, run: () => setKeysOpen(true) },
   ];
 
@@ -398,7 +421,7 @@ export default function App() {
     }
   }
 
-  const overlay = () => !!(bar() || settings() || history() || moving() || week() || tasks() || trashOpen() || keysOpen());
+  const overlay = () => !!(bar() || settings() || history() || reading() || moving() || week() || tasks() || trashOpen() || keysOpen());
 
   // Ctrl Tab and Ctrl \ come before the editor, which would indent or type them.
   const earlyKey = (e: KeyboardEvent) => {
@@ -434,6 +457,7 @@ export default function App() {
     else if (matches(e, "library")) void (view().kind === "library" ? writing() : library());
     else if (matches(e, "settings")) setSettings("all");
     else if (matches(e, "history") && onNote()) setHistory(true);
+    else if (matches(e, "read") && onNote()) void openReading();
     else if (matches(e, "move") && onNote()) setMoving(true);
     else if (e.altKey && !mod && (e.key === "ArrowLeft" || e.key === "ArrowRight") && onDay()) {
       void openDay(addDays(onDay()!, e.key === "ArrowLeft" ? -1 : 1));
@@ -502,6 +526,8 @@ export default function App() {
     sidePref = stored["ui.sidebar"] !== "0";
     setSideOn(sidePref && innerWidth >= SIDEBAR_DOCK_PX);
     setCustomKeys(parseKeyMap(stored["ui.keys"] ?? "{}"));
+    learnKeys(stored[USED_KEY], (k, v) => s.setUiSetting(k, v));
+    startSteps(stored[STEPS_KEY], (k, v) => s.setUiSetting(k, v));
     try {
       const r = JSON.parse(stored["ui.recent"] ?? "[]");
       if (Array.isArray(r)) setRecent(r.filter((x) => typeof x === "number").slice(0, RECENT_MAX));
@@ -531,7 +557,7 @@ export default function App() {
       },
       folder: (r) => void folderChanged(r),
       // Hidden to the tray counts as leaving: coming back soon opens the same note.
-      changed: () => view().kind !== "note" && setRev(rev() + 1),
+      changed: () => (stepDone("capture"), view().kind !== "note" && setRev(rev() + 1)),
     });
     if (inTauri) {
       const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
@@ -577,6 +603,9 @@ export default function App() {
         </Show>
         <Sidebar
           rev={rev()}
+          pinRev={pinRev()}
+          noteId={view().kind === "note" ? current()?.id ?? null : null}
+          onNote={(id) => void openNote(id)}
           here={here()}
           docked={docked()}
           root={root()}
@@ -717,6 +746,34 @@ export default function App() {
             onAiSetup={() => (setWeek(false), setSettings("ai"))}
             onReview={() => void review()}
           />
+        </Show>
+        <Show when={reading()}>
+          {(r) => (
+            <Reading
+              title={r().title}
+              folder={r().folder}
+              body={r().body}
+              onClose={() => {
+                setReading(null);
+                page?.focus();
+              }}
+              onLink={(inner) =>
+                void api()
+                  .then((s) => s.resolveLink(inner))
+                  .then((x) => x.kind === "note" && (setReading(null), void openNote(x.id)))
+              }
+              onTick={(line) => {
+                const lines = r().body.split("\n");
+                void api()
+                  .then((s) => s.tickTask(r().id, line, lines[line] ?? ""))
+                  .then(async () => {
+                    await page?.reload();
+                    setReading({ ...r(), body: page?.text() ?? r().body });
+                  })
+                  .catch((e) => say(errText(e), { error: true }));
+              }}
+            />
+          )}
         </Show>
         <Show when={history() && current()}>
           {(n) => (

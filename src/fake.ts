@@ -64,10 +64,13 @@ export function fakeApi(): Api {
     cacheWriteTokens: 0,
   });
   const sync: SyncStatus = { configured: false, clientId: "", signedIn: false, account: "", on: false, state: "off", message: null, lastAt: null, last: null };
+  // `?calendar` in the address starts with today's calendar on.
+  let calendarOn = typeof location !== "undefined" && location.search.includes("calendar");
   // `?synced` in the address starts signed in to Drive, to try the sync screens.
   if (typeof location !== "undefined" && location.search.includes("synced"))
     Object.assign(sync, { configured: true, signedIn: true, on: true, account: "you@example.com", state: "idle", lastAt: Date.now(), last: "2 files received" });
 
+  const scratch: Record<number, string> = { 1: "0601 234 567, the plumber\n", 3: "- eggs\n- coffee\n- lemons\n" };
   const add = (folder: string, title: string, body: string, tags: string[] = [], age = 0, pinned = false): Note => {
     const t = Date.now() - age;
     const n: Note = {
@@ -121,7 +124,7 @@ export function fakeApi(): Api {
   add("", "Tern release (conflict 2026-11-11 2114)", "The Linux beta is out. Next is the macOS build.\n\n## Open questions\n\n- Do we ship the AUR package the same day?\n", [], 2 * HOUR);
   add("Prompts", "Release notes", "Write release notes for {{product}} {{version}} from these commits. Group them as New, Fixed and Changed. Plain words, no marketing.\n\n{{commits}}\n", ["ai"], 12 * DAY);
   add("Prompts", "Translate to Bosnian", "Translate this into natural Bosnian, keeping the tone:\n\n{{text}}\n", ["ai"], 20 * DAY);
-  add("Snippets", "Email sign-off", "Thanks, and talk soon,\nNedim\n", [], 30 * DAY);
+  add("Snippets", "Email sign-off", ";sig\nThanks, and talk soon,\nNedim\n", [], 30 * DAY);
   add("Snippets", "Meeting link", "Here is the link for {{day}}: https://meet.example.com/{{room}}\n", [], 14 * DAY);
   add("Snippets", "git undo last commit", "git reset --soft HEAD~1\n", ["git"], 40 * DAY);
   add("Songs", "Kad ja pođoh", "Capo 2\n\nAm        Dm\nKad ja pođoh na Bembašu\nE7            Am\nna Bembašu na vodu\n", [], 60 * DAY);
@@ -191,7 +194,7 @@ export function fakeApi(): Api {
   };
 
   const self: Api = {
-    appInfo: () => wait({ version: "dev", dbPath: "(browser, nothing saved)", debug: true }),
+    appInfo: () => wait({ version: "dev", dbPath: "(browser, nothing saved)", debug: true, exePath: "C:\\Program Files\\Petrel\\petrel.exe" }),
     rescueText: () => wait("(nowhere)"),
     closeWindow: () => wait(undefined),
     showWindow: () => wait(undefined),
@@ -215,6 +218,18 @@ export function fakeApi(): Api {
     syncSetOn: (on) => wait(Object.assign(sync, { on, state: on ? "idle" : "off" })).then((x) => ({ ...x })),
     syncNow: () => wait(undefined).then(() => void (sync.lastAt = Date.now())),
     onSync: () => wait(undefined),
+    calendarStatus: () => wait({ on: calendarOn }),
+    calendarSetOn: (on) => wait((calendarOn = on, { on }), on ? 600 : 0),
+    calendarDay: () =>
+      wait(
+        calendarOn
+          ? [
+              { start: "", end: "", title: "Lejla's birthday" },
+              { start: "10:00", end: "10:30", title: "Tern release sync" },
+              { start: "14:30", end: "15:30", title: "Dentist" },
+            ]
+          : [],
+      ),
     // In the browser a page is opened when it is asked for, so it starts at once.
     windowReady: () => wait(true),
     onOpenWindow: () => wait(undefined),
@@ -241,6 +256,8 @@ export function fakeApi(): Api {
     notesInfo: () => wait({ root: "~/Google Drive/Petrel" }),
     setNotesRoot: (root) => wait({ added: 0, changed: 0, removed: 0, skipped: 0, root, paths: [] }),
     scanNotes: () => wait({ added: 0, changed: 0, removed: 0, skipped: 0, root: "~/Google Drive/Petrel", paths: [] }),
+    scratchPage: async (n) => scratch[n] ?? "",
+    saveScratchPage: async (n, text) => void (scratch[n] = text),
     listNotes: async (q) =>
       [...notes.values()]
         .filter((n) => q.folder == null || n.folder === q.folder)

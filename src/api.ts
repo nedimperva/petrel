@@ -10,6 +10,7 @@ export interface AppInfo {
   version: string;
   dbPath: string;
   debug: boolean;
+  exePath: string;
 }
 
 export interface Note {
@@ -278,6 +279,13 @@ export interface TopicFace {
   copy?: string;
 }
 
+/** An event on the calendar: `start` and `end` as `09:30`, empty for an all-day one. */
+export interface CalEvent {
+  start: string;
+  end: string;
+  title: string;
+}
+
 export interface AppEvents {
   /** Tray "Quit": save, then close this window. */
   quit(): void;
@@ -323,6 +331,9 @@ export interface Api {
   setNotesRoot(root: string): Promise<ScanReport>;
   scanNotes(): Promise<ScanReport>;
   listNotes(query: NoteQuery): Promise<NoteSummary[]>;
+  /** The capture window's scratch pages, 1 to 5 (`.scratch/` in the folder). */
+  scratchPage(n: number): Promise<string>;
+  saveScratchPage(n: number, text: string): Promise<void>;
   /** By title. */
   findNotes(text: string, limit: number): Promise<NoteSummary[]>;
   /** By the words in the text. */
@@ -413,6 +424,11 @@ export interface Api {
   syncSignOut(): Promise<SyncStatus>;
   syncSetOn(on: boolean): Promise<SyncStatus>;
   syncNow(): Promise<void>;
+  /** Today's calendar on today's page: read-only, asked for with its own sign-in. */
+  calendarStatus(): Promise<{ on: boolean }>;
+  calendarSetOn(on: boolean): Promise<{ on: boolean }>;
+  /** One day's events (`YYYY-MM-DD`), empty when the calendar is off. */
+  calendarDay(day: string): Promise<CalEvent[]>;
   onSync(run: (s: SyncStatus) => void): Promise<void>;
   aiWrite(o: {
     task: AiTask;
@@ -478,6 +494,8 @@ async function tauriApi(): Promise<Api> {
     setNotesRoot: (root) => invoke("set_notes_root", { root }),
     scanNotes: () => invoke("scan_notes"),
     listNotes: (query) => invoke("list_notes", { query }),
+    scratchPage: (n) => invoke("scratch_page", { n }),
+    saveScratchPage: (n, text) => invoke("save_scratch_page", { n, text }),
     findNotes: (text, limit) => invoke("find_notes", { text, limit }),
     searchNotes: (text, limit) => invoke("search_notes", { text, limit }),
     noteFolders: () => invoke("note_folders"),
@@ -546,6 +564,9 @@ async function tauriApi(): Promise<Api> {
     syncSignOut: () => invoke("sync_sign_out"),
     syncSetOn: (on) => invoke("sync_set_on", { on }),
     syncNow: () => invoke("sync_now"),
+    calendarStatus: () => invoke("calendar_status"),
+    calendarSetOn: (on) => invoke("calendar_set_on", { on }),
+    calendarDay: (day) => invoke("calendar_day", { day }),
     onSync: async (run) => {
       const { listen } = await import("@tauri-apps/api/event");
       await listen<SyncStatus>("petrel-sync", (e) => run(e.payload));

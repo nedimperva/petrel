@@ -1,0 +1,141 @@
+/* Collections' colours and marks, and the paper's grain (last, so it lies over each window's own paper). */
+
+/* Each collection keeps one quiet hue, for its dot, its mark and its blanks: picked in the library (`t`) or from
+   its name (src/library/faces.ts). */
+.hue-slate { --hue: var(--ink-2); --hue-soft: var(--hover); }
+.hue-blue { --hue: #2f4f9a; --hue-soft: #e9edf5; }
+.hue-teal { --hue: #22707c; --hue-soft: #e3f1f2; }
+.hue-green { --hue: #1f7a4d; --hue-soft: #e6f3ec; }
+.hue-ochre { --hue: #8a6510; --hue-soft: #fbf1dc; }
+.hue-clay { --hue: #a1452a; --hue-soft: #f8eae4; }
+.hue-rose { --hue: #a83a5e; --hue-soft: #f8e8ee; }
+.hue-plum { --hue: #6d4aa8; --hue-soft: #efe9f8; }
+:root[data-theme="dark"] .hue-blue { --hue: #8fa8e6; --hue-soft: #26304a; }
+:root[data-theme="dark"] .hue-teal { --hue: #6cc0ca; --hue-soft: #1b3236; }
+:root[data-theme="dark"] .hue-green { --hue: #6cc59a; --hue-soft: #1d3329; }
+:root[data-theme="dark"] .hue-ochre { --hue: #ddb661; --hue-soft: #382d16; }
+:root[data-theme="dark"] .hue-clay { --hue: #e59377; --hue-soft: #3a261f; }
+:root[data-theme="dark"] .hue-rose { --hue: #e78aa8; --hue-soft: #3b2029; }
+:root[data-theme="dark"] .hue-plum { --hue: #b49be3; --hue-soft: #2e2640; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]):not([data-theme="linen"]) .hue-blue { --hue: #8fa8e6; --hue-soft: #26304a; }
+  :root:not([data-theme="light"]):not([data-theme="linen"]) .hue-teal { --hue: #6cc0ca; --hue-soft: #1b3236; }
+  :root:not([data-theme="light"]):not([data-theme="linen"]) .hue-green { --hue: #6cc59a; --hue-soft: #1d3329; }
+  :root:not([data-theme="light"]):not([data-theme="linen"]) .hue-ochre { --hue: #ddb661; --hue-soft: #382d16; }
+  :root:not([data-theme="light"]):not([data-theme="linen"]) .hue-clay { --hue: #e59377; --hue-soft: #3a261f; }
+  :root:not([data-theme="light"]):not([data-theme="linen"]) .hue-rose { --hue: #e78aa8; --hue-soft: #3b2029; }
+  :root:not([data-theme="light"]):not([data-theme="linen"]) .hue-plum { --hue: #b49be3; --hue-soft: #2e2640; }
+}
+
+/* ---- collections' looks ---------------------------------------------------------------------------------- */
+
+.mark-btn {
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  background: none;
+  border-radius: var(--r-md);
+  cursor: pointer;
+}
+.mark-btn:hover .mark.tile,
+.mark-btn:focus-visible .mark.tile {
+  box-shadow: 0 0 0 2px var(--hue);
+}
+.shelf-head {
+  align-items: center;
+}
+.lib-title {
+  align-items: center;
+}
+.face-picker {
+  width: min(420px, calc(100vw - 32px));
+}
+.face-label {
+  margin: var(--s-3) 0 var(--s-2);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.face-colors,
+.face-marks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.swatch {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid var(--paper);
+  background: var(--hue);
+  box-shadow: 0 0 0 1px var(--line);
+  cursor: pointer;
+}
+.swatch.on {
+  box-shadow: 0 0 0 2px var(--ink);
+}
+.face-mark {
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--raised);
+  color: var(--hue);
+  cursor: pointer;
+}
+.face-mark.on {
+  background: var(--hue-soft);
+  border-color: var(--hue);
+}
+
+/* A collection's mark: a dot, or the small icon picked for it. */
+.mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  color: var(--hue);
+}
+.mark .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--hue);
+}
+.mark.tile {
+  width: 26px;
+  height: 26px;
+  border-radius: var(--r-md);
+  background: var(--hue-soft);
+}
+.mark.tile .dot {
+  width: 8px;
+  height: 8px;
+}
+/* Dots and icons take the same room, so the labels after them line up. */
+.mark {
+  min-width: 14px;
+}
+
+
+/* ---- The page, calmer (17 November list): last, over the capture window's own paper --------------------------------------------------------------------- */
+
+/* Paper with a grain you only see up close: the app, the capture window and the title bar sit on it. */
+.app,
+.titlebar,
+.capture {
+  background-image: var(--grain);
+}
+
+/* A blank line between paragraphs is half as tall, as in a book (editor.ts, `blankLines`). */
+.cm-editor .cm-line.cm-blank {
+  line-height: calc(var(--editor-leading) * 0.42);
+}
+
+/* Typewriter scrolling: room under the text, so the last line can rise to a third of the window too. */
+.cm-typewriter .cm-content {
+  padding-bottom: 62vh;
+}

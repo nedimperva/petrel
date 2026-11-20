@@ -202,6 +202,29 @@ From the 60-item review (https://claude.ai/artifact/DwnzLPdrfqZobjj2mWSTwV), bui
   `.trash/.places`), merging edits that do not touch (`merge.rs`), a last sync on Quit, the sync log, and a line
   saying Drive carries only the files Petrel made (`drive.file`).
 
+## The 17 November list (chosen 2026-11-19)
+
+From the post-0.3.0 list (https://claude.ai/artifact/PJA2vRcgFnSSPGLYob8tVy), items 1–11, 13–21, 24, 26–28, 35,
+42–44 and 46, built in five batches:
+
+- **Bugs and the page (1–11, 13–18, 21, 27, 44).** Stock CodeMirror keys that clash are dropped
+  (`editor/stockKeys.ts`, with a test). Half-height blank lines, warmer paper, Night, typewriter scrolling, a
+  fade between notes. Learned keys leave the key line (`learned.ts`). First steps (`firstSteps.ts`). Ctrl E is a
+  reading view (`note/Reading.tsx`, chords over words for songs). Today's page has the week strip, a thread to
+  earlier days, the day's tally and Google Calendar events (`src-tauri/src/calendar.rs`, read-only scope added
+  to the Google sign-in). The tray shows a sync dot.
+- **Writing (19, 20, 24, 35).** `;trigger` snippets from the Snippets collection (`collection/snippetText.ts`,
+  `editor/snippets.ts`). Five scratch pages in the capture window, kept in `.scratch/` (synced, not indexed,
+  `notes/scratch.rs`). Pictures as `![caption|320](attachments/x.png)`. Pinned notes in the sidebar.
+- **Outside Petrel (26, 28).** `petrel_core::outside` reads and adds within a scope; `petrel mcp` serves it to
+  Claude apps (`src-tauri/src/mcp.rs`), `petrel find|read|add|copy` to a terminal (`cli.rs`). The scope is
+  `ui.outside.collections` and `ui.outside.write` (Settings › Claude apps). The picker runs a prompt on the
+  selection (Ctrl J).
+- **Engine (42, 43, 46).** The drafts engine is gone: `store.rs` keeps only the connection, schema steps
+  (`schema.rs`), settings, undo and the checkpointer; `[[d:…]]` links are missing. `examples/notes_bench.rs` times
+  5,000 notes in CI. Styles are split per window under `src/styles/`; `note/day.tsx` holds today's head and
+  margin; `notes/` has days, pictures, looks, linking and undo. `packaging/aur/` builds `petrel-bin`.
+
 ## Look
 
 Tern's colours: near-white paper `#fcfbf9`, warm greys, ink `#1f1e1b`, one blue accent `#2f4f9a`. Literata for

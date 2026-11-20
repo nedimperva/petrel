@@ -57,7 +57,7 @@ const groupOf = (r: Row) => (r.t.kind === "day" ? "Days" : r.t.kind === "note" ?
 const ORDER = ["Days", "Collections", "Add to the end of a note", "New"];
 
 export default function Destination(p: {
-  exclude?: number;
+  exclude?: number | number[];
   noDay?: boolean;
   /** What is being moved, for the heading: a note's title. */
   what?: string;
@@ -72,10 +72,11 @@ export default function Destination(p: {
   const [i, setI] = createSignal(0);
   const [folders] = createResource(async () => (await (await api()).noteFolders()).filter((f) => f.path !== "inbox" && !f.path.startsWith(".")));
   const [used] = createResource(filedCounts);
+  const excluded = (id: number) => (Array.isArray(p.exclude) ? p.exclude.includes(id) : p.exclude === id);
   const [notes] = createResource(q, async (text): Promise<NoteSummary[]> => {
     const s = await api();
     const found = text.trim() ? await s.findNotes(text, 12) : await s.listNotes({ limit: 12 });
-    return found.filter((n) => n.folder !== "inbox" && n.id !== p.exclude);
+    return found.filter((n) => n.folder !== "inbox" && !excluded(n.id));
   });
   const count = (folder: string) => folders()?.find((f) => f.path === folder)?.count;
 

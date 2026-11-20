@@ -3,15 +3,18 @@
 
 import { api, errText, type NoteSummary } from "../api";
 import { blanks } from "../blanks";
+import { copyBody } from "./snippetText";
 import { say } from "../ui";
+import { stepDone } from "../firstSteps";
 import { noteUse } from "./lastUsed";
 import { hasVersions, versionsOf } from "./versions";
+import { faces } from "../library/Mark";
 
 /** The item's text, and whether it needs the sheet before copying: blanks to fill, or versions to choose. */
 export async function itemText(id: number): Promise<{ text: string; title: string; hasBlanks: boolean }> {
   const n = await (await api()).peekNote(id);
-  const text = n.body.replace(/\n+$/, "");
-  const versions = hasVersions(n.folder) && versionsOf(text).length > 1;
+  const text = copyBody(n);
+  const versions = hasVersions(n.folder, faces()) && versionsOf(text).length > 1;
   return { text, title: n.title, hasBlanks: versions || blanks(text).length > 0 };
 }
 
@@ -22,6 +25,7 @@ export async function copyFilled(item: Pick<NoteSummary, "id" | "title"> & { pat
     await s.recordCopy(item.id, app).catch(() => 0);
     if (item.path) await noteUse(item.path, app);
     say(`Copied “${item.title}”`);
+    stepDone("copy");
     return true;
   } catch (e) {
     say(errText(e), { error: true });

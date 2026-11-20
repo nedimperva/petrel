@@ -3196,11 +3196,12 @@ dependencies = [
 
 [[package]]
 name = "petrel"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "arboard",
  "base64 0.22.1",
+ "chrono",
  "dirs 7.0.0",
  "env_logger",
  "getrandom 0.3.4",
@@ -3227,7 +3228,7 @@ dependencies = [
 
 [[package]]
 name = "petrel-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "chrono",
