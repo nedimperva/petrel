@@ -76,6 +76,12 @@ export function createNoteSaver(o: {
         const n = await store.createNote(f.folder, f.title.trim() || "Untitled", body, []);
         if (mine === session) o.setNote(n);
       } else {
+        if (body === current.body) {
+          saved = Math.max(saved, at);
+          failure = null;
+          o.setSave(rev === saved ? "saved" : "dirty");
+          return true;
+        }
         const r = await store.saveNote(current.id, body, current.hash);
         if (mine === session) o.setNote({ ...current, hash: r.hash, modifiedAt: r.modifiedAt, body });
         if (r.conflict) o.conflict(r.conflict);
