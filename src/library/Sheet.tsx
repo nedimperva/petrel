@@ -208,9 +208,9 @@ export default function Sheet(p: {
                 <div class="fill-legend">
                   <span>Click any chip to focus its field.</span>
                   <span class="blank-legend-dots">
-                    <span><i class="bdot empty" /> empty</span>
-                    <span><i class="bdot auto" /> auto / default</span>
-                    <span><i class="bdot typed" /> typed</span>
+                    <span><i class="bdot is-empty" /> empty</span>
+                    <span><i class="bdot is-auto" /> auto / default</span>
+                    <span><i class="bdot is-typed" /> typed</span>
                   </span>
                 </div>
               </Show>

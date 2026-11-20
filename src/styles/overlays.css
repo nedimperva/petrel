@@ -652,6 +652,8 @@ button.blank-chip:hover {
   background: rgba(255, 255, 255, 0.14);
   border-color: rgba(255, 255, 255, 0.24);
   color: #bfe3cf;
+  line-height: 1.45;
+  vertical-align: baseline;
 }
 .lsheet.kind-code .blank-chip.state-unfilled,
 .fill-text.code .blank-chip.state-unfilled,
@@ -659,6 +661,15 @@ button.blank-chip:hover {
   background: transparent;
   border-style: dashed;
   color: #9bb5a7;
+}
+.lsheet.kind-code .blank-chip.active,
+.fill-text.code .blank-chip.active,
+.picker-peek-code .blank-chip.active,
+.lsheet.kind-code button.blank-chip:hover,
+.fill-text.code button.blank-chip:hover,
+.picker-peek-code button.blank-chip:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 /* A card, opened. */
@@ -685,7 +696,7 @@ button.blank-chip:hover {
 .lsheet-main {
   flex: 1;
   min-width: 0;
-  padding: 28px 34px;
+  padding: 24px 32px;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -711,7 +722,7 @@ button.blank-chip:hover {
   border-radius: var(--r-lg);
   background: #1f2421;
   color: #e6efe9;
-  font: 400 13.5px/1.65 var(--font-mono);
+  font: 400 13.5px/1.7 var(--font-mono);
 }
 .lsheet .blank-chip.filled {
   font-size: 0.92em;
@@ -817,15 +828,16 @@ button.blank-chip:hover {
   width: 8px;
   height: 8px;
   border-radius: 3px;
+  flex: none;
 }
-.bdot.empty {
+.bdot.is-empty {
   border: 1px dashed var(--line-strong);
 }
-.bdot.auto {
+.bdot.is-auto {
   background: var(--accent-wash);
   border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
 }
-.bdot.typed {
+.bdot.is-typed {
   background: var(--accent);
 }
 .btn.wide {

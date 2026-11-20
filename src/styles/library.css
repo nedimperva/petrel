@@ -600,39 +600,27 @@
 .scard-code .blank-chip,
 .ccard-code .blank-chip {
   font-size: 0.9em;
-  line-height: 1.5;
+  font-weight: 500;
+  line-height: 1.35;
   padding: 0 5px;
+  vertical-align: 0;
+  background: var(--accent-wash);
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent-ink);
 }
 .scard-text {
+  flex: 0 0 auto;
   font-size: var(--t-sm);
   line-height: 1.5;
   color: var(--ink-2);
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
 .scard-text.lines,
 .ccard-text.lines {
   white-space: pre-line;
-}
-.scard-blanks {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-wrap: wrap;
-  max-height: 22px;
-  overflow: hidden;
-}
-.scard-blanks .blank-chip,
-.ccard-blanks .blank-chip {
-  font-size: var(--t-xs);
-  line-height: 1.45;
-  padding: 0 6px;
-  background: transparent;
-  border: 1px dashed var(--line-strong);
-  color: var(--muted);
-  font-weight: 500;
 }
 .scard-foot {
   margin-top: auto;
@@ -688,7 +676,7 @@
   content: "";
   position: absolute;
   inset: auto 0 0 0;
-  height: 16px;
+  height: 14px;
   background: linear-gradient(transparent, var(--sunk));
   pointer-events: none;
 }
@@ -708,9 +696,12 @@
   font: 11.5px / 1.48 var(--font-mono);
   padding: 7px 9px;
   color: var(--ink);
-  white-space: pre;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  max-height: 4.6em;
 }
 .scard.page {
   height: 164px;
@@ -743,8 +734,9 @@
   -webkit-box-orient: vertical;
 }
 .scard.page .scard-text {
-  font: var(--t-sm) / 1.55 var(--font-write);
-  -webkit-line-clamp: 3;
+  flex: 0 0 auto;
+  font: var(--t-sm) / 1.5 var(--font-write);
+  -webkit-line-clamp: 2;
 }
 .scard-tasks {
   font-size: var(--t-xs);
@@ -752,8 +744,11 @@
 }
 
 /* Shared structured card helpers: checklists, hover mini-buttons, shelf bands, hue copy flash. */
-.shelves-band-seg {
+.shelves-band-seg,
+.coll-view-seg {
   flex: none;
+  background: var(--hover);
+  border: 1px solid var(--line);
 }
 .shelf-band-head {
   display: flex;
@@ -808,17 +803,16 @@
   color: var(--muted);
 }
 .card-hover-acts {
-  display: inline-flex;
+  display: none;
   align-items: center;
   gap: 4px;
-  opacity: 0;
-  transition: opacity var(--d-fast) var(--ease);
+  flex: none;
 }
 .scard:hover .card-hover-acts,
 .scard.on .card-hover-acts,
 .ccard:hover .card-hover-acts,
 .ccard.on .card-hover-acts {
-  opacity: 1;
+  display: inline-flex;
 }
 .card-mini-btn {
   padding: 1px 6px;
@@ -1282,11 +1276,12 @@
   color: var(--ink-2);
 }
 .ccard-text {
+  flex: 0 0 auto;
   font-size: var(--t-rd);
   line-height: 1.55;
   color: var(--ink-2);
   display: -webkit-box;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
@@ -1294,21 +1289,16 @@
 .ccard-title.serif {
   font-family: var(--font-write);
 }
-.ccard-blanks {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  flex-wrap: wrap;
-  max-height: 24px;
-  overflow: hidden;
-}
 .ccard-code {
   font: var(--t-sm) / 1.5 var(--font-mono);
   padding: 8px 10px;
   color: var(--ink);
-  white-space: pre;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  max-height: 4.8em;
 }
 .ccard-foot {
   margin-top: auto;
@@ -1365,7 +1355,8 @@
   -webkit-box-orient: vertical;
 }
 .ccard.page .ccard-text {
-  -webkit-line-clamp: 4;
+  flex: 0 0 auto;
+  -webkit-line-clamp: 3;
 }
 .ccard.page .ccard-foot {
   border-top: 0;

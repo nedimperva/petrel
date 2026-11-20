@@ -299,9 +299,6 @@ export default function Shelves(p: {
                     </>
                   }
                 >
-                  <Show when={!code}>
-                    <span class="scard-band" aria-hidden="true" />
-                  </Show>
                   <span class="scard-top">
                     <span class="scard-title">{n.title}</span>
                     <Show when={p.data?.versions[n.id]}>{(v) => <span class="scard-badge">{v()}v</span>}</Show>
@@ -323,14 +320,6 @@ export default function Shelves(p: {
                         <span class="card-lang">{cp()!.lang}</span>
                       </Show>
                       <CardText class="scard-code" code text={p.data?.firstVersion[n.id] ?? n.preview} />
-                    </span>
-                  </Show>
-                  <Show when={!code && bs().length}>
-                    <span class="scard-blanks">
-                      <For each={bs().slice(0, 3)}>{(b) => <span class="blank-chip">{b}</span>}</For>
-                      <Show when={bs().length > 3}>
-                        <span class="muted small">+{bs().length - 3}</span>
-                      </Show>
                     </span>
                   </Show>
                   <span class="scard-foot">

@@ -590,9 +590,6 @@ export default function Collection(p: {
                       </>
                     }
                   >
-                    <Show when={!code()}>
-                      <span class="ccard-band" aria-hidden="true" />
-                    </Show>
                     <span class="ccard-top">
                       <Show when={subName()}>
                         <span class="card-sub-tag">{folderName(subName())}</span>
@@ -614,14 +611,6 @@ export default function Collection(p: {
                           <span class="card-lang">{cp()!.lang}</span>
                         </Show>
                         <CardText class="ccard-code" code text={p.firstVersion[n.id] ?? n.preview} />
-                      </span>
-                    </Show>
-                    <Show when={!code() && bs().length}>
-                      <span class="ccard-blanks">
-                        <For each={bs().slice(0, 4)}>{(b) => <span class="blank-chip">{b}</span>}</For>
-                        <Show when={bs().length > 4}>
-                          <span class="muted small">+{bs().length - 4}</span>
-                        </Show>
                       </span>
                     </Show>
                     <span class="ccard-foot">
