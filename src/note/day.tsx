@@ -1,11 +1,11 @@
-// A day's page (journal/YYYY-MM-DD.md): the week strip + anchored month popover over the title, the calm tally
-// subline and `+ New entry`, and in the right margin the day's schedule, unified Carry-over & Due tasks, and a
-// clickable Captured today card. Split from NotePage.tsx, which owns the text.
+// A day's page (journal/YYYY-MM-DD.md): a clean date heading with tally and `+ Entry` over the text, and in the
+// right margin a simple month calendar chooser, the day's schedule, unified Carry-over & Due tasks, and a clickable
+// Captured today card. Split from NotePage.tsx, which owns the text.
 
-import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show, type Accessor } from "solid-js";
+import { createEffect, createMemo, createSignal, For, on, Show, type Accessor } from "solid-js";
 import { api, errText, type CalEvent, type Note, type OpenTask } from "../api";
 import type { EditorHandle } from "../editor/editor";
-import { addDays, clock, dayTitle, dueOf, JOURNAL, monthGrid, today, weekOf } from "../journal/days";
+import { addDays, clock, dayOf, dayTitle, dueOf, JOURNAL, monthGrid, parseDay, today } from "../journal/days";
 import { keyLabel } from "../keys";
 import { Kbd, say } from "../ui";
 
@@ -16,10 +16,15 @@ export interface MarginTask {
   isJournal: boolean;
 }
 
+function shiftMonth(iso: string, delta: number): string {
+  const d = parseDay(iso) ?? new Date();
+  return dayOf(new Date(d.getFullYear(), d.getMonth() + delta, 1));
+}
+
 export function createDay(o: { dayPage: Accessor<string | null>; note: Accessor<Note | null>; editor: () => EditorHandle | undefined }) {
   const dayPage = o.dayPage;
   const note = o.note;
-  // The days that have a page, for the week strip and month popover. Signals, not resources (avoids App's Suspense).
+  // The days that have a page, for the calendar dots. Signals, not resources (avoids App's Suspense).
   const [journal, setJournal] = createSignal<Set<string>>(new Set());
   createEffect(
     on(
@@ -32,10 +37,6 @@ export function createDay(o: { dayPage: Accessor<string | null>; note: Accessor<
       },
     ),
   );
-
-  /** The month popover, anchored to the week strip. */
-  const [showMonth, setShowMonth] = createSignal(false);
-  createEffect(on(dayPage, () => setShowMonth(false)));
 
   /** The day's events from Google Calendar, when it is turned on (Settings › Sync). */
   const [events, setEvents] = createSignal<CalEvent[]>([]);
@@ -160,92 +161,14 @@ export function createDay(o: { dayPage: Accessor<string | null>; note: Accessor<
     }
   }
 
-  return { journal, showMonth, setShowMonth, events, writeUnder, openList, capturedToday, bringHere, tickTask };
+  return { journal, events, writeUnder, openList, capturedToday, bringHere, tickTask };
 }
 
 export type DayState = ReturnType<typeof createDay>;
 
 export function DayHead(p: { day: string; tally: string; state: DayState; onDay(day: string): void; onNewEntry(): void }) {
-  let weekEl: HTMLDivElement | undefined;
-  const monthLabel = () => new Date(`${p.day}T12:00`).toLocaleDateString(undefined, { month: "long" });
-  const monthTitle = () => new Date(`${p.day}T12:00`).toLocaleDateString(undefined, { month: "long", year: "numeric" });
-
-  onMount(() => {
-    const away = (e: MouseEvent) => {
-      if (p.state.showMonth() && weekEl && !weekEl.contains(e.target as Node)) p.state.setShowMonth(false);
-    };
-    const esc = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && p.state.showMonth()) {
-        e.preventDefault();
-        e.stopPropagation();
-        p.state.setShowMonth(false);
-      }
-    };
-    document.addEventListener("mousedown", away);
-    document.addEventListener("keydown", esc, true);
-    onCleanup(() => {
-      document.removeEventListener("mousedown", away);
-      document.removeEventListener("keydown", esc, true);
-    });
-  });
-
   return (
     <div class="day-head">
-      <div class="day-week" role="group" aria-label="This week" ref={weekEl}>
-        <For each={weekOf(p.day)}>
-          {(x) => (
-            <button
-              type="button"
-              class="week-day"
-              classList={{ on: x === p.day, has: p.state.journal().has(x), today: x === today(), future: x > today() }}
-              aria-label={dayTitle(x)}
-              aria-current={x === p.day ? "date" : undefined}
-              onClick={() => p.onDay(x)}
-            >
-              <span class="week-wd">{new Date(`${x}T12:00`).toLocaleDateString(undefined, { weekday: "short" })}</span>
-              <span class="week-n">{Number(x.slice(8))}</span>
-            </button>
-          )}
-        </For>
-        <button
-          type="button"
-          class="week-month"
-          classList={{ on: p.state.showMonth() }}
-          aria-expanded={p.state.showMonth()}
-          onClick={() => p.state.setShowMonth(!p.state.showMonth())}
-        >
-          {monthLabel()} ▾
-        </button>
-        <Show when={p.state.showMonth()}>
-          <div class="day-month-pop" role="dialog" aria-label={monthTitle()}>
-            <div class="day-month-name">{monthTitle()}</div>
-            <div class="day-grid">
-              <For each={["M", "T", "W", "T", "F", "S", "S"]}>{(w) => <span class="day-wd">{w}</span>}</For>
-              <For each={monthGrid(p.day)}>
-                {(x) =>
-                  x ? (
-                    <button
-                      type="button"
-                      class="day-cell"
-                      classList={{ on: x === p.day, has: p.state.journal().has(x), today: x === today(), future: x > today() }}
-                      aria-label={dayTitle(x)}
-                      onClick={() => {
-                        p.state.setShowMonth(false);
-                        p.onDay(x);
-                      }}
-                    >
-                      {Number(x.slice(8))}
-                    </button>
-                  ) : (
-                    <span />
-                  )
-                }
-              </For>
-            </div>
-          </div>
-        </Show>
-      </div>
-
       <div class="day-heading-row">
         <div class="day-heading-text">
           <h1 class="day-title">{dayTitle(p.day)}</h1>
@@ -283,8 +206,57 @@ export function DayHead(p: { day: string; tally: string; state: DayState; onDay(
 }
 
 export function DayMargin(p: { day: string; state: DayState; onDay(day: string): void; onOpen(id: number): void; onInbox(): void }) {
+  const [viewedMonth, setViewedMonth] = createSignal(p.day);
+  createEffect(on(() => p.day, (d) => setViewedMonth(d)));
+
+  const monthTitle = () =>
+    new Date(`${viewedMonth()}T12:00`).toLocaleDateString(undefined, {
+      month: "long",
+      year: viewedMonth().slice(0, 4) === today().slice(0, 4) ? undefined : "numeric",
+    });
+
   return (
     <>
+      <section class="day-month-box" aria-label="Calendar">
+        <div class="day-month-head">
+          <span class="day-month-name">{monthTitle()}</span>
+          <span class="day-month-nav">
+            <Show when={viewedMonth().slice(0, 7) !== today().slice(0, 7) || p.day !== today()}>
+              <button type="button" class="link small" onClick={() => (setViewedMonth(today()), p.onDay(today()))}>
+                Today
+              </button>
+            </Show>
+            <button type="button" class="day-month-step" aria-label="Previous month" title="Previous month" onClick={() => setViewedMonth(shiftMonth(viewedMonth(), -1))}>
+              ‹
+            </button>
+            <button type="button" class="day-month-step" aria-label="Next month" title="Next month" onClick={() => setViewedMonth(shiftMonth(viewedMonth(), 1))}>
+              ›
+            </button>
+          </span>
+        </div>
+        <div class="day-grid">
+          <For each={["M", "T", "W", "T", "F", "S", "S"]}>{(w) => <span class="day-wd">{w}</span>}</For>
+          <For each={monthGrid(viewedMonth())}>
+            {(x) =>
+              x ? (
+                <button
+                  type="button"
+                  class="day-cell"
+                  classList={{ on: x === p.day, has: p.state.journal().has(x), today: x === today(), future: x > today() }}
+                  aria-label={dayTitle(x)}
+                  aria-current={x === p.day ? "date" : undefined}
+                  onClick={() => p.onDay(x)}
+                >
+                  {Number(x.slice(8))}
+                </button>
+              ) : (
+                <span />
+              )
+            }
+          </For>
+        </div>
+      </section>
+
       <Show when={p.state.events().length}>
         <section class="day-cal" aria-label="Schedule">
           <h4>Schedule</h4>
