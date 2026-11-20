@@ -3,15 +3,20 @@
 Release notes for Petrel. The release workflow takes a version's notes from its section here; a tag without a
 section fails. Keep entries short and in the user's language: what changed for them, not which file moved.
 
-## Unreleased
+## 0.4.0
 
 - Fixed: Ctrl / no longer turns a line into a comment, empty time lines no longer pile up on today's page, related
   notes skip conflict copies, the Ctrl K preview shows text instead of Markdown, a loose match no longer runs a
   command, and notes whose names differ only in case (or are Windows device names) are marked.
 - Writing: softer blank lines, warmer paper and a Night look, typewriter scrolling that keeps the line still, a
   fade between notes, a reading view on Ctrl E (songs show their chords above the words).
-- Today's page: a strip of the week, a thread back to earlier days, the day's tally, and today's events from
-  Google Calendar.
+- Today's page: quiet entry headers with live timestamps (starting a fresh entry when you return after a break or on
+  Ctrl Enter), a simple month calendar chooser in the right margin, the day's tally, and today's events from Google
+  Calendar.
+- Quick picker: fuller type-aware previews, visible captured selection, collection scope pills, clickable versions
+  and linked blanks, and Ctrl J to run a prompt on the text selected in the app you came from.
+- Library: clearer distinction between Pages and To copy items, richer previews (tasks, code, pictures, tables, and
+  blanks), a Cards / Split view toggle, Space for Quick Peek, and multi-select with batch move, copy, and delete.
 - Key hints you have used often leave the key line; first steps on a new folder; a calmer sidebar with pinned
   notes under Today; a sync dot on the tray, and a note if the last sync before Quit did not finish.
 - Snippets as you type: `;sig` puts in a snippet from the Snippets collection, its blanks as fields.
@@ -19,7 +24,6 @@ section fails. Keep entries short and in the user's language: what changed for t
 - Pictures take a width (drag the right edge) and a caption.
 - Petrel in Claude Desktop and Claude Code (Settings › Claude apps), and from a terminal: `petrel find`, `read`,
   `add`, `copy`.
-- In the picker, Ctrl J runs a prompt on the text selected in the app you came from.
 - An AUR package, `petrel-bin`.
 
 ## 0.3.0
