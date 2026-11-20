@@ -1,17 +1,18 @@
-// A card, opened: the whole text on a sheet over the library. A prompt's blanks become fields on the right and
-// the text fills in as you type; Enter copies. A prompt or snippet with `## versions` shows one at a time: Alt ←
-// and Alt → step through them, and the one copied last comes first. A capture from the inbox gets
-// its filing buttons instead: Suggest a home (s, Claude, only when pressed). Move to (m) and Delete (d) work on any card.
+// A card, opened: the whole text on a sheet over the library (or inline in Split Sheet / Inbox). A prompt's blanks
+// become fields on the right, linked bi-directionally to clickable chips in the preview; Enter copies. A prompt or
+// snippet with `## versions` shows clickable tabs; Alt ← and Alt → step through them, and the one copied last comes
+// first. A capture from the inbox gets its filing buttons instead: Suggest a home (s, Claude, only when pressed).
 
-import { createMemo, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 import { api, errText, type AiSuggestion, type Note } from "../api";
 import { parts } from "../blanks";
-import BlankFields, { createBlanks, keepVersion, lastVersions } from "../collection/BlankFields";
+import BlankFields, { createBlanks, keepVersion, lastVersions, type BlankKind } from "../collection/BlankFields";
 import { copyFilled } from "../collection/copyItem";
+import { copyBody } from "../collection/snippetText";
 import { hasVersions, lastFirst, versionsOf } from "../collection/versions";
 import { ago, folderName, say, typing } from "../ui";
 import { kindOf, topOf } from "./Card";
-import Mark, { hueClass } from "./Mark";
+import Mark, { faces, hueClass } from "./Mark";
 
 export default function Sheet(p: {
   id: number;
@@ -25,29 +26,66 @@ export default function Sheet(p: {
   onAiSetup(): void;
   /** In the library's preview pane, always open: no scrim, Esc is the library's, the fields wait for a click. */
   inline?: boolean;
+  /** True while multi-selection mode is active in the parent list, so batch keys win over single-item keys. */
+  disabled?: boolean;
+  onCopied?: () => void;
 }) {
-  const [note] = createResource(
-    () => p.id,
-    async (id) => (await api()).peekNote(id),
+  // Signals, not createResource: avoids triggering App's top-level <Suspense> when switching items in Split view.
+  const [note, setNote] = createSignal<Note | null>(null);
+  const [last, setLast] = createSignal<Record<string, string>>({});
+  const [vi, setVi] = createSignal(0);
+  const [activeBlank, setActiveBlank] = createSignal<string | null>(null);
+  const [sugg, setSugg] = createSignal<AiSuggestion[] | "loading" | null>(null);
+
+  onMount(() => void lastVersions().then(setLast, () => {}));
+  createEffect(
+    on(
+      () => p.id,
+      (id) => {
+        setVi(0);
+        setActiveBlank(null);
+        setSugg(null);
+        void api()
+          .then((s) => s.peekNote(id))
+          .then((n) => {
+            if (p.id === id) setNote(n);
+          })
+          .catch(() => {});
+      },
+    ),
   );
-  const body = () => (note()?.body ?? "").replace(/\n+$/, "");
-  const [last] = createResource(lastVersions);
+
+  const body = () => {
+    const n = note();
+    return n ? copyBody(n) : "";
+  };
   const versions = createMemo(() => {
     const n = note();
-    return n && hasVersions(n.folder) ? lastFirst(versionsOf(body()), last()?.[n.path]) : [];
+    return n && hasVersions(n.folder, faces()) ? lastFirst(versionsOf(body()), last()[n.path]) : [];
   });
-  const [vi, setVi] = createSignal(0);
   const version = () => versions()[vi() % Math.max(1, versions().length)];
   const text = () => version()?.text ?? body();
   const state = createBlanks(text);
   const fields = state.list;
+  const blankOf = (name: string) => fields().find((x) => x.name === name);
   const value = (name: string) => {
-    const b = fields().find((x) => x.name === name);
+    const b = blankOf(name);
     return b ? state.value(b) : "";
+  };
+  const kind = (name: string): BlankKind => {
+    const b = blankOf(name);
+    return b ? state.kind(b) : "unfilled";
   };
   const filled = state.out;
   const inbox = () => note()?.folder === "inbox";
   let side: HTMLElement | undefined;
+
+  const focusBlank = (name: string) => {
+    setActiveBlank(name);
+    const el = side?.querySelector<HTMLElement>(`[data-blank-input="${CSS.escape(name)}"]`);
+    el?.focus();
+    el?.scrollIntoView({ block: "nearest" });
+  };
 
   /** Alt ← and Alt →: the version before or after, its first blank in focus. */
   function step(back: boolean) {
@@ -55,15 +93,17 @@ export default function Sheet(p: {
     setVi((vi() + (back ? n - 1 : 1)) % n);
     setTimeout(() => side?.querySelector<HTMLElement>("input, textarea, .choices")?.focus());
   }
-  const [sugg, setSugg] = createSignal<AiSuggestion[] | "loading" | null>(null);
 
-  async function copy(markdown = false) {
+  async function copy(mode: "plain" | "markdown" | "raw" = "plain") {
     const n = note();
     if (!n) return;
-    const out = markdown ? `# ${n.title}\n\n${filled()}` : filled();
-    void state.keep();
+    const out = mode === "raw" ? text() : mode === "markdown" ? `# ${n.title}\n\n${filled()}` : filled();
+    if (mode !== "raw") void state.keep();
     if (version()) void keepVersion(n.path, version()!.name);
-    if (await copyFilled(n, out)) p.onClose();
+    if (await copyFilled(n, out)) {
+      p.onCopied?.();
+      p.onClose();
+    }
   }
 
   async function suggest() {
@@ -81,19 +121,22 @@ export default function Sheet(p: {
 
   const key = (e: KeyboardEvent) => {
     const n = note();
-    if (!n) return;
+    if (!n || p.disabled) return;
+    // In inline mode, let overlays (Destination, FacePicker) own keyboard events.
+    if (p.inline && document.querySelector(".scrim")) return;
     if (e.key === "Escape") {
       if (p.inline) return;
       p.onClose();
     } else if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight") && versions().length > 1) step(e.key === "ArrowLeft");
     else if (e.key === "Enter" && !(e.target instanceof HTMLTextAreaElement && !e.ctrlKey)) {
+      if (p.inline && typing(e) && !side?.contains(e.target as Node)) return;
       const s = sugg();
       if (inbox() && Array.isArray(s) && s[0]) p.onFile(n, s[0]);
       else if (inbox()) p.onMove(n);
-      else void copy();
+      else void copy("plain");
     } else if (typing(e) || e.ctrlKey || e.metaKey || e.altKey) return;
     else if (e.key === "e") p.onEdit(n.id);
-    else if (e.key === "c") void copy();
+    else if (e.key === "c") void copy("plain");
     else if (e.key === "m") p.onMove(n);
     else if (inbox() && e.key === "s") void suggest();
     else if (e.key === "d" || e.key === "Delete") p.onDelete(n);
@@ -142,17 +185,35 @@ export default function Sheet(p: {
               </Show>
               <div class="lsheet-text">
                 <For each={shown()}>
-                  {(x) =>
-                    x.blank ? (
-                      <span class="blank-chip" classList={{ filled: !!value(x.text) }}>
-                        {value(x.text) || x.text}
-                      </span>
-                    ) : (
-                      x.text
-                    )
-                  }
+                  {(x) => {
+                    if (!x.blank) return x.text;
+                    const k = () => kind(x.text);
+                    const v = () => value(x.text);
+                    return (
+                      <button
+                        type="button"
+                        class={`blank-chip state-${k()}`}
+                        classList={{ filled: k() !== "unfilled", active: activeBlank() === x.text }}
+                        title={`Click to edit ${x.text}`}
+                        onClick={() => focusBlank(x.text)}
+                        onMouseEnter={() => setActiveBlank(x.text)}
+                      >
+                        {v() || x.text}
+                      </button>
+                    );
+                  }}
                 </For>
               </div>
+              <Show when={fields().length && !inbox()}>
+                <div class="fill-legend">
+                  <span>Click any chip to focus its field.</span>
+                  <span class="blank-legend-dots">
+                    <span><i class="bdot empty" /> empty</span>
+                    <span><i class="bdot auto" /> auto / default</span>
+                    <span><i class="bdot typed" /> typed</span>
+                  </span>
+                </div>
+              </Show>
             </div>
             <aside class="lsheet-side" ref={side}>
               <Show
@@ -196,16 +257,23 @@ export default function Sheet(p: {
                 }
               >
                 <Show when={fields().length}>
-                  <div class="side-head">Fill in</div>
-                  <BlankFields state={state} side focusFirst={!p.inline} />
+                  <div class="side-head">Fill in ({fields().length})</div>
+                  <BlankFields state={state} side focusFirst={!p.inline} activeBlank={activeBlank()} onActiveBlank={setActiveBlank} />
                 </Show>
                 <div class="side-actions">
-                  <button type="button" class="btn primary wide big" onClick={() => copy()}>
+                  <button type="button" class="btn primary wide big" onClick={() => void copy("plain")}>
                     Copy <kbd>Enter</kbd>
                   </button>
-                  <button type="button" class="btn wide" onClick={() => copy(true)}>
-                    Copy as Markdown
-                  </button>
+                  <div class="side-actions-row">
+                    <button type="button" class="btn wide" onClick={() => void copy("markdown")}>
+                      As Markdown
+                    </button>
+                    <Show when={fields().length}>
+                      <button type="button" class="btn wide" onClick={() => void copy("raw")}>
+                        Raw template
+                      </button>
+                    </Show>
+                  </div>
                   <button type="button" class="btn wide" onClick={() => p.onEdit(n().id)}>
                     Edit <kbd>e</kbd>
                   </button>

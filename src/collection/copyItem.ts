@@ -8,12 +8,13 @@ import { say } from "../ui";
 import { stepDone } from "../firstSteps";
 import { noteUse } from "./lastUsed";
 import { hasVersions, versionsOf } from "./versions";
+import { faces } from "../library/Mark";
 
 /** The item's text, and whether it needs the sheet before copying: blanks to fill, or versions to choose. */
 export async function itemText(id: number): Promise<{ text: string; title: string; hasBlanks: boolean }> {
   const n = await (await api()).peekNote(id);
   const text = copyBody(n);
-  const versions = hasVersions(n.folder) && versionsOf(text).length > 1;
+  const versions = hasVersions(n.folder, faces()) && versionsOf(text).length > 1;
   return { text, title: n.title, hasBlanks: versions || blanks(text).length > 0 };
 }
 

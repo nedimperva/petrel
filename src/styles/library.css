@@ -538,15 +538,16 @@
   flex-direction: column;
   gap: 6px;
   min-width: 0;
-  height: 140px;
+  height: 158px;
   box-sizing: border-box;
-  padding: 14px 14px 12px;
+  padding: 14px 14px 10px;
   border-radius: var(--r-lg);
   background: var(--raised);
   border: 1px solid var(--line);
   box-shadow: var(--shadow-sm);
   text-align: left;
   overflow: hidden;
+  cursor: pointer;
   transition: border-color var(--d-fast) var(--ease), box-shadow var(--d-fast) var(--ease), transform var(--d-fast) var(--ease);
 }
 .scard.on {
@@ -611,47 +612,123 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+.scard-text.lines,
+.ccard-text.lines {
+  white-space: pre-line;
+}
 .scard-blanks {
   display: flex;
+  align-items: center;
   gap: 4px;
   flex-wrap: wrap;
-  max-height: 20px;
+  max-height: 22px;
   overflow: hidden;
 }
-.scard-blanks .blank-chip {
+.scard-blanks .blank-chip,
+.ccard-blanks .blank-chip {
   font-size: var(--t-xs);
+  line-height: 1.45;
+  padding: 0 6px;
+  background: transparent;
+  border: 1px dashed var(--line-strong);
+  color: var(--muted);
+  font-weight: 500;
 }
 .scard-foot {
   margin-top: auto;
   display: flex;
+  align-items: center;
   gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
   font-size: var(--t-xs);
   color: var(--muted);
   white-space: nowrap;
+  min-width: 0;
+}
+.scard-foot.page-foot {
+  border-top: 0;
+  padding-top: 2px;
+}
+.scard-used {
+  min-width: 0;
   overflow: hidden;
+  text-overflow: ellipsis;
 }
 .scard-foot b {
   color: var(--ink);
   font-weight: 600;
 }
+.scard-cta {
+  flex: none;
+  font-weight: 500;
+  color: var(--accent-ink);
+}
+.scard-cta.ok,
+.ccard-go.ok {
+  color: var(--ok);
+}
 .scard.code {
-  height: 96px;
+  height: 148px;
   gap: 8px;
 }
-.scard-code {
-  font: var(--t-sm) / 1.4 var(--font-mono);
-  padding: 6px 8px;
+.scard-code-wrap,
+.ccard-code-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   border-radius: var(--r-md);
   background: var(--sunk);
-  color: var(--ink);
-  white-space: nowrap;
+  border: 1px solid var(--line);
   overflow: hidden;
-  text-overflow: ellipsis;
+}
+.scard-code-wrap::after,
+.ccard-code-wrap::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 16px;
+  background: linear-gradient(transparent, var(--sunk));
+  pointer-events: none;
+}
+.card-lang {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  z-index: 1;
+  padding: 0 5px;
+  border-radius: var(--r-sm);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  font: 500 10px / 1.5 var(--font-ui);
+  color: var(--muted);
+}
+.scard-code {
+  font: 11.5px / 1.48 var(--font-mono);
+  padding: 7px 9px;
+  color: var(--ink);
+  white-space: pre;
+  overflow: hidden;
+  max-height: 4.6em;
 }
 .scard.page {
-  height: 152px;
-  padding: 14px 16px;
+  height: 164px;
+  padding: 14px 16px 12px;
   background: var(--paper);
+}
+.scard-page-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--t-xs);
+  color: var(--muted);
+}
+.scard-photos {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--muted);
 }
 .scard-date {
   font-size: var(--t-xs);
@@ -670,9 +747,200 @@
   -webkit-line-clamp: 3;
 }
 .scard-tasks {
-  margin-top: auto;
   font-size: var(--t-xs);
   color: var(--ok);
+}
+
+/* Shared structured card helpers: checklists, hover mini-buttons, shelf bands, hue copy flash. */
+.shelves-band-seg {
+  flex: none;
+}
+.shelf-band-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--t-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.shelf-band-rule {
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+.shelf-band-note {
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--faint);
+}
+.card-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  overflow: hidden;
+}
+.card-check-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font: var(--t-sm) / 1.45 var(--font-ui);
+  color: var(--ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.card-check-item > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.card-check-item.done {
+  color: var(--faint);
+  text-decoration: line-through;
+}
+.card-check-box {
+  flex: none;
+  font-size: 11px;
+  color: var(--muted);
+}
+.card-hover-acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity var(--d-fast) var(--ease);
+}
+.scard:hover .card-hover-acts,
+.scard.on .card-hover-acts,
+.ccard:hover .card-hover-acts,
+.ccard.on .card-hover-acts {
+  opacity: 1;
+}
+.card-mini-btn {
+  padding: 1px 6px;
+  border-radius: var(--r-sm);
+  background: var(--sunk);
+  color: var(--ink-2);
+  font: 500 11px / 1.5 var(--font-ui);
+  cursor: pointer;
+}
+.card-mini-btn:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.card-sub-tag {
+  flex: none;
+  padding: 0 6px;
+  border-radius: var(--r-sm);
+  background: var(--sunk);
+  color: var(--ink-2);
+  font: 500 var(--t-xs) / 1.55 var(--font-ui);
+}
+@keyframes card-copy-flash {
+  0% {
+    border-color: var(--hue, var(--accent));
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--hue, var(--accent)) 32%, transparent);
+  }
+  100% {
+    box-shadow: var(--shadow-sm);
+  }
+}
+.scard.flash,
+.ccard.flash {
+  animation: card-copy-flash 750ms var(--ease);
+}
+
+/* Multi-selection controls: quiet hover check circle + calm bottom action bar. */
+.sel-check {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1.5px solid var(--line-strong);
+  background: var(--raised);
+  color: var(--accent-fg);
+  font: 700 10px / 1 var(--font-ui);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--d-fast) var(--ease), background var(--d-fast) var(--ease), border-color var(--d-fast) var(--ease), transform var(--d-fast) var(--ease);
+}
+.sel-check.on {
+  opacity: 1;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.selecting .sel-check,
+.ccard:hover .sel-check,
+.ccard.on .sel-check,
+.ccard.picked .sel-check,
+.reader-row:hover .sel-check,
+.reader-row.picked .sel-check,
+.coll-split-row:hover .sel-check,
+.coll-split-row.picked .sel-check,
+.lib-row-selectable:hover .sel-check,
+.lib-row-selectable.picked .sel-check {
+  opacity: 1;
+}
+.card-check {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+}
+.ccard.picked {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent), var(--shadow-sm);
+}
+.selection-bar {
+  background: var(--accent-wash) !important;
+  border-top-color: color-mix(in srgb, var(--accent) 45%, var(--line)) !important;
+  gap: 8px !important;
+  height: 44px;
+}
+.sel-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--t-sm);
+  color: var(--accent-ink);
+  margin-right: 4px;
+}
+.sel-count b {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: var(--t-xs);
+}
+
+/* Inbox multi-select rows */
+.lib-row-selectable {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 10px;
+}
+.lib-row-selectable .sel-check {
+  margin-top: 2px;
+}
+.lib-row-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.lib-row.picked {
+  background: var(--accent-wash);
 }
 
 /* A collection of pages: the list beside the page, read. */
@@ -706,12 +974,16 @@
   margin: 0;
   font: 600 var(--t-lg) / 1.3 var(--font-ui);
 }
+.reader-view-seg {
+  flex: none;
+}
 .reader-list .lib-filter {
   flex: none;
   height: 34px;
   margin: 0 var(--s-3) var(--s-2);
 }
-.reader-chips {
+.reader-chips,
+.reader-subs {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -733,18 +1005,34 @@
 }
 .reader-row {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  align-items: flex-start;
+  gap: 8px;
   width: 100%;
+  box-sizing: border-box;
   padding: 9px 10px;
   border-radius: var(--r-md);
   text-align: left;
+  cursor: pointer;
+}
+.reader-row .sel-check {
+  margin-top: 2px;
+}
+.reader-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
 .reader-row:hover {
   background: var(--hover);
 }
 .reader-row.on {
   background: var(--accent-soft);
+}
+.reader-row.picked {
+  background: var(--accent-wash);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 .reader-row-top {
   display: flex;
@@ -811,81 +1099,8 @@
   padding: var(--s-3) var(--s-5);
   border-top: 1px solid var(--line);
 }
-.read {
-  font: var(--editor-size, 18px) / 1.75 var(--editor-font);
-  color: var(--ink);
-}
-.read p,
-.read ul,
-.read blockquote,
-.read pre {
-  margin: 0 0 var(--s-4);
-}
-.read h2,
-.read h3,
-.read h4 {
-  margin: var(--s-5) 0 var(--s-2);
-  font-weight: 600;
-  line-height: 1.3;
-}
-.read h2 {
-  font-size: 1.3em;
-}
-.read h3 {
-  font-size: 1.12em;
-}
-.read h4 {
-  font-size: 1em;
-}
-.read ul {
-  padding-left: 1.3em;
-}
-.read blockquote {
-  padding-left: var(--s-4);
-  border-left: 2px solid var(--line-strong);
-  color: var(--ink-2);
-  white-space: pre-line;
-}
-.read pre {
-  padding: var(--s-3) var(--s-4);
-  border-radius: var(--r-md);
-  background: var(--sunk);
-  font: 0.8em / 1.5 var(--font-mono);
-  overflow: auto;
-}
-.read code {
-  font: 0.86em var(--font-mono);
-  padding: 1px 4px;
-  border-radius: var(--r-sm);
-  background: var(--sunk);
-}
-.read-task {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  margin: 0 0 6px;
-}
-.read-task input {
-  margin-top: 0.45em;
-  width: 16px;
-  height: 16px;
-  accent-color: var(--accent);
-}
-.read-task.done span {
-  color: var(--muted);
-  text-decoration: line-through;
-}
-.read-link {
-  display: inline;
-  padding: 0;
-  font: inherit;
-  color: var(--accent);
-  text-decoration: underline;
-  text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent);
-  text-underline-offset: 3px;
-}
 
-/* ---- one collection, picked in the sidebar: its cards, big (src/library/Collection.tsx) ---------------------- */
+/* ---- one collection, picked in the sidebar: Cards grid or Split Sheet (src/library/Collection.tsx) ----------- */
 
 .collection {
   flex: 1;
@@ -907,7 +1122,7 @@
   align-items: center;
   flex-wrap: wrap;
   gap: var(--s-3);
-  padding: var(--s-5) var(--s-6) var(--s-4);
+  padding: var(--s-5) var(--s-6) var(--s-3);
 }
 .mark.tile.big {
   width: 34px;
@@ -922,12 +1137,41 @@
 .coll-name {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
   min-width: 0;
+}
+.coll-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .coll-name h1 {
   margin: 0;
   font: 600 22px / 1.2 var(--font-ui);
+}
+.coll-kind-pill {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  font: 500 var(--t-xs) / 1.5 var(--font-ui);
+  color: var(--muted);
+  cursor: pointer;
+}
+.coll-kind-pill:hover {
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+.coll-view-seg {
+  flex: none;
+}
+.coll-subs {
+  flex: none;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 var(--s-6) var(--s-3);
 }
 .coll-chips {
   display: flex;
@@ -953,7 +1197,7 @@
 /* Under .lib-split, whose filter is 34 px: as specific as that rule, and after it. */
 .coll-head .coll-filter {
   flex: none;
-  width: 220px;
+  width: 210px;
   height: 30px;
   margin: 0;
   gap: 8px;
@@ -967,15 +1211,15 @@
   padding: var(--s-1) var(--s-6) var(--s-6);
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
-  grid-auto-rows: 214px;
+  grid-auto-rows: 224px;
   align-content: start;
   gap: 16px;
 }
 .coll-grid.pages {
-  grid-auto-rows: 224px;
+  grid-auto-rows: 232px;
 }
 .coll-grid.code {
-  grid-auto-rows: 150px;
+  grid-auto-rows: 178px;
 }
 .ccard {
   position: relative;
@@ -991,6 +1235,7 @@
   box-shadow: var(--shadow-sm);
   text-align: left;
   overflow: hidden;
+  cursor: pointer;
   transition: border-color var(--d-fast) var(--ease), box-shadow var(--d-fast) var(--ease), transform var(--d-fast) var(--ease);
 }
 .ccard:hover {
@@ -1012,6 +1257,7 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
+  padding-right: 24px;
 }
 .ccard-title {
   flex: 1;
@@ -1037,7 +1283,7 @@
 }
 .ccard-text {
   font-size: var(--t-rd);
-  line-height: 1.6;
+  line-height: 1.55;
   color: var(--ink-2);
   display: -webkit-box;
   -webkit-line-clamp: 3;
@@ -1050,21 +1296,19 @@
 }
 .ccard-blanks {
   display: flex;
+  align-items: center;
   gap: 5px;
   flex-wrap: wrap;
-  max-height: 22px;
+  max-height: 24px;
   overflow: hidden;
 }
 .ccard-code {
   font: var(--t-sm) / 1.5 var(--font-mono);
   padding: 8px 10px;
-  border-radius: 8px;
-  background: var(--sunk);
   color: var(--ink);
   white-space: pre;
   overflow: hidden;
-  text-overflow: ellipsis;
-  max-height: 3em;
+  max-height: 4.8em;
 }
 .ccard-foot {
   margin-top: auto;
@@ -1093,21 +1337,27 @@
   color: var(--accent-ink);
   font-weight: 500;
 }
+.ccard-sel-hint {
+  font-size: var(--t-xs);
+  color: var(--accent-ink);
+  font-weight: 500;
+}
 .ccard.page {
-  padding: 20px 22px 0;
+  padding: 18px 20px 0;
   background: var(--paper);
 }
 .ccard-meta {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: var(--t-sm);
+  padding-right: 26px;
+  font-size: var(--t-xs);
   color: var(--muted);
 }
 .ccard.page .ccard-title {
   flex: none;
   white-space: normal;
-  font-size: 20px;
+  font-size: 19px;
   font-weight: 500;
   line-height: 1.25;
   display: -webkit-box;
@@ -1124,3 +1374,111 @@
 .ccard-tasks {
   color: var(--ok);
 }
+
+/* Split Sheet view for a To copy collection */
+.coll-split {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(250px, 320px) minmax(0, 1fr);
+  border-top: 1px solid var(--line);
+  background: var(--paper);
+}
+.coll-split-list {
+  min-height: 0;
+  overflow: auto;
+  padding: var(--s-2);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.coll-split-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 10px;
+  border-radius: var(--r-md);
+  cursor: pointer;
+}
+.coll-split-row .sel-check {
+  margin-top: 2px;
+}
+.coll-split-row:hover {
+  background: var(--hover);
+}
+.coll-split-row.on {
+  background: var(--accent-soft);
+}
+.coll-split-row.picked {
+  background: var(--accent-wash);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.coll-split-row-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.coll-split-row-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.coll-split-row-title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-rd);
+  font-weight: 500;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.coll-split-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--t-xs);
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.coll-split-pane {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+
+/* Quick Peek modal for a Page card (Space / Peek) */
+.peek-modal {
+  width: min(720px, calc(100vw - 64px));
+  max-height: min(680px, calc(100vh - 80px));
+  display: flex;
+  flex-direction: column;
+  border-radius: 18px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  animation: lift var(--d-slow) var(--ease);
+}
+.peek-modal-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--raised);
+}
+.peek-modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 26px 34px 34px;
+}
+
