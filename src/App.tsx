@@ -17,7 +17,7 @@ import Reading from "./note/Reading";
 import { learnKeys, USED_KEY } from "./learned";
 import { showSteps, startSteps, stepDone, STEPS_KEY } from "./firstSteps";
 import { createResource, createSignal, For, lazy, onCleanup, onMount, Show, Suspense } from "solid-js";
-import { api, errText, inTauri, type AiStatus, type Note, type NoteSummary, type ScanReport } from "./api";
+import { api, errText, inTauri, type AiStatus, type Conflict, type Note, type NoteSummary, type ScanReport } from "./api";
 import { plainText } from "./copy";
 import TitleBar from "./TitleBar";
 import Sidebar, { type Place } from "./Sidebar";
@@ -35,7 +35,7 @@ import { syncStatus, watchSync } from "./sync";
 import { keyLabel, matches, parseKeyMap, setCustomKeys, setSystemKeys } from "./keys";
 import Shortcuts from "./Shortcuts";
 import Destination, { type Target } from "./inbox/Destination";
-import { addDays, JOURNAL, today } from "./journal/days";
+import { addDays, JOURNAL, listName, today } from "./journal/days";
 import { typingSound } from "./joy/sound";
 import { loadFaces } from "./library/Mark";
 
@@ -47,6 +47,7 @@ const Versions = lazy(() => import("./versions/Versions"));
 const Week = lazy(() => import("./journal/Week"));
 const Tasks = lazy(() => import("./palette/Tasks"));
 const Trash = lazy(() => import("./palette/Trash"));
+const Settle = lazy(() => import("./library/Settle"));
 
 type View =
   | { kind: "library"; tab: string; review?: boolean }
@@ -88,6 +89,8 @@ export default function App() {
   const [bar, setBar] = createSignal<"all" | "notes" | "beside" | "about" | null>(null);
   /** "Ask about this note" from Ctrl J: the note, and the question if one was typed there. */
   const [asking, setAsking] = createSignal<{ id: number; title: string; ask?: string } | null>(null);
+  /** A question for all the notes, asked as Ctrl K opens (Ctrl J on an empty page). */
+  const [askAll, setAskAll] = createSignal("");
   const [beside, setBeside] = createSignal<number | null>(null);
   // The sidebar: shown unless hidden with Ctrl 0 (ui.sidebar); docked on a wide window, over the page on a narrow one.
   const [sideOn, setSideOn] = createSignal(true);
@@ -171,6 +174,8 @@ export default function App() {
   let lastGo = 0;
   const panels = { tasks: false, week: false, history: false, trash: false };
   const [trashOpen, setTrash] = createSignal(false);
+  /** A note changed in two places, being settled from its mark in Ctrl K. */
+  const [settling, setSettling] = createSignal<Conflict | null>(null);
   const openPanel = (which: keyof typeof panels, set: (on: boolean) => void) => {
     panels[which] = Date.now() - barClosedAt < 400;
     set(true);
@@ -656,6 +661,7 @@ export default function App() {
                 onNoteId={(id) => (seen(id), setNoteFolder(page?.note()?.folder ?? null))}
                 onBeside={(id) => void openBeside(id)}
                 onAsk={(about) => (setAsking(about), setBar("about"))}
+                onAskNotes={(q) => (setAskAll(q ?? ""), setBar("all"))}
                 besideOpen={beside() !== null}
                 notice={notice()}
                 ref={(h) => (page = h)}
@@ -684,7 +690,7 @@ export default function App() {
                 const n = () => s().notes.find((x) => x.id === id);
                 return (
                   <div class="switcher-row" role="option" aria-selected={k() === s().i} classList={{ on: k() === s().i }} onMouseDown={(e) => (e.preventDefault(), setSwitcher({ ...s(), i: k() }), switchDone())}>
-                    <span class="row-label">{n() ? (n()!.folder === "inbox" ? n()!.preview.split("\n")[0] : n()!.title) : "…"}</span>
+                    <span class="row-label">{n() ? (n()!.folder === "inbox" ? n()!.preview.split("\n")[0] : listName(n()!)) : "…"}</span>
                     <span class="row-sub">{n() ? folderName(n()!.folder) : ""}</span>
                   </div>
                 );
@@ -703,11 +709,13 @@ export default function App() {
           recent={others()}
           aiReady={ai().ready}
           about={bar() === "about" ? (asking() ?? undefined) : undefined}
-          ask={bar() === "about" ? asking()?.ask : undefined}
+          ask={bar() === "about" ? asking()?.ask : bar() === "all" ? askAll() || undefined : undefined}
           onOpen={bar() === "beside" ? (id) => void openBeside(id) : openNote}
           onAiSetup={() => setSettings("ai")}
+          onSettle={setSettling}
           onClose={() => {
             barClosedAt = Date.now();
+            setAskAll("");
             setBar(null);
             page?.focus();
           }}
@@ -734,6 +742,20 @@ export default function App() {
               if (current()?.id === id) void page?.refresh();
             }}
           />
+        </Show>
+        <Show when={settling()}>
+          {(c) => (
+            <Settle
+              conflict={c()}
+              onClose={() => (setSettling(null), page?.focus())}
+              onDone={() => {
+                const id = c().original;
+                setSettling(null);
+                setRev(rev() + 1);
+                if (current()?.id === id) void page?.refresh();
+              }}
+            />
+          )}
         </Show>
         <Show when={trashOpen()}>
           <Trash onClose={() => closePanel("trash", setTrash)} onOpen={(id) => void openNote(id)} onChanged={() => setRev(rev() + 1)} />

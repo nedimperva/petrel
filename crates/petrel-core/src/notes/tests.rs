@@ -72,6 +72,16 @@ fn a_title_that_differs_only_in_capitals_gets_a_number() {
 }
 
 #[test]
+fn questions_skip_conflict_copies() {
+    let dir = tmp();
+    let mut s = store_in(&dir);
+    let a = s.create_note("", "Tern release", "the linux beta ships friday\n", &[]).unwrap();
+    s.create_note("", "Tern release (conflict 2026-11-11 2114)", "the linux beta ships monday\n", &[]).unwrap();
+    let found: Vec<i64> = s.notes_about("when does the linux beta ship", 5).unwrap().into_iter().map(|n| n.id).collect();
+    assert_eq!(found, vec![a.id]);
+}
+
+#[test]
 fn similar_notes_share_telling_words() {
     let dir = tmp();
     let mut s = store_in(&dir);

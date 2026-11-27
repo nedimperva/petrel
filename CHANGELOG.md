@@ -3,6 +3,19 @@
 Release notes for Petrel. The release workflow takes a version's notes from its section here; a tag without a
 section fails. Keep entries short and in the user's language: what changed for them, not which file moved.
 
+## Unreleased
+
+- A note changed in two places shows up once: its conflict copy no longer appears in Ctrl K, the capture's @ list,
+  Move or Open tasks. Ctrl K marks the note "to settle", with a link that settles it there.
+- Days read as days in lists: Today, Yesterday, Mon 23 Nov, instead of 2026-11-23.
+- The Ctrl K preview keeps headings, lists and tasks as the page shows them.
+- The picker's list says each collection once, counts the blanks of the version it would copy, and its search
+  hint fits. Filling blanks is quieter: fields as lines, the keys in one line.
+- History on a note without versions is a small note; Ctrl J on an empty page offers to ask your notes.
+- The capture window says where words go ("Goes to Inbox") and lists scratch pages by number once they have words.
+- The library's inbox shows captures you can read; Ctrl J has no number column; section labels are no longer in
+  capitals.
+
 ## 0.4.0
 
 - Fixed: Ctrl / no longer turns a line into a comment, empty time lines no longer pile up on today's page, related

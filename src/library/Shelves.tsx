@@ -370,30 +370,28 @@ export default function Shelves(p: {
 
       <div class="shelves" ref={shelvesEl}>
         <Show when={inbox().length && !q()}>
+          {/* The captures waiting, as short lines you can read (two at most, ending at a word), with how old each is. */}
           <section class="inbox-strip" aria-label="Inbox">
-            <button type="button" class="inbox-strip-name" onClick={() => p.onTab("inbox")}>
-              <span class="inbox-strip-icon" aria-hidden="true">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M4 13h4l2 3h4l2-3h4M4 13l2-8h12l2 8v6H4z" />
-                </svg>
-              </span>
-              <span class="inbox-strip-text">
+            <div class="inbox-strip-head">
+              <button type="button" class="inbox-strip-name" onClick={() => p.onTab("inbox")}>
                 <b>Inbox</b>
-                <span class="muted small">{inbox().length} to file</span>
-              </span>
-            </button>
+                <span class="muted">{inbox().length} to file</span>
+              </button>
+              <span class="grow" />
+              <button type="button" class="inbox-strip-review" onClick={p.onReview}>
+                <kbd>r</kbd> review them one at a time
+              </button>
+            </div>
             <span class="inbox-strip-items">
-              <For each={inbox().slice(0, 4)}>
+              <For each={inbox().slice(0, 3)}>
                 {(n) => (
-                  <button type="button" class="inbox-chip" onClick={() => p.onTab("inbox")}>
-                    {plain(n.preview).slice(0, 60) || n.title}
+                  <button type="button" class="inbox-line" onClick={() => p.onTab("inbox")}>
+                    <span class="inbox-line-text">{plain(n.preview) || n.title}</span>
+                    <span class="inbox-line-age">{ago(n.modifiedAt)}</span>
                   </button>
                 )}
               </For>
             </span>
-            <button type="button" class="btn primary small" onClick={p.onReview}>
-              Review <kbd>r</kbd>
-            </button>
           </section>
         </Show>
 

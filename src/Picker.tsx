@@ -49,6 +49,13 @@ export default function Picker() {
     return { all: all.filter((n) => n.folder !== "inbox"), counts };
   });
   const [last] = createResource(lastVersions);
+  /** The whole text of the things to copy, read once: the list counts the blanks of the version Enter copies,
+   * which the short preview (its `##` marks gone) cannot tell. */
+  const [bodies] = createResource(data, async (d) => {
+    const ids = d.all.filter((n) => hasVersions(n.folder, faces())).slice(0, 400).map((n) => n.id);
+    const whole = ids.length ? await (await api()).peekNotes(ids).catch(() => []) : [];
+    return new Map(whole.map((n) => [n.id, copyBody(n)]));
+  });
   // Words further down a long prompt or snippet: the engine searches the whole text, the list adds those.
   const [inText] = createResource(q, async (text) =>
     text.trim() ? new Set((await (await api()).searchNotes(text, 80).catch(() => [])).map((n) => n.id)) : new Set<number>(),
@@ -389,7 +396,7 @@ export default function Picker() {
             <input
               class="palette-input"
               ref={input}
-              placeholder={ctx()?.app ? `Copy into ${ctx()!.app}: find a prompt, snippet or page…` : "Find a prompt, snippet or page to copy…"}
+              placeholder="Find something to copy…"
               value={q()}
               onInput={(e) => (setQ(e.currentTarget.value), setI(0), setVi(0))}
               onKeyDown={key}
@@ -441,7 +448,11 @@ export default function Picker() {
             <For each={rows()}>
               {(n, k) => {
                 const page = () => isPage(n);
-                const bCount = () => (page() ? 0 : blankNames(n.preview).length);
+                // The blanks of the version Enter would copy (the one used last), as the library counts them, not
+                // every version's together.
+                const text = () => bodies()?.get(n.id) ?? n.preview;
+                const vs = () => (page() || !hasVersions(n.folder, faces()) ? [] : lastFirst(versionsOf(text()), last()?.[n.path]));
+                const bCount = () => (page() ? 0 : blankNames(vs().length > 1 ? vs()[0].text : text()).length);
                 return (
                   <>
                     <Show when={scope() === "all" && page() && (k() === 0 || !isPage(rows()[k() - 1]))}>
@@ -465,15 +476,15 @@ export default function Picker() {
                         <Mark folder={n.folder} size={12} />
                       </span>
                       <span class="row-two">
-                        <span class="picker-row-title">
-                          <span class="row-label">{renderHighlighted(n.folder === "inbox" ? n.preview.split("\n")[0] : n.title)}</span>
-                          <Show when={bCount()}>
-                            <span class="picker-pill">{bCount()} {bCount() === 1 ? "blank" : "blanks"}</span>
-                          </Show>
-                        </span>
+                        <span class="row-label">{renderHighlighted(n.folder === "inbox" ? n.preview.split("\n")[0] : n.title)}</span>
                         <Show
                           when={used()[n.path]}
-                          fallback={<span class="row-used">{page() ? `${folderName(n.folder)} · ${ago(n.modifiedAt)}` : folderName(n.folder)}</span>}
+                          fallback={
+                            <span class="row-used">
+                              {page() ? `${folderName(n.folder)} · ${ago(n.modifiedAt)}` : folderName(n.folder)}
+                              {vs().length > 1 ? ` · ${vs().length} versions` : ""}
+                            </span>
+                          }
                         >
                           {(u) => (
                             <span class="row-used">
@@ -482,13 +493,21 @@ export default function Picker() {
                           )}
                         </Show>
                       </span>
-                      <Show when={here()[n.path]}>
+                      {/* One quiet word on the right: how often here, else the blanks to fill. The collection is said once,
+                          under the title. */}
+                      <Show
+                        when={here()[n.path]}
+                        fallback={
+                          <Show when={bCount()}>
+                            <span class="row-sub picker-blanks">
+                              {bCount()} {bCount() === 1 ? "blank" : "blanks"}
+                            </span>
+                          </Show>
+                        }
+                      >
                         <span class="row-here" title={`Copied ${here()[n.path]} times with ${ctx()?.app} in front`}>
                           {here()[n.path]}× here
                         </span>
-                      </Show>
-                      <Show when={!here()[n.path]}>
-                        <span class="row-sub">{folderName(topOf(n.folder))}</span>
                       </Show>
                     </button>
                   </>

@@ -213,6 +213,30 @@
   font: 400 var(--t-md) / 1.55 var(--font-write);
   white-space: pre-wrap;
 }
+.history-none {
+  width: min(320px, calc(100vw - 48px));
+  padding: var(--s-4) var(--s-5);
+  border-radius: var(--r-lg);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-lg);
+  font-family: var(--font-ui);
+}
+.history-none h3 {
+  margin: 0 0 var(--s-2);
+  font-size: var(--t-rd);
+  font-weight: 600;
+}
+.history-none p {
+  margin: 0 0 var(--s-3);
+  font-size: var(--t-md);
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+.history-none-keys {
+  font-size: var(--t-sm);
+  color: var(--muted);
+}
 .history {
   display: grid;
   grid-template-columns: 240px 1fr;
@@ -545,10 +569,8 @@ button.cap-top-text:hover {
 }
 .dest-group {
   padding: 10px 10px 4px;
-  font-size: var(--t-xs);
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-size: var(--t-sm);
+  font-weight: 400;
   color: var(--muted);
 }
 .dest .palette-row {
@@ -741,10 +763,8 @@ button.blank-chip:hover {
   overflow: auto;
 }
 .side-head {
-  font-size: var(--t-xs);
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-size: var(--t-sm);
+  font-weight: 400;
   color: var(--muted);
 }
 .side-field {

@@ -37,6 +37,7 @@ import FirstSteps from "./FirstSteps";
 import { createDay, DayHead, DayMargin } from "./day";
 import { usageLine } from "../ai/usage";
 import { addAsk, ASKS_KEY, parseAsks } from "../ai/asks";
+import { stepDone } from "../firstSteps";
 
 export interface NotePageHandle {
   note(): Note | null;
@@ -74,6 +75,8 @@ interface Props {
   onBeside?(id: number): void;
   /** Opens Ctrl K for questions about this note alone, asking `ask` at once when given. */
   onAsk?(about: { id: number; title: string; ask?: string }): void;
+  /** Ctrl K, asking all the notes (`q` asked at once when given): what Ctrl J offers on an empty page. */
+  onAskNotes?(q?: string): void;
   /** A note is open beside: the margin is taken. */
   besideOpen?: boolean;
   /** A line in the footer for a moment ("Updated from Drive"). */
@@ -105,8 +108,6 @@ const MENU_H = 400;
 /** Where the cursor and the scroll were in each note this session, so going back never jumps. */
 const places = new Map<number, { anchor: number; head: number; top: number }>();
 
-/** `Title (conflict 2026-11-11 2114)`: the other side of a clash, settled in the library, never offered as related. */
-const CONFLICT_COPY = / \(conflict \d{4}-\d{2}-\d{2}[^)]*\)$/;
 
 /** Characters after which a note counts as long (see `measureSoon`). */
 const LONG_NOTE = 20_000;
@@ -161,7 +162,7 @@ export default function NotePage(p: Props) {
     setLinks(l);
     // Notes already listed as linking here are not repeated as similar, nor are conflict copies.
     const shown = new Set([...l.linked, ...l.mentioned].map((b) => b.id));
-    setNear(near.filter((n) => !shown.has(n.id) && !CONFLICT_COPY.test(n.title)));
+    setNear(near.filter((n) => !shown.has(n.id)));
   };
   /** Notes that share telling words with this one, from the index: no AI, no key. Not the notes this one links to:
    * they are listed just above. */
@@ -307,6 +308,7 @@ export default function NotePage(p: Props) {
     const doc = v.state.doc;
     const text = task === "continue" || task === "summarize" ? doc.sliceString(0, to) : task === "title" ? doc.toString() : doc.sliceString(from, to);
     if (!text.trim()) return say("There is no text to work on yet");
+    stepDone("ai");
     last = { task, from, to, instruction, label };
     const mine = ++seq;
     await saver.flush();
@@ -398,7 +400,6 @@ export default function NotePage(p: Props) {
     if (!editor || previewOf(view().state)) return;
     const v = view();
     const sel = v.state.selection.main;
-    if (!v.state.doc.length) return say("Write something first");
     const r = range();
     if (r.from !== r.to) v.dispatch({ selection: { anchor: r.from, head: r.to } });
     const c = v.coordsAtPos(r.from !== r.to ? r.to : sel.head);
@@ -488,6 +489,19 @@ export default function NotePage(p: Props) {
     const has = m.to > m.from;
     const len = view().state.doc.length;
     const out: MenuItem[] = [];
+    // An empty page has nothing to rewrite or continue: asking your notes is what works, and the rest says it waits.
+    if (!len) {
+      const q = m.q.trim();
+      return [
+        {
+          label: q ? `Ask your notes: “${q}”` : "Ask your notes",
+          hint: "answered from all of them, in Ctrl K",
+          group: q ? undefined : "Ask",
+          icon: "explain",
+          go: () => p.onAskNotes?.(q || undefined),
+        },
+      ];
+    }
     if (has) {
       for (const [task, label] of [
         ["tidy", "Tidy"],
@@ -1014,20 +1028,17 @@ export default function NotePage(p: Props) {
                       <span class="ai-menu-label">{x.label}</span>
                       <span class="ai-menu-hint">{x.hint}</span>
                     </span>
-                    <Show
-                      when={i() === m().i}
-                      fallback={
-                        <Show when={!m().q && i() < 9}>
-                          <kbd class="ai-menu-num">{i() + 1}</kbd>
-                        </Show>
-                      }
-                    >
+                    {/* Only the row Enter runs shows its key; 1 to 9 still pick a row, as the foot says. */}
+                    <Show when={i() === m().i}>
                       <kbd class="ai-menu-enter">↵</kbd>
                     </Show>
                   </button>
                   </>
                 )}
               </For>
+              <Show when={!view().state.doc.length}>
+                <p class="ai-menu-empty">Tidy, shorten, continue and your prompts wait for some text.</p>
+              </Show>
             </div>
             <footer class="ai-menu-foot">
               <KeyHints hints={[["↑ ↓", "choose"], ["1–9", "pick"], ["Enter", "run"], ["Esc", "close"]]} />

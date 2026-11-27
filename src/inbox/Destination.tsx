@@ -4,7 +4,7 @@
 
 import { createResource, createSignal, For, onMount, Show } from "solid-js";
 import { api, type NoteSummary } from "../api";
-import { dayTitle, today } from "../journal/days";
+import { dayTitle, listName, today } from "../journal/days";
 import Mark from "../library/Mark";
 import { folderName, KeyHints } from "../ui";
 import { filedCounts } from "./file";
@@ -37,7 +37,7 @@ export function placeRows(text: string, folders: string[], notes: NoteSummary[],
   const fs = folders
     .filter((f) => f !== "journal" && (!q || f.toLowerCase().includes(q) || folderName(f).toLowerCase().includes(q)))
     .map((f): Row => ({ t: { kind: "folder", folder: f }, label: folderName(f), sub: "as a new note in this folder", folder: f }));
-  const ns = notes.map((n): Row => ({ t: { kind: "note", id: n.id, title: n.title }, label: n.title, sub: `add to the end · ${folderName(n.folder)}`, folder: n.folder }));
+  const ns = notes.map((n): Row => ({ t: { kind: "note", id: n.id, title: n.title }, label: listName(n), sub: `add to the end · ${folderName(n.folder)}`, folder: n.folder }));
   let out: Row[];
   if (!q) {
     const all = [day, ...fs, ...ns];

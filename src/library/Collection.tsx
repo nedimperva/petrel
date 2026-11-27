@@ -16,6 +16,7 @@ import { blankNames, codePreview, photoCount, previewTasks, subOf } from "./prev
 import { pruneSelection, rangeSelection, toggleSelection } from "./selection";
 import Sheet from "./Sheet";
 import { loadTaskCounts, tasksOf } from "./taskCounts";
+import { listName } from "../journal/days";
 
 type Order = "use" | "new" | "az" | "tasks";
 
@@ -440,7 +441,7 @@ export default function Collection(p: {
                       </button>
                       <div class="coll-split-row-body">
                         <div class="coll-split-row-top">
-                          <span class="coll-split-row-title">{n.title}</span>
+                          <span class="coll-split-row-title">{listName(n)}</span>
                           <Show when={p.versions[n.id]}>{(v) => <span class="scard-badge">{v()}v</span>}</Show>
                           <Show when={uses(n)}>
                             <span class="uses">{uses(n)}×</span>
@@ -551,7 +552,7 @@ export default function Collection(p: {
                           </Show>
                           <span>{words(n)} words</span>
                         </span>
-                        <span class="ccard-title serif">{n.title}</span>
+                        <span class="ccard-title serif">{listName(n)}</span>
                         <Show
                           when={tasks().length}
                           fallback={<CardText class={song() ? "ccard-text serif lines" : "ccard-text serif"} preserveLines={song()} text={n.preview} />}
@@ -594,7 +595,7 @@ export default function Collection(p: {
                       <Show when={subName()}>
                         <span class="card-sub-tag">{folderName(subName())}</span>
                       </Show>
-                      <span class="ccard-title">{n.title}</span>
+                      <span class="ccard-title">{listName(n)}</span>
                       <Show when={n.pinned}>
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" role="img" aria-label="Pinned" class="ccard-pin">
                           <path d="M12 17v5M8 3h8l-1 6 3 4H6l3-4z" />

@@ -11,6 +11,7 @@ import { plain, subOf } from "./preview";
 import ReadNote from "./ReadNote";
 import { pruneSelection, rangeSelection, toggleSelection } from "./selection";
 import { loadTaskCounts, tasksOf } from "./taskCounts";
+import { listName } from "../journal/days";
 
 type Order = "new" | "az" | "pinned" | "tasks";
 
@@ -410,7 +411,7 @@ export default function Reader(p: {
                     </button>
                     <div class="reader-row-main">
                       <span class="reader-row-top">
-                        <span class="reader-row-title">{n.title}</span>
+                        <span class="reader-row-title">{listName(n)}</span>
                         <Show when={n.pinned}>
                           <span class="muted small">pinned</span>
                         </Show>

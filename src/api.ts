@@ -1,6 +1,8 @@
 // What the UI may ask of the shell (src-tauri/src/commands.rs, notes.rs, ai.rs). In a browser (`npm run dev`)
 // a fake store in fake.ts stands in, so the screens can be worked on without the engine.
 
+import { withoutCopies } from "./notes/conflict";
+
 export interface UndoToken {
   token: string;
   count: number;
@@ -601,8 +603,21 @@ async function streamed<T>(live: AiLive | undefined, call: () => Promise<T>): Pr
 let cached: Promise<Api> | undefined;
 
 export function api(): Promise<Api> {
-  cached ??= inTauri ? tauriApi() : import("./fake").then((m) => m.fakeApi());
+  cached ??= (inTauri ? tauriApi() : import("./fake").then((m) => m.fakeApi())).then(hideCopies);
   return cached;
+}
+
+/** Every list of notes leaves out conflict copies: one is reached through its note (Ctrl K marks it "to settle")
+ * and the library's settle card, so it never shows up as a second note to find, file into or tick. */
+function hideCopies(a: Api): Api {
+  return {
+    ...a,
+    listNotes: (q) => a.listNotes(q).then(withoutCopies),
+    findNotes: (t, n) => a.findNotes(t, n).then(withoutCopies),
+    searchNotes: (t, n) => a.searchNotes(t, n).then(withoutCopies),
+    similarNotes: (id) => a.similarNotes(id).then(withoutCopies),
+    openTasks: () => a.openTasks().then(withoutCopies),
+  };
 }
 
 /** The message of a rejected call, without the `Error: ` the bridge adds. */

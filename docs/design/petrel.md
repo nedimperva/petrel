@@ -225,6 +225,35 @@ From the post-0.3.0 list (https://claude.ai/artifact/PJA2vRcgFnSSPGLYob8tVy), it
   5,000 notes in CI. Styles are split per window under `src/styles/`; `note/day.tsx` holds today's head and
   margin; `notes/` has days, pictures, looks, linking and undo. `packaging/aur/` builds `petrel-bin`.
 
+## Ten to make better (chosen 2026-11-27)
+
+From the board of ten (https://claude.ai/artifact/BuHpTWwQPmR31DSssJWMmL), all ten, each an existing screen made
+clearer; nothing new:
+
+1. **A conflict copy stays out of the way.** `api()` drops `Title (conflict …)` from every list of notes
+   (`notes/conflict.ts`), so Ctrl K, the capture's `@` list, Move, Open tasks and related notes show the note once;
+   `notes_about` skips copies too, so an answer never reads both. Ctrl K marks the note "to settle" and its preview
+   has a Settle it link that opens the settle card from anywhere.
+2. **Days read as days.** `listName` (`journal/days.ts`) names a day's page Today · Fri 27 Nov, Yesterday · …, or
+   Mon 23 Nov in Ctrl K, Ctrl Tab, Move, Open tasks and the library. The file name does not change.
+3. **The picker list.** "Find something to copy…"; the collection said once under the title; the blanks on the
+   right, counted from the version Enter copies (bodies read once, as the library does); versions on the second
+   line; code previews on the paper, not a black box.
+4. **Ctrl K preview keeps the note's shape.** `previewLines` (`notes/plain.ts`) keeps headings, items, tasks and
+   quotes a line each.
+5. **Empty states.** History with no versions is a small note, not an empty panel. Ctrl J on an empty page offers
+   Ask your notes (Ctrl K, asked at once) and says the rest waits for text; the first step for Claude is ticked
+   when something runs, not when Ctrl J is pressed.
+6. **Filling blanks, quieter.** Same split: the text in the writing font with blanks marked in it, fields as lines,
+   no legend or caps, the keys in one line at the foot (Ctrl Enter paste stays the main one).
+7. **The capture bar.** "Goes to Inbox" / "Adds to Note"; scratch pages are listed by number only once one has
+   words; the `@` list says "Add to the end of" once; "Saved" as a word.
+8. **The library's inbox.** Up to three captures as two-line passages in the writing font with their age; Review
+   is a quiet `r`.
+9. **Ctrl J without the number column.** Only the row Enter runs shows its key; 1–9 still pick.
+10. **Quiet labels.** Section labels in the sidebar, margin, menus, Move, the shortcuts, review and the picker are
+    small sentence-case words, not capitals. The song and reading labels keep theirs.
+
 ## Look
 
 Tern's colours: near-white paper `#fcfbf9`, warm greys, ink `#1f1e1b`, one blue accent `#2f4f9a`. Literata for

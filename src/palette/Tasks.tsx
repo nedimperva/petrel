@@ -6,7 +6,7 @@
 import { createMemo, createSignal, For, onMount, Show } from "solid-js";
 import { api, errText, type OpenTask } from "../api";
 import { folderName, KeyHints, say } from "../ui";
-import { dayTitle, dueGroup, dueOf, JOURNAL, today, type DueGroup } from "../journal/days";
+import { dayTitle, dueGroup, dueOf, JOURNAL, listName, today, type DueGroup } from "../journal/days";
 
 const GROUPS: Record<DueGroup, string> = { overdue: "Overdue", today: "Today", week: "This week", later: "Later" };
 
@@ -111,7 +111,7 @@ export default function Tasks(p: { onClose(): void; onOpen(id: number): void; on
                   }
                 >
                   <button class="task-note" onClick={() => (p.onClose(), p.onOpen(g.noteId!))}>
-                    <span>{g.folder === "inbox" ? "A capture" : g.title}</span>
+                    <span>{g.folder === "inbox" ? "A capture" : listName(g)}</span>
                     <span class="row-sub">{folderName(g.folder)}</span>
                   </button>
                 </Show>
@@ -124,7 +124,7 @@ export default function Tasks(p: { onClose(): void; onOpen(id: number): void; on
                       </span>
                       <Show when={g.noteId === null}>
                         <span class="row-sub">
-                          {dayTitle(due(r.t)!)} · {r.t.folder === "inbox" ? "a capture" : r.t.title}
+                          {dayTitle(due(r.t)!)} · {r.t.folder === "inbox" ? "a capture" : listName(r.t)}
                         </span>
                       </Show>
                     </div>

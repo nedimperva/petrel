@@ -3,7 +3,7 @@
 
 import { createMemo, createResource, createSignal, For, onCleanup, Show } from "solid-js";
 import { api, errText, type NoteVersion } from "../api";
-import { ago, say } from "../ui";
+import { ago, Kbd, say } from "../ui";
 import { counts, diff } from "./diff";
 
 export function reasonLabel(reason: string): string {
@@ -47,11 +47,23 @@ export default function Versions(p: { noteId: number; title: string; current: st
 
   return (
     <div class="scrim top" onMouseDown={(e) => e.target === e.currentTarget && p.onClose()}>
-      <div class="history panel" role="dialog" aria-label="History">
-        <div class="history-list">
-          <h3>History</h3>
-          <p class="muted small">{p.title}</p>
-          <Show when={list()?.length} fallback={<p class="muted pad">No versions yet. Petrel keeps one every few minutes of writing, and before every AI change.</p>}>
+      {/* Nothing kept yet: a small note says so, not a full-size panel with nothing in it and a Restore that cannot. */}
+      <Show
+        when={list() === undefined || list()!.length}
+        fallback={
+          <div class="history-none panel" role="dialog" aria-label="History">
+            <h3>No versions yet</h3>
+            <p>The first is kept after a few minutes of writing, and before any AI change.</p>
+            <span class="history-none-keys">
+              <Kbd keys="Esc" /> back
+            </span>
+          </div>
+        }
+      >
+        <div class="history panel" role="dialog" aria-label="History">
+          <div class="history-list">
+            <h3>History</h3>
+            <p class="muted small">{p.title}</p>
             <For each={list()}>
               {(v, i) => (
                 <button class="history-row" classList={{ on: i() === at() }} onClick={() => setAt(i())}>
@@ -60,28 +72,28 @@ export default function Versions(p: { noteId: number; title: string; current: st
                 </button>
               )}
             </For>
-          </Show>
-        </div>
-        <div class="history-body">
-          <div class="history-head">
-            <Show when={sel()}>
-              <span class="muted small">
-                {summary().del} words would come back, {summary().add} would go
-              </span>
-            </Show>
-            <span class="grow" />
-            <button class="btn" onClick={p.onClose}>
-              Close <kbd>Esc</kbd>
-            </button>
-            <button class="btn primary" disabled={!sel()} onClick={restore}>
-              Restore <kbd>Enter</kbd>
-            </button>
           </div>
-          <div class="diff">
-            <For each={parts()}>{(x) => <span class={x.kind}>{x.text}</span>}</For>
+          <div class="history-body">
+            <div class="history-head">
+              <Show when={sel()}>
+                <span class="muted small">
+                  {summary().del} words would come back, {summary().add} would go
+                </span>
+              </Show>
+              <span class="grow" />
+              <button class="btn" onClick={p.onClose}>
+                Close <kbd>Esc</kbd>
+              </button>
+              <button class="btn primary" disabled={!sel()} onClick={restore}>
+                Restore <kbd>Enter</kbd>
+              </button>
+            </div>
+            <div class="diff">
+              <For each={parts()}>{(x) => <span class={x.kind}>{x.text}</span>}</For>
+            </div>
           </div>
         </div>
-      </div>
+      </Show>
     </div>
   );
 }

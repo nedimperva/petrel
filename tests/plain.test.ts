@@ -15,3 +15,16 @@ test("marks are taken out of a preview line", () => {
   assert.equal(plainLine("a [link](https://x.example) here ![pic](a.png)"), "a link here ");
   assert.equal(plainLine("snake_case_name and 2*3*4"), "snake_case_name and 2*3*4");
 });
+
+test("a preview keeps the note's shape: headings, items and tasks each on a line", async () => {
+  const { previewLines } = await import("../src/notes/plain.ts");
+  const lines = previewLines("The Linux beta is out.\nNext is Windows.\n\n## Open questions\n\n- Do we ship the [[AUR]] package?\n  - [ ] Ask Amra\n- [x] Icon done\n\nA second paragraph.");
+  assert.deepEqual(lines, [
+    { kind: "text", text: "The Linux beta is out. Next is Windows.", depth: 0 },
+    { kind: "heading", text: "Open questions", depth: 0 },
+    { kind: "item", text: "Do we ship the AUR package?", depth: 0 },
+    { kind: "task", text: "Ask Amra", depth: 1 },
+    { kind: "done", text: "Icon done", depth: 0 },
+    { kind: "text", text: "A second paragraph.", depth: 0 },
+  ]);
+});

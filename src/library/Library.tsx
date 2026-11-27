@@ -23,6 +23,7 @@ import { pruneSelection, rangeSelection, toggleSelection } from "./selection";
 import Settle from "./Settle";
 import Sheet from "./Sheet";
 import Shelves from "./Shelves";
+import { listName } from "../journal/days";
 
 // The review is a mode of the inbox's cards: one at a time, in the library's place.
 const Review = lazy(() => import("../inbox/Review"));
@@ -624,7 +625,7 @@ export default function Library(p: {
                     </button>
                     <div class="lib-row-body">
                       <span class="lib-row-top">
-                        <span class="lib-row-title">{n.folder === "inbox" ? n.preview.split("\n")[0] || n.title : n.title}</span>
+                        <span class="lib-row-title">{n.folder === "inbox" ? n.preview.split("\n")[0] || n.title : listName(n)}</span>
                         <span class="lib-row-meta">{meta(n)}</span>
                       </span>
                       <span class="lib-row-text">{(n.folder === "inbox" ? plain(n.preview.split("\n").slice(1).join("\n")) : plain(n.preview)) || ago(n.modifiedAt)}</span>

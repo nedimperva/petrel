@@ -13,8 +13,8 @@
 // Ctrl D sends it to today's page and back to the inbox, as Ctrl D opens today's page in the main window. The line
 // at the top then shows the page's last entry, so you see where the words land.
 //
-// Scratch pages: Ctrl 1 to 5 open five pages that stay in this window (the phone number, the shop list), shown as
-// dots in the bar. They are files in `.scratch/` that sync but are never filed or found; the same Ctrl number
+// Scratch pages: Ctrl 1 to 5 open five pages that stay in this window (the phone number, the shop list), listed by
+// number in the bar once they have words. They are files in `.scratch/` that sync but are never filed or found; the same Ctrl number
 // again goes back to the capture. Ctrl Enter on one makes its text a capture and empties the page.
 //
 // The bar under the text holds only the place, the pages and Esc; `?` lists the window's keys.
@@ -147,7 +147,7 @@ export default function Capture() {
   let scratchEd: EditorHandle | undefined;
   /** 0 is the capture; 1 to 5 a scratch page. */
   const [page, setPage] = createSignal(0);
-  /** Which pages have words, for the dots. */
+  /** Which pages have words, for the numbers in the bar. */
   const [filled, setFilled] = createSignal<boolean[]>([false, false, false, false, false]);
   let scratchTimer: ReturnType<typeof setTimeout> | undefined;
   let scratchDirty = false;
@@ -243,7 +243,7 @@ export default function Capture() {
     const options: Completion[] = [
       ...days,
       ...fs.map((f) => ({ label: `@${f}`, detail: "collection", apply: pick({ kind: "folder", folder: f }, f) })),
-      ...ns.map((n) => ({ label: `@${n.title}`, detail: `add to the end · ${folderName(n.folder)}`, apply: pick({ kind: "note", id: n.id, title: n.title }, n.folder) })),
+      ...ns.map((n) => ({ label: `@${n.title}`, detail: folderName(n.folder), section: "Add to the end of", apply: pick({ kind: "note", id: n.id, title: n.title }, n.folder) })),
     ];
     if (w && !folders.some((f) => f.toLowerCase() === w) && !days.length && !ns.length) {
       // A new collection is a new folder: a typo must not make one, so it takes Enter twice.
@@ -586,7 +586,7 @@ export default function Capture() {
         <span class="cap-place" classList={{ away: page() > 0, on: !!(target() ?? implied()), implied: !target() && !!implied() }}>
           <button class="chip" classList={{ on: !!(target() ?? implied()) }} onClick={() => setChoosing(true)} title={`Choose a place (${keyLabel("capChoose")})`}>
             <Mark folder={targetFolder(target() ?? implied(), targetHome())} size={12} />
-            {target()?.kind === "note" ? "Add to " : ""}
+            {target()?.kind === "note" ? "Adds to " : "Goes to "}
             {targetLabel(target() ?? implied())}
           </button>
           <Show when={target()}>
@@ -615,23 +615,30 @@ export default function Capture() {
           </span>
         </Show>
         <span class="grow" data-tauri-drag-region />
-        <span class="cap-dots" role="tablist" aria-label="Scratch pages">
-          <For each={[1, 2, 3, 4, 5]}>
-            {(n) => (
-              <button
-                type="button"
-                role="tab"
-                class={`cap-dot hue-${PAGE_HUES[n - 1]}`}
-                classList={{ on: page() === n, filled: filled()[n - 1] }}
-                aria-selected={page() === n}
-                aria-label={`Scratch page ${n}`}
-                title={`Scratch page ${n} (Ctrl ${n})`}
-                onClick={() => void openPage(n)}
-              />
-            )}
-          </For>
-        </span>
-        <Show when={msg()} fallback={<Show when={saveLabel()}><span class={`save-dot ${save()}`} role="status" aria-label={saveLabel()} title={saveLabel()} /></Show>}>
+        {/* Only the scratch pages with words are listed, by the number that opens them: dots meant nothing until
+            you knew Ctrl 1 to 5. */}
+        <Show when={page() > 0 || filled().some(Boolean)}>
+          <span class="cap-scratch" role="tablist" aria-label="Scratch pages">
+            <span class="cap-scratch-word">Scratch</span>
+            <For each={[1, 2, 3, 4, 5].filter((n) => filled()[n - 1] || page() === n)}>
+              {(n) => (
+                <button
+                  type="button"
+                  role="tab"
+                  class={`cap-num hue-${PAGE_HUES[n - 1]}`}
+                  classList={{ on: page() === n }}
+                  aria-selected={page() === n}
+                  aria-label={`Scratch page ${n}`}
+                  title={`Scratch page ${n} (Ctrl ${n})${page() === n ? ", the same key goes back" : ""}`}
+                  onClick={() => void openPage(n)}
+                >
+                  {n}
+                </button>
+              )}
+            </For>
+          </span>
+        </Show>
+        <Show when={msg()} fallback={<Show when={saveLabel()}><span class={`cap-saved ${save()}`} role="status">{saveLabel()}</span></Show>}>
           <span class="bad">{msg()}</span>
         </Show>
         <button class="cap-esc" aria-label="Done" title="Done: save and close" onClick={() => void done()}>

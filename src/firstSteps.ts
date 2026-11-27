@@ -45,7 +45,8 @@ export function startSteps(stored: string | undefined, store: (key: string, valu
   setState(parseSteps(stored));
   const down = (e: KeyboardEvent) => {
     if (state().hidden) return;
-    for (const id of ["find", "today", "ai"] as const) if (matches(e, id)) stepDone(id);
+    // Asking Claude counts when something runs (NotePage's run), not when Ctrl J only opens the menu.
+    for (const id of ["find", "today"] as const) if (matches(e, id)) stepDone(id);
   };
   addEventListener("keydown", down, true);
   return () => removeEventListener("keydown", down, true);
