@@ -1,6 +1,8 @@
 // What the UI may ask of the shell (src-tauri/src/commands.rs, notes.rs, ai.rs). In a browser (`npm run dev`)
 // a fake store in fake.ts stands in, so the screens can be worked on without the engine.
 
+import { withoutCopies } from "./notes/conflict";
+
 export interface UndoToken {
   token: string;
   count: number;
@@ -312,10 +314,12 @@ export interface Api {
   closePicker(): Promise<void>;
   /** Hides the picker and presses Ctrl V (or Ctrl Shift V) in the app that was in front. */
   pasteIntoFront(shift: boolean): Promise<void>;
-  /** A warm window (capture, picker) is loaded and waiting; true means it was already asked for. */
-  windowReady(): Promise<boolean>;
-  /** Calls back when a waiting warm window is asked for. */
-  onOpenWindow(run: () => void): Promise<void>;
+  /** The warm Quick Bar is loaded and waiting; returns its pending mode ("capture" | "copy") if already asked for. */
+  windowReady(): Promise<string | null>;
+  /** Calls back when a waiting warm window is asked for, with its mode payload. */
+  onOpenWindow(run: (mode: string) => void): Promise<void>;
+  /** Calls back when the already-visible Quick Bar is asked to switch mode. */
+  onQuickBarMode?(run: (mode: string) => void): Promise<void>;
   showNoteInMain(id: number): Promise<void>;
   /** `html`: also as rich text, from the Markdown. */
   copyText(text: string, html: boolean): Promise<void>;
@@ -465,7 +469,11 @@ async function tauriApi(): Promise<Api> {
     windowReady: () => invoke("window_ready"),
     onOpenWindow: async (run) => {
       const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-      await getCurrentWebviewWindow().listen("petrel-open-window", () => run());
+      await getCurrentWebviewWindow().listen<string>("petrel-open-window", (e) => run(e.payload || "copy"));
+    },
+    onQuickBarMode: async (run) => {
+      const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+      await getCurrentWebviewWindow().listen<string>("petrel-quickbar-mode", (e) => run(e.payload || "copy"));
     },
     showNoteInMain: (id) => invoke("show_note_in_main", { id }),
     copyText: (text, html) => invoke("copy_text", { text, html }),
@@ -601,8 +609,21 @@ async function streamed<T>(live: AiLive | undefined, call: () => Promise<T>): Pr
 let cached: Promise<Api> | undefined;
 
 export function api(): Promise<Api> {
-  cached ??= inTauri ? tauriApi() : import("./fake").then((m) => m.fakeApi());
+  cached ??= (inTauri ? tauriApi() : import("./fake").then((m) => m.fakeApi())).then(hideCopies);
   return cached;
+}
+
+/** Every list of notes leaves out conflict copies: one is reached through its note (Ctrl K marks it "to settle")
+ * and the library's settle card, so it never shows up as a second note to find, file into or tick. */
+function hideCopies(a: Api): Api {
+  return {
+    ...a,
+    listNotes: (q) => a.listNotes(q).then(withoutCopies),
+    findNotes: (t, n) => a.findNotes(t, n).then(withoutCopies),
+    searchNotes: (t, n) => a.searchNotes(t, n).then(withoutCopies),
+    similarNotes: (id) => a.similarNotes(id).then(withoutCopies),
+    openTasks: () => a.openTasks().then(withoutCopies),
+  };
 }
 
 /** The message of a rejected call, without the `Error: ` the bridge adds. */

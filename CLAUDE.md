@@ -5,7 +5,13 @@ Markdown files in one folder; a Rust engine (`crates/petrel-core`) indexes them 
 (`src-tauri`) adds windows, tray, hotkeys and AI, and a SolidJS UI (`src`) draws it. The README covers setup and
 keys; `docs/design/petrel.md` is the design; this file covers state and decisions that aren't visible from the code.
 
-## Where things stand (2026-11-19)
+## Where things stand (2026-11-27)
+
+- **Ten to make better (owner picked all ten 2026-11-27, board https://claude.ai/artifact/BuHpTWwQPmR31DSssJWMmL),
+  branch `claude/project-thread-w42ypd`:** summary in `docs/design/petrel.md` › Ten to make better. Conflict copies
+  are dropped from every note list in `api()` (`notes/conflict.ts`); a copy is reached through Ctrl K's "to settle"
+  mark or the library's settle card. Day pages are named with `listName` in lists. Tried in a browser against the
+  fake store; not tried on Windows.
 
 - **The 17 November list (owner picked 2026-11-19, list https://claude.ai/artifact/PJA2vRcgFnSSPGLYob8tVy), branch
   `claude/project-thread-uvzutg`, one commit per batch:** items 1–11, 13–21, 24, 26–28, 35, 42–44, 46; summary in

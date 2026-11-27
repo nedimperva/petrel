@@ -150,19 +150,9 @@
   background: color-mix(in srgb, var(--hue, var(--accent)) 13%, transparent);
   color: var(--hue, var(--accent));
 }
-.picker-row-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-.picker-pill {
+.picker-blanks {
   flex: none;
-  font-size: 10.5px;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: var(--accent-wash);
-  color: var(--accent-ink);
+  white-space: nowrap;
 }
 .picker-peek {
   padding: var(--s-4);
@@ -212,17 +202,18 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+/* Code sits on the paper, a shade down, as it does on the page: not a black box in a light window. */
 .picker-peek-code {
-  border-radius: var(--r-lg);
-  background: #1f2421;
-  color: #e6efe9;
+  border-radius: var(--r-md);
+  background: var(--sunk);
+  color: var(--ink);
   padding: 12px 14px;
   overflow: auto;
 }
 .picker-peek-lang {
   margin-bottom: 6px;
   font: 500 var(--t-xs) / 1.2 var(--font-ui);
-  color: #98a29d;
+  color: var(--faint);
   text-transform: lowercase;
 }
 .picker-peek-code pre {
@@ -351,12 +342,17 @@
 .picker > .fill.fill-split,
 .fill.fill-split {
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
   gap: 0;
   padding: 0;
   height: 100%;
   min-height: 0;
   overflow: hidden;
+}
+.fill-split-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
 }
 .fill-main {
   flex: 1;
@@ -364,21 +360,21 @@
   display: flex;
   flex-direction: column;
   gap: var(--s-3);
-  padding: var(--s-4);
-  background: var(--sheet);
+  padding: var(--s-4) var(--s-5);
+  background: var(--sunk);
   overflow: auto;
 }
 .fill-split .fill-head {
+  display: flex;
   justify-content: flex-start;
-  align-items: center;
-  gap: var(--s-2);
-  font: 600 var(--t-rd) / 1.3 var(--font-ui);
-}
-.fill-back {
-  flex: none;
+  align-items: baseline;
+  gap: 6px;
+  font: 400 var(--t-sm) / 1.3 var(--font-ui);
+  color: var(--muted);
 }
 .fill-title {
-  font-weight: 600;
+  font-weight: 500;
+  color: var(--ink);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -387,31 +383,110 @@
 .fill-text {
   flex: 1;
   min-height: 0;
-  padding: var(--s-3) var(--s-4);
-  border-radius: var(--r-lg);
-  background: var(--raised);
-  border: 1px solid var(--line);
-  font: 400 14.5px / 1.7 var(--font-ui);
+  font: 400 15px / 1.75 var(--font-write);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   color: var(--ink);
   overflow: auto;
 }
 .fill-text.code {
-  background: #1f2421;
-  color: #e6efe9;
   font: 400 var(--t-sm) / 1.65 var(--font-mono);
 }
+/* A blank in the text: its value on a soft wash once filled, its name underlined while it waits. */
+.fill-blank {
+  display: inline;
+  padding: 0 3px;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  font: inherit;
+  color: var(--faint);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.fill-blank.state-auto,
+.fill-blank.state-typed {
+  color: var(--accent-ink);
+  background: var(--accent-wash);
+  text-decoration: none;
+}
+.fill-blank.active,
+.fill-blank:hover {
+  box-shadow: inset 0 -1.5px 0 var(--accent);
+}
 .fill-side {
-  width: clamp(220px, 42%, 280px);
+  width: clamp(200px, 42%, 280px);
   flex: none;
   display: flex;
   flex-direction: column;
-  gap: var(--s-3);
-  padding: var(--s-4);
-  border-left: 1px solid var(--line);
-  background: var(--raised);
+  gap: var(--s-4);
+  padding: var(--s-4) var(--s-5);
+  background: var(--paper);
   overflow: auto;
+}
+/* Fields are lines on the paper, not boxes. */
+.fill-side .side-field {
+  margin: 0;
+  padding: 0;
+  font-weight: 400;
+  color: var(--muted);
+  background: none;
+}
+.fill-side .side-field.active {
+  background: none;
+  color: var(--ink-2);
+}
+.fill-side input,
+.fill-side textarea {
+  width: 100%;
+  padding: 4px 0;
+  border: 0;
+  border-bottom: 1px solid var(--line-strong);
+  border-radius: 0;
+  background: transparent;
+  font: 400 var(--t-rd) / 1.5 var(--font-ui);
+  color: var(--ink);
+  box-shadow: none;
+  outline: none;
+  resize: vertical;
+}
+.fill-side input:focus,
+.fill-side textarea:focus {
+  border-bottom: 1.5px solid var(--accent);
+}
+.fill-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2) var(--s-4);
+  padding: 8px var(--s-4);
+  border-top: 1px solid var(--line);
+  background: var(--paper);
+  font: 400 var(--t-sm) / 1.3 var(--font-ui);
+  color: var(--ink-2);
+}
+.fill-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  font: inherit;
+  color: inherit;
+}
+button.fill-key {
+  cursor: pointer;
+}
+button.fill-key:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.fill-key.main {
+  color: var(--accent-ink);
+  font-weight: 500;
 }
 
 /* ---- scratch pages in the capture window ------------------------------------------------------------------- */
@@ -427,30 +502,39 @@
 .cap-page {
   color: var(--muted);
 }
-.cap-dots {
+.cap-scratch {
   display: inline-flex;
-  gap: 6px;
+  gap: 4px;
   align-items: center;
+  color: var(--muted);
 }
-.cap-dot {
-  width: 9px;
-  height: 9px;
-  padding: 0;
-  border: 1.5px solid var(--hue);
-  border-radius: 50%;
-  background: transparent;
-  opacity: 0.55;
+.cap-scratch-word {
+  margin-right: 2px;
+}
+.cap-num {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--raised);
+  color: var(--ink-2);
+  font: var(--t-xs) / 1 var(--font-ui);
   cursor: pointer;
 }
-.cap-dot.filled {
-  background: var(--hue);
+.cap-num.on {
+  border-color: var(--hue);
+  box-shadow: inset 0 -2px 0 var(--hue);
+  color: var(--ink);
 }
-.cap-dot.on {
-  opacity: 1;
-  box-shadow: 0 0 0 2px var(--paper), 0 0 0 3.5px var(--hue);
+.cap-num:hover {
+  color: var(--ink);
 }
-.cap-dot:hover {
-  opacity: 1;
+.cap-saved {
+  color: var(--faint);
+}
+.cap-saved.error {
+  color: var(--bad);
 }
 
 /* ---- the picker: a prompt run on the selection ------------------------------------------------------------- */
@@ -513,8 +597,92 @@
 /* The heading over the notes that match in the picker. */
 .picker-section {
   padding: 10px 10px 4px;
-  color: var(--faint);
-  font-size: var(--t-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  color: var(--muted);
+  font-size: var(--t-sm);
+}
+
+/* ---- unified Global Quick Bar (Copy + Capture in one frameless window) ------------------------------------ */
+
+.quickbar {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  box-sizing: border-box;
+  overflow: hidden;
+}
+.quickbar.leaving > * {
+  visibility: hidden;
+}
+.qb-top {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 8px var(--s-3);
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+}
+.qb-mode-seg {
+  flex: none;
+}
+.qb-search-wrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+.qb-search {
+  flex: 1;
+  min-width: 0;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 2px 4px !important;
+  font-size: var(--t-md) !important;
+}
+.qb-cap-bar {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+.qb-peek-inner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  height: 100%;
+}
+.qb-run {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  height: 100%;
+}
+.qb-capture {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+}
+.qb-capture.away {
+  display: none;
+}
+.qb-dest-strip {
+  flex: none;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px var(--s-3);
+  border-top: 1px solid var(--line);
+  background: var(--sunk);
+}
+:root[data-window="quickbar"] body {
+  background: transparent;
 }

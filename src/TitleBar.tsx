@@ -1,13 +1,13 @@
-// Petrel's own title bar, as in Tern: the system draws none on Windows. The sidebar's button and new note on the
-// left, what you are on in the middle, search and the window buttons on the right. The empty
-// parts drag the window and a double click maximizes. On Linux the window manager draws the frame, so the window
-// buttons are left out and the bar only carries Petrel's own controls.
+// Petrel's unified quiet top bar: one chrome strip with zero duplicate New/Settings buttons.
+// Left: sidebar toggle + interactive breadcrumb (clicking the folder pill opens inline Move).
+// Right: search trigger (Ctrl K), in-place Read toggle (Ctrl E), Inspector toggle (Ctrl .), and Windows frame buttons.
 
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
 import { inTauri } from "./api";
+import { folderName, Kbd } from "./ui";
+import { keyLabel } from "./keys";
 
 export const ownFrame = inTauri && !navigator.userAgent.includes("Linux");
-
 
 async function win() {
   const { getCurrentWindow } = await import("@tauri-apps/api/window");
@@ -16,32 +16,45 @@ async function win() {
 
 const Icon = {
   sidebar: (
-    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
       <rect x="3" y="4" width="18" height="16" rx="2" />
       <path d="M9 4v16" />
     </svg>
   ),
-  plus: (
-    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
-      <path d="M12 5v14M5 12h14" />
-    </svg>
-  ),
   search: (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
       <circle cx="11" cy="11" r="7" />
       <path d="m20 20-3.5-3.5" />
+    </svg>
+  ),
+  read: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M2 5.5A2.5 2.5 0 0 1 4.5 3H12v18H4.5A2.5 2.5 0 0 1 2 18.5v-13zM22 5.5A2.5 2.5 0 0 0 19.5 3H12v18h7.5a2.5 2.5 0 0 0 2.5-2.5v-13z" />
+    </svg>
+  ),
+  inspector: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M15 4v16" />
     </svg>
   ),
 };
 
 export default function TitleBar(p: {
-  /** The note's title while writing, or where you are in the library. */
   title: string;
+  /** Current note's folder, when editing a saved note (clickable for inline Move). */
+  folder?: string | null;
+  canMove?: boolean;
+  onMove?(anchor: { x: number; y: number }): void;
   sidebar: boolean;
   onSidebar(): void;
-  onSettings(): void;
-  onNew(): void;
   onSearch(): void;
+  /** Note-level inline toggles (Read mode & right Inspector). */
+  onNote?: boolean;
+  readMode?: boolean;
+  onToggleRead?(): void;
+  inspectorOpen?: boolean;
+  onToggleInspector?(): void;
 }) {
   const [max, setMax] = createSignal(false);
   onMount(async () => {
@@ -57,38 +70,74 @@ export default function TitleBar(p: {
 
   return (
     <header class="titlebar" data-tauri-drag-region="deep">
-      <div class="titlebar-side">
+      <div class="titlebar-left">
         <button
           type="button"
           class="icon-btn"
           classList={{ on: p.sidebar }}
           onClick={p.onSidebar}
-          title={p.sidebar ? "Hide the sidebar (Ctrl 0)" : "Show the sidebar (Ctrl 0)"}
-          aria-label={p.sidebar ? "Hide the sidebar" : "Show the sidebar"}
+          title={p.sidebar ? `Hide sidebar (${keyLabel("sidebar")})` : `Show sidebar (${keyLabel("sidebar")})`}
+          aria-label={p.sidebar ? "Hide sidebar" : "Show sidebar"}
           aria-pressed={p.sidebar}
         >
           {Icon.sidebar}
         </button>
-        <button type="button" class="icon-btn" onClick={p.onNew} title="New note (Ctrl N)" aria-label="New note">
-          {Icon.plus}
-        </button>
+        <div class="titlebar-crumb" data-tauri-drag-region>
+          <Show when={p.folder != null}>
+            <Show
+              when={p.canMove && p.onMove}
+              fallback={<span class="crumb-folder">{folderName(p.folder!)}</span>}
+            >
+              <button
+                type="button"
+                class="crumb-folder clickable"
+                title={`Move note (${keyLabel("move")})`}
+                onClick={(e) => {
+                  const r = e.currentTarget.getBoundingClientRect();
+                  p.onMove?.({ x: r.left, y: r.bottom + 6 });
+                }}
+              >
+                {folderName(p.folder!)} <span aria-hidden="true">▾</span>
+              </button>
+            </Show>
+            <span class="crumb-sep" aria-hidden="true">/</span>
+          </Show>
+          <span class="titlebar-title" data-tauri-drag-region>
+            {p.title}
+          </span>
+        </div>
       </div>
-      <div class="titlebar-mid" data-tauri-drag-region>
-        <span class="titlebar-title" data-tauri-drag-region>
-          {p.title}
-        </span>
-      </div>
-      <div class="titlebar-end">
-        <button type="button" class="icon-btn" onClick={p.onSearch} title="Find or ask (Ctrl K)" aria-label="Find or ask">
+
+      <div class="titlebar-right">
+        <button type="button" class="titlebar-search" onClick={p.onSearch} title={`Find, command, or ask (${keyLabel("find")})`}>
           {Icon.search}
+          <span class="titlebar-search-label">Find or ask</span>
+          <Kbd keys={keyLabel("find")} />
         </button>
-        <button type="button" class="icon-btn" onClick={p.onSettings} title="Settings (Ctrl ,)" aria-label="Settings">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M4 7h10M18 7h2M4 17h2M10 17h10" />
-            <circle cx="16" cy="7" r="2" />
-            <circle cx="8" cy="17" r="2" />
-          </svg>
-        </button>
+        <Show when={p.onNote}>
+          <button
+            type="button"
+            class="icon-btn"
+            classList={{ on: !!p.readMode }}
+            onClick={p.onToggleRead}
+            title={p.readMode ? `Back to editing (${keyLabel("read")})` : `Read view (${keyLabel("read")})`}
+            aria-label={p.readMode ? "Back to editing" : "Read view"}
+            aria-pressed={!!p.readMode}
+          >
+            {Icon.read}
+          </button>
+          <button
+            type="button"
+            class="icon-btn"
+            classList={{ on: !!p.inspectorOpen }}
+            onClick={p.onToggleInspector}
+            title={`Inspector: Outline, Links & History (${keyLabel("inspector")})`}
+            aria-label="Toggle Inspector"
+            aria-pressed={!!p.inspectorOpen}
+          >
+            {Icon.inspector}
+          </button>
+        </Show>
         <Show when={ownFrame}>
           <div class="window-buttons">
             <button type="button" onClick={() => button("min")} title="Minimize" aria-label="Minimize">

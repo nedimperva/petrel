@@ -11,8 +11,8 @@ use tauri::{Emitter, Manager};
 use crate::AppState;
 
 pub fn build(app: &tauri::App) -> Result<()> {
-    let new = MenuItem::with_id(app, "picker", "Quick picker…", true, None::<&str>)?;
-    let capture = MenuItem::with_id(app, "capture", "Capture…", true, None::<&str>)?;
+    let capture = MenuItem::with_id(app, "capture", "Quick Bar · Capture…", true, None::<&str>)?;
+    let new = MenuItem::with_id(app, "picker", "Quick Bar · Copy…", true, None::<&str>)?;
     let show = MenuItem::with_id(app, "show", "Show Petrel", true, None::<&str>)?;
     let pause = CheckMenuItem::with_id(app, "pause", "Pause hotkeys", true, false, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Petrel", true, None::<&str>)?;
@@ -90,8 +90,8 @@ fn close_windows(app: &tauri::AppHandle) {
         return app.exit(0);
     }
     for (label, w) in &windows {
-        // A warm window that is hidden has no text in it; the picker never has.
-        if label == "picker" || (label == "capture" && !w.is_visible().unwrap_or(false)) {
+        // A warm Quick Bar that is hidden has no unsaved text in it.
+        if label == "quickbar" && !w.is_visible().unwrap_or(false) {
             let _ = w.destroy();
             continue;
         }

@@ -74,12 +74,10 @@ fn wants_picker(args: &[String]) -> bool {
     args.iter().skip(1).any(|a| a == "--picker")
 }
 
-/// The capture window and the picker float, centred and on every workspace, on Hyprland (`hypr.rs`).
+/// The unified Quick Bar floats, centred and on every workspace, on Hyprland (`hypr.rs`).
 pub fn arrange(w: &tauri::WebviewWindow) {
-    match w.label() {
-        "capture" => hypr::arrange("Petrel capture", 640, 260),
-        "picker" => hypr::arrange("Petrel picker", 620, 440),
-        _ => {}
+    if w.label() == "quickbar" {
+        hypr::arrange("Petrel quick bar", 680, 440);
     }
 }
 
@@ -164,43 +162,54 @@ fn run_cli() -> Option<i32> {
     }
 }
 
-/// Opens the capture window, or focuses it if it is open. The window is made once and kept warm (`warm.rs`):
-/// later opens show a page that has already loaded. The title is what a Hyprland float rule matches on: on
-/// Wayland every Petrel window shares the app id.
+/// Opens the unified Quick Bar in capture mode, or switches/focuses it if already open.
 pub fn open_capture(app: &tauri::AppHandle) {
-    match warm::open(app, "capture") {
+    remember_context(app);
+    remember_picker_context(app);
+    match warm::open(app, "quickbar", "capture") {
         warm::Open::Focus(w) => {
             let _ = w.show();
             let _ = w.set_focus();
             arrange(&w);
         }
-        warm::Open::Started | warm::Open::Loading => remember_context(app),
-        warm::Open::Build => {
-            remember_context(app);
-            build_capture(app);
-        }
+        warm::Open::Started | warm::Open::Loading => {}
+        warm::Open::Build => build_quickbar(app),
     }
 }
 
-fn build_capture(app: &tauri::AppHandle) {
-    let built = WebviewWindowBuilder::new(app, "capture", WebviewUrl::App("index.html".into()))
-        .title("Petrel capture")
-        .inner_size(640.0, 260.0)
-        .min_inner_size(360.0, 160.0)
-        // No frame: the text on a panel, dragged by its empty space (data-tauri-drag-region in the UI).
+/// Opens the unified Quick Bar in copy mode, or switches/focuses it if already open.
+pub fn open_picker(app: &tauri::AppHandle) {
+    remember_picker_context(app);
+    remember_context(app);
+    match warm::open(app, "quickbar", "copy") {
+        warm::Open::Focus(w) => {
+            let _ = w.show();
+            let _ = w.set_focus();
+            arrange(&w);
+        }
+        warm::Open::Started | warm::Open::Loading => {}
+        warm::Open::Build => build_quickbar(app),
+    }
+}
+
+fn build_quickbar(app: &tauri::AppHandle) {
+    let built = WebviewWindowBuilder::new(app, "quickbar", WebviewUrl::App("index.html".into()))
+        .title("Petrel quick bar")
+        .inner_size(680.0, 440.0)
+        .min_inner_size(440.0, 260.0)
+        // No frame: dragged by its empty space (data-tauri-drag-region in the UI).
         .decorations(false)
         .center()
-        // A quick note over whatever you were doing; it hides itself when you're done.
         .always_on_top(true)
         .visible(false)
-        .initialization_script("window.__PETREL_CAPTURE__ = true;")
+        .initialization_script("window.__PETREL_QUICKBAR__ = true;")
         .build();
     if let Err(e) = built {
-        log::error!("cannot open the capture window: {e}");
+        log::error!("cannot open the quick bar: {e}");
     }
 }
 
-/// Makes the capture window and the picker, hidden, a little after start, so even the first hotkey is quick.
+/// Makes the single Quick Bar window hidden shortly after start, so the first hotkey is instant.
 /// Only with a tray: without one Petrel quits when its windows close, and nothing would be waiting.
 fn prewarm(app: &tauri::AppHandle) {
     let handle = app.clone();
@@ -208,11 +217,8 @@ fn prewarm(app: &tauri::AppHandle) {
         std::thread::sleep(std::time::Duration::from_secs(3));
         let h = handle.clone();
         let _ = handle.run_on_main_thread(move || {
-            if h.get_webview_window("capture").is_none() {
-                build_capture(&h);
-            }
-            if h.get_webview_window("picker").is_none() {
-                build_picker(&h);
+            if h.get_webview_window("quickbar").is_none() {
+                build_quickbar(&h);
             }
         });
     });
@@ -254,40 +260,6 @@ fn remember_picker_context(app: &tauri::AppHandle) {
     if let Ok(mut slot) = state.picker_context.lock() {
         *slot = Some(rx);
     };
-}
-
-/// Opens the quick picker, or focuses it: a small search over the collections that copies and closes. Kept
-/// warm like the capture window.
-pub fn open_picker(app: &tauri::AppHandle) {
-    match warm::open(app, "picker") {
-        warm::Open::Focus(w) => {
-            remember_picker_context(app);
-            let _ = w.show();
-            let _ = w.set_focus();
-            arrange(&w);
-        }
-        warm::Open::Started | warm::Open::Loading => remember_picker_context(app),
-        warm::Open::Build => {
-            remember_picker_context(app);
-            build_picker(app);
-        }
-    }
-}
-
-fn build_picker(app: &tauri::AppHandle) {
-    let built = WebviewWindowBuilder::new(app, "picker", WebviewUrl::App("index.html".into()))
-        .title("Petrel picker")
-        .inner_size(620.0, 440.0)
-        .min_inner_size(420.0, 240.0)
-        .always_on_top(true)
-        .decorations(false)
-        .center()
-        .visible(false)
-        .initialization_script("window.__PETREL_PICKER__ = true;")
-        .build();
-    if let Err(e) = built {
-        log::error!("cannot open the picker: {e}");
-    }
 }
 
 const SWEEP_EVERY: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);

@@ -35,8 +35,13 @@ import { hush } from "./quiet";
 import { takeJump } from "./jump";
 import FirstSteps from "./FirstSteps";
 import { createDay, DayHead, DayMargin } from "./day";
+import ReadNote from "../library/ReadNote";
+import { isSong, songLines } from "./songs";
+import Versions from "../versions/Versions";
+import { Match, Switch } from "solid-js";
 import { usageLine } from "../ai/usage";
 import { addAsk, ASKS_KEY, parseAsks } from "../ai/asks";
+import { stepDone } from "../firstSteps";
 
 export interface NotePageHandle {
   note(): Note | null;
@@ -74,8 +79,18 @@ interface Props {
   onBeside?(id: number): void;
   /** Opens Ctrl K for questions about this note alone, asking `ask` at once when given. */
   onAsk?(about: { id: number; title: string; ask?: string }): void;
+  /** Ctrl K, asking all the notes (`q` asked at once when given): what Ctrl J offers on an empty page. */
+  onAskNotes?(q?: string): void;
   /** A note is open beside: the margin is taken. */
   besideOpen?: boolean;
+  /** In-place book / song-chord reading view (Ctrl E) — replaces the full-screen overlay. */
+  readMode?: boolean;
+  onExitRead?(): void;
+  /** Unified right Inspector drawer: `"about"` (outline, links, related, calendar) or `"history"` (versions diff). */
+  inspector?: "about" | "history" | null;
+  onInspector?(tab: "about" | "history" | null): void;
+  /** When false (e.g. arrowing in the workspace list), loads the note without yanking keyboard focus. */
+  autoFocus?: boolean;
   /** A line in the footer for a moment ("Updated from Drive"). */
   notice?: string | null;
   /** A day's page (`YYYY-MM-DD`) that may not have a file yet. */
@@ -105,8 +120,6 @@ const MENU_H = 400;
 /** Where the cursor and the scroll were in each note this session, so going back never jumps. */
 const places = new Map<number, { anchor: number; head: number; top: number }>();
 
-/** `Title (conflict 2026-11-11 2114)`: the other side of a clash, settled in the library, never offered as related. */
-const CONFLICT_COPY = / \(conflict \d{4}-\d{2}-\d{2}[^)]*\)$/;
 
 /** Characters after which a note counts as long (see `measureSoon`). */
 const LONG_NOTE = 20_000;
@@ -161,7 +174,7 @@ export default function NotePage(p: Props) {
     setLinks(l);
     // Notes already listed as linking here are not repeated as similar, nor are conflict copies.
     const shown = new Set([...l.linked, ...l.mentioned].map((b) => b.id));
-    setNear(near.filter((n) => !shown.has(n.id) && !CONFLICT_COPY.test(n.title)));
+    setNear(near.filter((n) => !shown.has(n.id)));
   };
   /** Notes that share telling words with this one, from the index: no AI, no key. Not the notes this one links to:
    * they are listed just above. */
@@ -218,7 +231,7 @@ export default function NotePage(p: Props) {
       if (p.day) {
         // Today's empty page starts with the time; it is not a file until something is written after it.
         if (p.day === today()) editor?.load(`${clock()} `, 6);
-        editor?.view.focus();
+        if (p.autoFocus !== false) editor?.view.focus();
       } else {
         // A collection with a template: the page starts from it, today and the time filled in. It is not a file
         // until something is written.
@@ -228,7 +241,7 @@ export default function NotePage(p: Props) {
           const text = fill(t, { today: todayText(), date: todayText(), time: clock() });
           editor.load(text, text.length);
         }
-        titleInput?.focus();
+        if (p.autoFocus !== false) titleInput?.focus();
       }
       return;
     }
@@ -239,7 +252,7 @@ export default function NotePage(p: Props) {
       setTitle(n.title);
       measure();
       void loadLinks(n.id);
-      editor?.view.focus();
+      if (p.autoFocus !== false) editor?.view.focus();
       // Opened from a search: start where the words are.
       const found = takeJump(n.id, editor?.text() ?? "");
       if (found !== null && editor) {
@@ -307,6 +320,7 @@ export default function NotePage(p: Props) {
     const doc = v.state.doc;
     const text = task === "continue" || task === "summarize" ? doc.sliceString(0, to) : task === "title" ? doc.toString() : doc.sliceString(from, to);
     if (!text.trim()) return say("There is no text to work on yet");
+    stepDone("ai");
     last = { task, from, to, instruction, label };
     const mine = ++seq;
     await saver.flush();
@@ -398,7 +412,6 @@ export default function NotePage(p: Props) {
     if (!editor || previewOf(view().state)) return;
     const v = view();
     const sel = v.state.selection.main;
-    if (!v.state.doc.length) return say("Write something first");
     const r = range();
     if (r.from !== r.to) v.dispatch({ selection: { anchor: r.from, head: r.to } });
     const c = v.coordsAtPos(r.from !== r.to ? r.to : sel.head);
@@ -488,6 +501,19 @@ export default function NotePage(p: Props) {
     const has = m.to > m.from;
     const len = view().state.doc.length;
     const out: MenuItem[] = [];
+    // An empty page has nothing to rewrite or continue: asking your notes is what works, and the rest says it waits.
+    if (!len) {
+      const q = m.q.trim();
+      return [
+        {
+          label: q ? `Ask your notes: “${q}”` : "Ask your notes",
+          hint: "answered from all of them, in Ctrl K",
+          group: q ? undefined : "Ask",
+          icon: "explain",
+          go: () => p.onAskNotes?.(q || undefined),
+        },
+      ];
+    }
     if (has) {
       for (const [task, label] of [
         ["tidy", "Tidy"],
@@ -796,10 +822,64 @@ export default function NotePage(p: Props) {
   const saveLabel = () =>
     ({ saved: "Saved", dirty: "Editing", saving: "Saving…", error: "Not saved" })[save()];
   const synced = () => /google drive|googledrive|my drive|onedrive|dropbox|syncthing/i.test(p.root);
+  const readBody = () => editor?.text() ?? note()?.body ?? "";
+  const readSong = () => isSong(readBody(), note()?.folder ?? p.folder);
+  const tickRead = (line: number) => {
+    const n = note();
+    if (!n) return;
+    const lines = readBody().split("\n");
+    void api()
+      .then((s) => s.tickTask(n.id, line, lines[line] ?? ""))
+      .then(() => load(n.id))
+      .catch((e) => say(errText(e), { error: true }));
+  };
+  const showInspector = () => !p.besideOpen && (p.inspector === "about" || p.inspector === "history");
+  const showDayMarginAuto = () => !!dayPage() && !p.besideOpen && p.inspector === undefined;
 
   return (
-    <div class="page" classList={{ "day-page": !!dayPage(), "beside-open": !!p.besideOpen }}>
+    <div class="page" classList={{ "day-page": !!dayPage(), "beside-open": !!p.besideOpen, "inspector-open": showInspector() }}>
+      <div class="page-split">
       <div class="page-main">
+        <Show
+          when={!p.readMode}
+          fallback={
+            <article class="reading-inline" classList={{ song: readSong() }} aria-label={`Reading ${title() || note()?.title || ""}`}>
+              <div class="reading-inline-head">
+                <span class="reading-meta">{dayPage() ? "Journal" : folderName(note()?.folder ?? p.folder)}</span>
+                <button type="button" class="link small" onClick={() => p.onExitRead?.()}>
+                  Back to editing <kbd>Esc</kbd>
+                </button>
+              </div>
+              <h1 class="reading-title">{dayPage() ? dayTitle(dayPage()!) : title() || note()?.title}</h1>
+              <Show when={readSong()} fallback={<ReadNote body={readBody()} folder={note()?.folder ?? p.folder} onLink={(inner) => void followLink(inner)} onTick={(line) => tickRead(line)} />}>
+                <div class="song">
+                  <For each={songLines(readBody())}>
+                    {(l) => (
+                      <Switch>
+                        <Match when={l.kind === "blank"}><div class="song-gap" /></Match>
+                        <Match when={l.kind === "label" && l}>{(x) => <div class="song-label">{(x() as { text: string }).text}</div>}</Match>
+                        <Match when={l.kind === "line" && l}>
+                          {(x) => (
+                            <div class="song-line">
+                              <For each={(x() as { parts: { chord: string; text: string }[] }).parts}>
+                                {(part) => (
+                                  <span class="song-part" classList={{ chorded: !!part.chord }}>
+                                    <span class="song-chord">{part.chord}</span>
+                                    <span class="song-words">{part.text || " "}</span>
+                                  </span>
+                                )}
+                              </For>
+                            </div>
+                          )}
+                        </Match>
+                      </Switch>
+                    )}
+                  </For>
+                </div>
+              </Show>
+            </article>
+          }
+        >
         <div class="sheet">
           <Show when={dayPage()}>
             {(d) => (
@@ -837,114 +917,170 @@ export default function NotePage(p: Props) {
             <FirstSteps />
           </Show>
         </div>
-        {/* On a narrow page the margin waits at the right edge as a rail of short lines, one per heading (the one you
-            are in is darker); hovering it opens the margin over the text. A wide page shows the margin as it is. */}
-        <div class="margin-dock">
-        <div class="margin-rail" aria-hidden="true">
-          <Show when={!dayPage() && heads().length} fallback={<For each={[0, 1, 2]}>{() => <span class="rail-dash" />}</For>}>
-            <For each={heads().slice(0, 24)}>
-              {(h, i) => <span class="rail-dash" classList={{ on: i() === here() }} style={{ width: `${Math.max(6, 18 - (h.level - minLevel()) * 5)}px` }} />}
+        </Show>
+        {/* Quiet right rail on narrow/closed inspector when note has headings */}
+        <Show when={!showInspector() && !showDayMarginAuto() && !p.readMode && heads().length > 0 && !p.besideOpen}>
+          <button
+            type="button"
+            class="margin-rail-btn"
+            title="Open Inspector (Ctrl .)"
+            aria-label="Open Inspector"
+            onClick={() => p.onInspector?.("about")}
+          >
+            <For each={heads().slice(0, 18)}>
+              {(h, i) => <span class="rail-dash" classList={{ on: i() === here() }} style={{ width: `${Math.max(6, 16 - (h.level - minLevel()) * 4)}px` }} />}
             </For>
-          </Show>
-        </div>
-        <aside class="note-margin" classList={{ quiet: typingNow() }} aria-label="About this note">
-          <Show when={dayPage()}>
-            {(d) => <DayMargin day={d()} state={day} onDay={(x) => p.onDay?.(x)} onOpen={p.onOpen} onInbox={() => p.onFolder("inbox")} />}
-          </Show>
-          {/* Only what the note has: a new page is only the page (the shortcuts sheet explains # and [[). */}
-          <Show when={!dayPage() && heads().length}>
-            <section aria-label="On this page">
-              <h4>On this page</h4>
-              <Show when={heads().length}>
-              <For each={heads()}>
-                {(h, i) => (
-                  <button
-                    class="outline-row"
-                    classList={{ on: i() === here() }}
-                    style={{ "padding-left": `${(h.level - minLevel()) * 12 + 10}px` }}
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => jump(h.from)}
-                  >
-                    {h.text}
-                  </button>
-                )}
-              </For>
+          </button>
+        </Show>
+      </div>
+
+      {/* Unified Collapsible Right Inspector Drawer (About: Outline + Links + Calendar | History: Versions diff) */}
+      <Show when={showInspector() || showDayMarginAuto()}>
+        <aside class="inspector-drawer" classList={{ quiet: typingNow() && p.inspector !== "history" }} aria-label="Inspector">
+          <header class="inspector-head">
+            <div class="seg inspector-seg" role="tablist" aria-label="Inspector">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={p.inspector !== "history"}
+                classList={{ on: p.inspector !== "history" }}
+                onClick={() => p.onInspector?.("about")}
+              >
+                About
+              </button>
+              <Show when={note()}>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={p.inspector === "history"}
+                  classList={{ on: p.inspector === "history" }}
+                  onClick={() => p.onInspector?.("history")}
+                >
+                  History
+                </button>
               </Show>
-            </section>
-          </Show>
-          <Show when={outLinks().length}>
-            <section aria-label="Links in this note">
-              <h4>Links in this note</h4>
-              <For each={outLinks()}>
-                {(l) => (
-                  <button class="link-row" onClick={() => void followLink(l)}>
-                    <span class="link-title">{l}</span>
-                  </button>
-                )}
-              </For>
-            </section>
-          </Show>
-          <Show when={hasLinks()}>
-            <section class="margin-links">
-            <Show when={links().linked.length}>
-              <h4>Linked from</h4>
-              <For each={links().linked}>
-                {(b) => (
-                  <button class="link-row" onClick={() => p.onOpen(b.id)}>
-                    <span class="link-title">{b.title}</span>
-                    <span class="link-line">{b.line.replace(/\[\[|\]\]/g, "")}</span>
-                  </button>
-                )}
-              </For>
-            </Show>
-            <Show when={links().mentioned.length}>
-              <h4>Mentioned in</h4>
-              <For each={links().mentioned}>
-                {(b) => (
-                  <button class="link-row" onClick={() => p.onOpen(b.id)}>
-                    <span class="link-title">{b.title}</span>
-                    <span class="link-line">{b.line}</span>
-                  </button>
-                )}
-              </For>
-            </Show>
-            <Show when={!related() && similar().length}>
-              <h4>Shares words with</h4>
-              <For each={similar()}>
-                {(n) => (
-                  <button class="link-row" onClick={() => p.onOpen(n.id)}>
-                    <span class="link-title">{n.folder === "inbox" ? n.preview.split("\n")[0] || n.title : n.title}</span>
-                    <span class="link-line">{folderName(n.folder)}</span>
-                  </button>
-                )}
-              </For>
-            </Show>
-            <Show when={related()}>
-              <h4>
-                <span class="spark">✦</span> Related
-              </h4>
-              <Show when={Array.isArray(related())} fallback={<p class="ai-thinking">Claude is looking through your notes…</p>}>
-                <Show when={(related() as AiRelated[]).length} fallback={<p class="muted small">Nothing closely related.</p>}>
-                  <For each={related() as AiRelated[]}>
-                    {(r) => (
-                      <button class="link-row" onClick={() => p.onOpen(r.id)}>
-                        <span class="link-title">{r.title}</span>
-                        <span class="link-line">{r.why}</span>
-                      </button>
-                    )}
-                  </For>
-                </Show>
-              </Show>
-            </Show>
-            </section>
-          </Show>
-          <Show when={note() && !related()}>
-            <button class="link small margin-related" onClick={() => p.aiReady ? findRelated() : p.onAiSetup()}>
-              <span class="spark">✦</span> Find related notes
+            </div>
+            <span class="grow" />
+            <button type="button" class="icon-btn" title="Close Inspector (Ctrl .)" aria-label="Close Inspector" onClick={() => p.onInspector?.(null)}>
+              ×
             </button>
-          </Show>
+          </header>
+
+          <div class="inspector-body">
+            <Show
+              when={p.inspector === "history" && note()}
+              fallback={
+                <div class="inspector-about">
+                  <Show when={dayPage()}>
+                    {(d) => <DayMargin day={d()} state={day} onDay={(x) => p.onDay?.(x)} onOpen={p.onOpen} onInbox={() => p.onFolder("inbox")} />}
+                  </Show>
+                  <Show when={!dayPage() && heads().length}>
+                    <section aria-label="On this page">
+                      <h4>On this page</h4>
+                      <For each={heads()}>
+                        {(h, i) => (
+                          <button
+                            class="outline-row"
+                            classList={{ on: i() === here() }}
+                            style={{ "padding-left": `${(h.level - minLevel()) * 12 + 10}px` }}
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => jump(h.from)}
+                          >
+                            {h.text}
+                          </button>
+                        )}
+                      </For>
+                    </section>
+                  </Show>
+                  <Show when={outLinks().length}>
+                    <section aria-label="Links in this note">
+                      <h4>Links in this note</h4>
+                      <For each={outLinks()}>
+                        {(l) => (
+                          <button class="link-row" onClick={() => void followLink(l)}>
+                            <span class="link-title">{l}</span>
+                          </button>
+                        )}
+                      </For>
+                    </section>
+                  </Show>
+                  <Show when={hasLinks()}>
+                    <section class="margin-links">
+                      <Show when={links().linked.length}>
+                        <h4>Linked from</h4>
+                        <For each={links().linked}>
+                          {(b) => (
+                            <button class="link-row" onClick={() => p.onOpen(b.id)}>
+                              <span class="link-title">{b.title}</span>
+                              <span class="link-line">{b.line.replace(/\[\[|\]\]/g, "")}</span>
+                            </button>
+                          )}
+                        </For>
+                      </Show>
+                      <Show when={links().mentioned.length}>
+                        <h4>Mentioned in</h4>
+                        <For each={links().mentioned}>
+                          {(b) => (
+                            <button class="link-row" onClick={() => p.onOpen(b.id)}>
+                              <span class="link-title">{b.title}</span>
+                              <span class="link-line">{b.line}</span>
+                            </button>
+                          )}
+                        </For>
+                      </Show>
+                      <Show when={!related() && similar().length}>
+                        <h4>Shares words with</h4>
+                        <For each={similar()}>
+                          {(n) => (
+                            <button class="link-row" onClick={() => p.onOpen(n.id)}>
+                              <span class="link-title">{n.folder === "inbox" ? n.preview.split("\n")[0] || n.title : n.title}</span>
+                              <span class="link-line">{folderName(n.folder)}</span>
+                            </button>
+                          )}
+                        </For>
+                      </Show>
+                      <Show when={related()}>
+                        <h4><span class="spark">✦</span> Related</h4>
+                        <Show when={Array.isArray(related())} fallback={<p class="ai-thinking">Claude is looking through your notes…</p>}>
+                          <Show when={(related() as AiRelated[]).length} fallback={<p class="muted small">Nothing closely related.</p>}>
+                            <For each={related() as AiRelated[]}>
+                              {(r) => (
+                                <button class="link-row" onClick={() => p.onOpen(r.id)}>
+                                  <span class="link-title">{r.title}</span>
+                                  <span class="link-line">{r.why}</span>
+                                </button>
+                              )}
+                            </For>
+                          </Show>
+                        </Show>
+                      </Show>
+                    </section>
+                  </Show>
+                  <Show when={!dayPage() && !heads().length && !outLinks().length && !hasLinks()}>
+                    <p class="muted small">Headings, links and backlinks appear here as you write.</p>
+                  </Show>
+                  <Show when={note() && !related()}>
+                    <button class="link small margin-related" onClick={() => p.aiReady ? findRelated() : p.onAiSetup()}>
+                      <span class="spark">✦</span> Find related notes
+                    </button>
+                  </Show>
+                </div>
+              }
+            >
+              {(n) => (
+                <Versions
+                  inline
+                  noteId={n().id}
+                  title={n().title}
+                  current={editor?.text() ?? n().body}
+                  onClose={() => p.onInspector?.(null)}
+                  onRestored={() => void load(n().id)}
+                />
+              )}
+            </Show>
+          </div>
         </aside>
-        </div>
+      </Show>
       </div>
       <footer class="page-foot">
         <span>{dayPage() ? "Journal" : folderName(note()?.folder ?? p.folder)}</span>
@@ -957,7 +1093,7 @@ export default function NotePage(p: Props) {
             dayPage() === today() && ["Ctrl Enter", "new entry"],
             [chips("find"), "find"],
             [chips("ai"), "AI"],
-            [chips("library"), "library"],
+            [chips("inspector"), "inspector"],
             [chips("shortcuts"), "all keys"],
           ]}
         />
@@ -1014,20 +1150,17 @@ export default function NotePage(p: Props) {
                       <span class="ai-menu-label">{x.label}</span>
                       <span class="ai-menu-hint">{x.hint}</span>
                     </span>
-                    <Show
-                      when={i() === m().i}
-                      fallback={
-                        <Show when={!m().q && i() < 9}>
-                          <kbd class="ai-menu-num">{i() + 1}</kbd>
-                        </Show>
-                      }
-                    >
+                    {/* Only the row Enter runs shows its key; 1 to 9 still pick a row, as the foot says. */}
+                    <Show when={i() === m().i}>
                       <kbd class="ai-menu-enter">↵</kbd>
                     </Show>
                   </button>
                   </>
                 )}
               </For>
+              <Show when={!view().state.doc.length}>
+                <p class="ai-menu-empty">Tidy, shorten, continue and your prompts wait for some text.</p>
+              </Show>
             </div>
             <footer class="ai-menu-foot">
               <KeyHints hints={[["↑ ↓", "choose"], ["1–9", "pick"], ["Enter", "run"], ["Esc", "close"]]} />

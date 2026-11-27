@@ -923,9 +923,17 @@ impl Store {
             "SELECT f.rowid FROM notes_fts f WHERE notes_fts MATCH ?1 ORDER BY bm25(notes_fts) LIMIT ?2",
         )?;
         let ids: Vec<i64> = stmt
-            .query_map(params![words.join(" OR "), limit as i64], |r| r.get(0))?
+            .query_map(params![words.join(" OR "), (limit + 4) as i64], |r| r.get(0))?
             .collect::<rusqlite::Result<_>>()?;
-        ids.into_iter().map(|id| self.peek_note(id)).collect()
+        // A conflict copy says what its note says; reading both would only repeat it in the answer.
+        let mut out = Vec::new();
+        for id in ids {
+            let n = self.peek_note(id)?;
+            if !is_conflict_copy(&n.title) && out.len() < limit {
+                out.push(n);
+            }
+        }
+        Ok(out)
     }
 
     /// The notes most about a question among `within` only (a filter in Ctrl K), best first. When the words

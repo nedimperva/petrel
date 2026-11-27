@@ -328,13 +328,18 @@
   overflow: auto;
   padding: 2px 6px 6px;
 }
+/* Plain small words, not capitals: the headings should be the quietest thing in the menu. */
 .ai-menu-group {
   padding: 10px 8px 4px;
-  font-size: var(--t-xs);
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-size: var(--t-sm);
   color: var(--muted);
+}
+.ai-menu-empty {
+  margin: 4px 8px 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font: var(--t-sm) / 1.4 var(--font-ui);
+  color: var(--faint);
 }
 .ai-menu .menu-item {
   position: relative;
@@ -400,14 +405,10 @@
 .ai-menu .menu-item.on .ai-menu-hint {
   opacity: 1;
 }
-.ai-menu-num,
 .ai-menu-enter {
   flex: none;
   min-width: 20px;
   text-align: center;
-}
-.ai-menu-num {
-  opacity: 0.55;
 }
 .ai-menu-foot {
   display: flex;
@@ -475,10 +476,8 @@
 }
 .shortcuts-grid h3 {
   margin: 0 0 var(--s-2);
-  font-size: var(--t-xs);
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-size: var(--t-sm);
+  font-weight: 400;
   color: var(--muted);
 }
 .shortcut-row {
@@ -565,6 +564,78 @@
   color: var(--ink);
   border-radius: 3px;
   padding: 0 2px;
+}
+/* The preview keeps the page's shape: a heading reads as one, items and tasks keep a line each. */
+.peek-text.peek-heading {
+  margin-top: var(--s-2);
+  font-weight: 600;
+  font-size: 18px;
+  color: var(--ink);
+}
+.peek-text.peek-item,
+.peek-text.peek-task,
+.peek-text.peek-done {
+  position: relative;
+  margin-bottom: var(--s-1);
+  margin-left: 18px;
+}
+.peek-text.peek-item::before {
+  content: "•";
+  position: absolute;
+  left: -16px;
+  color: var(--faint);
+}
+.peek-text.peek-task::before,
+.peek-text.peek-done::before {
+  content: "";
+  position: absolute;
+  left: -18px;
+  top: 0.55em;
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid var(--faint);
+  border-radius: 3px;
+}
+.peek-text.peek-done {
+  color: var(--faint);
+  text-decoration: line-through;
+}
+.peek-text.peek-done::before {
+  background: var(--faint);
+}
+.peek-text.peek-quote {
+  font-style: italic;
+  color: var(--muted);
+}
+/* A note changed in two places: said once, above its text, with the way to settle it. */
+.peek-clash {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  margin: 0 0 var(--s-3);
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--r-md);
+  background: var(--sunk);
+  font: var(--t-md) / 1.4 var(--font-ui);
+  color: var(--ink-2);
+}
+.peek-clash .link {
+  font: inherit;
+  font-weight: 500;
+}
+.row-sub.row-settle {
+  color: var(--ink-2);
+}
+.row-sub.row-settle::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--settle);
+  vertical-align: 1px;
 }
 /* Too narrow for two columns: the list alone, as before. */
 @media (max-width: 820px) {

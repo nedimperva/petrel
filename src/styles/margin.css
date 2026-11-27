@@ -276,10 +276,8 @@
 }
 .note-margin h4 {
   margin: 0 0 var(--s-2);
-  font-size: var(--t-xs);
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-size: var(--t-sm);
+  font-weight: 400;
   color: var(--muted);
 }
 .note-margin section {
@@ -314,4 +312,149 @@
 }
 .margin-related {
   align-self: flex-start;
+}
+
+/* ---- unified collapsible right Inspector drawer + in-place Read view -------------------------------------- */
+
+.page-split {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  position: relative;
+}
+.page-split > .page-main {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+}
+.margin-rail-btn {
+  position: absolute;
+  top: var(--s-6);
+  right: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  padding: 8px 6px;
+  border-radius: var(--r-md);
+  opacity: 0.65;
+  transition: opacity var(--d-fast) var(--ease), background var(--d-fast) var(--ease);
+}
+.margin-rail-btn:hover {
+  opacity: 1;
+  background: var(--hover);
+}
+.inspector-drawer {
+  width: clamp(250px, 28%, 320px);
+  flex: none;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--line);
+  background: var(--sunk);
+  transition: opacity var(--d-slow) var(--ease);
+}
+.inspector-drawer.quiet:not(:hover) {
+  opacity: 0.45;
+}
+.inspector-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.inspector-seg button {
+  padding: 3px 9px;
+}
+.inspector-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--s-4);
+}
+.inspector-about {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-5);
+}
+.inspector-about h4 {
+  margin: 0 0 var(--s-2);
+  font-size: var(--t-sm);
+  font-weight: 500;
+  color: var(--muted);
+}
+.inspector-about section {
+  display: flex;
+  flex-direction: column;
+}
+.inspector-about .link-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+}
+.inspector-about .day-month {
+  position: static;
+  width: auto;
+}
+.insp-history {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.insp-empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  font-size: var(--t-md);
+}
+.insp-ver-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 180px;
+  overflow: auto;
+}
+.insp-diff-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: var(--s-2);
+  border-top: 1px solid var(--line);
+}
+.insp-diff {
+  padding: var(--s-3);
+  border-radius: var(--r-md);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  font: 400 var(--t-rd) / 1.6 var(--font-write);
+  max-height: 360px;
+  overflow: auto;
+}
+
+/* In-place Read view (replaces full-screen Reading.tsx overlay) */
+.reading-inline {
+  max-width: 700px;
+  width: 100%;
+  margin: 0 auto;
+  padding: var(--s-6) var(--s-5) 72px;
+  font: calc(var(--editor-size) + 1px) / 1.75 var(--editor-font);
+  color: var(--ink);
+}
+.reading-inline.song {
+  max-width: 980px;
+}
+.reading-inline-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--s-2);
+}
+.reading-inline .reading-meta {
+  margin: 0;
+}
+.reading-inline .reading-title {
+  margin: 0 0 var(--s-5);
+  font: 600 32px / 1.2 var(--font-write);
 }

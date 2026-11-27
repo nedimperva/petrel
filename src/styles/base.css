@@ -271,44 +271,54 @@ kbd {
 .titlebar {
   flex: none;
   display: flex;
-  align-items: stretch;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
   height: var(--titlebar-h);
+  padding: 0 var(--s-2);
   background: var(--paper);
+  border-bottom: 1px solid var(--line);
   user-select: none;
 }
-.app.in-library .titlebar {
-  background: var(--sunk);
-}
-.titlebar-side,
-.titlebar-end {
-  width: 184px;
-  flex: none;
+.titlebar-left,
+.titlebar-right {
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding: 0 var(--s-2);
-}
-.titlebar-end {
-  justify-content: flex-end;
-  padding-right: 0;
-  gap: var(--s-2);
-}
-/* A narrow window: the sides take only what their buttons need, so the title keeps some room. */
-@media (max-width: 640px) {
-  .titlebar-side,
-  .titlebar-end {
-    width: auto;
-  }
-}
-.titlebar-mid {
-  flex: 1;
+  gap: 6px;
   min-width: 0;
+}
+.titlebar-left {
+  flex: 1;
+}
+.titlebar-right {
+  flex: none;
+}
+.titlebar-crumb {
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--t-sm);
+}
+.crumb-folder {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  border-radius: var(--r-sm);
+  color: var(--ink-2);
+  font-weight: 500;
+}
+.crumb-folder.clickable:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.crumb-sep {
+  color: var(--faint);
 }
 .titlebar-title {
-  max-width: 100%;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -316,9 +326,32 @@ kbd {
   color: var(--muted);
   transition: opacity var(--d-base) var(--ease);
 }
+.titlebar-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 8px 0 10px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  background: var(--raised);
+  color: var(--muted);
+  font-size: var(--t-sm);
+  transition: border-color var(--d-fast) var(--ease), color var(--d-fast) var(--ease);
+}
+.titlebar-search:hover {
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+@media (max-width: 680px) {
+  .titlebar-search-label {
+    display: none;
+  }
+}
 /* Writing: the bar keeps quiet until the pointer comes back to it. */
-.app:not(.in-library) .titlebar:not(:hover) .icon-btn {
-  opacity: 0.55;
+.titlebar:not(:hover) .icon-btn:not(.on),
+.titlebar:not(:hover) .titlebar-search {
+  opacity: 0.72;
 }
 .tabs {
   display: flex;

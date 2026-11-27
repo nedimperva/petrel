@@ -2,6 +2,95 @@
 
 /* ---- overlays: palette, dialogs, history ------------------------------------------------------------------------ */
 
+.scrim-clear {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  background: transparent;
+}
+.palette.dest-popover {
+  position: fixed;
+  width: min(400px, calc(100vw - 24px));
+  max-height: min(420px, 60vh);
+  border-radius: var(--r-lg);
+}
+
+/* ---- inline editable blanks (Quick Bar + Direct Copy Card) ------------------------------------------------ */
+
+.inline-tpl-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.inline-tpl {
+  font: 400 15.5px / 1.85 var(--font-write);
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.inline-tpl.code {
+  padding: 12px 14px;
+  border-radius: var(--r-md);
+  background: var(--sunk);
+  border: 1px solid var(--line);
+  font: 400 var(--t-sm) / 1.75 var(--font-mono);
+}
+.inline-blank {
+  display: inline-block;
+  vertical-align: baseline;
+  min-width: 5ch;
+  max-width: 100%;
+  padding: 0 6px !important;
+  margin: 0 2px;
+  border: 1px solid transparent !important;
+  border-bottom: 1.5px solid var(--accent) !important;
+  border-radius: var(--r-sm) !important;
+  background: var(--accent-soft) !important;
+  color: var(--accent-ink) !important;
+  font: 500 0.94em / 1.45 var(--font-ui) !important;
+  box-shadow: none !important;
+}
+.inline-tpl.code .inline-blank {
+  font-family: var(--font-mono) !important;
+}
+.inline-blank.state-unfilled {
+  background: var(--sunk) !important;
+  border-bottom-style: dashed !important;
+  color: var(--ink) !important;
+}
+.inline-blank:focus {
+  background: var(--raised) !important;
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 2px var(--accent-soft) !important;
+}
+.inline-choice-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin: 0 3px;
+  vertical-align: baseline;
+}
+.inline-choice {
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--raised);
+  color: var(--ink-2);
+  font: 500 var(--t-xs) / 1.5 var(--font-ui);
+}
+.inline-choice.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+.inline-past {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding-top: 2px;
+}
+
 .scrim {
   position: fixed;
   inset: 0;
@@ -212,6 +301,30 @@
   background: var(--sunk);
   font: 400 var(--t-md) / 1.55 var(--font-write);
   white-space: pre-wrap;
+}
+.history-none {
+  width: min(320px, calc(100vw - 48px));
+  padding: var(--s-4) var(--s-5);
+  border-radius: var(--r-lg);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-lg);
+  font-family: var(--font-ui);
+}
+.history-none h3 {
+  margin: 0 0 var(--s-2);
+  font-size: var(--t-rd);
+  font-weight: 600;
+}
+.history-none p {
+  margin: 0 0 var(--s-3);
+  font-size: var(--t-md);
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+.history-none-keys {
+  font-size: var(--t-sm);
+  color: var(--muted);
 }
 .history {
   display: grid;
@@ -545,10 +658,8 @@ button.cap-top-text:hover {
 }
 .dest-group {
   padding: 10px 10px 4px;
-  font-size: var(--t-xs);
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-size: var(--t-sm);
+  font-weight: 400;
   color: var(--muted);
 }
 .dest .palette-row {
@@ -741,10 +852,8 @@ button.blank-chip:hover {
   overflow: auto;
 }
 .side-head {
-  font-size: var(--t-xs);
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-size: var(--t-sm);
+  font-weight: 400;
   color: var(--muted);
 }
 .side-field {

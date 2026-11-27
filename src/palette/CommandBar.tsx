@@ -4,9 +4,11 @@
 // `when:week`, `has:link`, `has:picture`, `has:task` (palette/filters.ts). After an answer, Tab asks again: the
 // follow-up goes with the earlier answers and the same notes, and Ctrl Enter keeps the whole exchange as a note.
 
-import { plainText } from "../notes/plain";
+import { previewLines, type PreviewLine } from "../notes/plain";
+import { withoutCopies } from "../notes/conflict";
+import { listName } from "../journal/days";
 import { createEffect, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
-import { aiLive, api, errText, type AiAnswer, type AiSource, type NoteSummary } from "../api";
+import { aiLive, api, errText, type AiAnswer, type AiSource, type Conflict, type NoteSummary } from "../api";
 import { answerHtml } from "../copy";
 import { ago, folderName, Kbd, say } from "../ui";
 import { acceptOffer, inFolder, keep, noFilters, parseFilters } from "./filters";
@@ -46,6 +48,8 @@ export default function CommandBar(p: {
   ask?: string;
   onOpen(id: number): void;
   onAiSetup(): void;
+  /** Settle a note changed in two places, from its "to settle" mark. */
+  onSettle?(c: Conflict): void;
   onClose(): void;
 }) {
   let input!: HTMLInputElement;
@@ -81,7 +85,7 @@ export default function CommandBar(p: {
       if (!text.trim()) {
         const ids = (p.recent ?? []).slice(0, 8);
         const ns = (await Promise.all(ids.map((id) => s.peekNote(id).catch(() => null)))).filter((n) => !!n);
-        const recent: NoteSummary[] = ns.map((n) => ({ id: n.id, path: n.path, folder: n.folder, title: n.title, preview: n.body.slice(0, 200), tags: n.tags, pinned: n.pinned, modifiedAt: n.modifiedAt }));
+        const recent: NoteSummary[] = withoutCopies(ns).map((n) => ({ id: n.id, path: n.path, folder: n.folder, title: n.title, preview: n.body.slice(0, 200), tags: n.tags, pinned: n.pinned, modifiedAt: n.modifiedAt }));
         // Ctrl K opens on notes: the ones opened lately, then the last edited, so it is never only commands.
         const want = p.notesOnly ? 12 : 6;
         if (recent.length >= want) return recent.slice(0, want);
@@ -176,20 +180,28 @@ export default function CommandBar(p: {
     const re = new RegExp(`(${ws.map(escapeRe).join("|")})`, "giu");
     return text.split(re).filter(Boolean).map((t) => ({ t, on: ws.some((w) => w.toLowerCase() === t.toLowerCase()) }));
   };
-  // The preview starts at the passage with the words, when they are further down than it shows.
-  const paragraphs = () => {
+  // The preview starts at the passage with the words, when they are further down than it shows. Headings, items and
+  // tasks keep a line each, so the preview reads like the page.
+  const lines = (): (PreviewLine | "…")[] => {
     const body = peek()?.body ?? "";
     const lower = body.toLowerCase();
     const hits = marked().map((w) => lower.indexOf(w.toLowerCase())).filter((x) => x >= 0);
     const first = hits.length ? Math.min(...hits) : 0;
     const from = first > 600 ? body.lastIndexOf("\n\n", first) + 2 : 0;
-    const out = body
-      .slice(from, from + 2400)
-      .split(/\n{2,}/)
-      .map((x) => plainText(x).trim())
-      .filter(Boolean)
-      .slice(0, 8);
+    const out = previewLines(body.slice(from, from + 2400)).slice(0, 14);
     return from > 0 ? ["…", ...out] : out;
+  };
+
+  /** Notes with a conflict copy beside them, by the note: Ctrl K marks them "to settle". */
+  const [clashes] = createResource(async () => {
+    const all = await (await api()).conflicts().catch(() => [] as Conflict[]);
+    return new Map(all.map((c) => [c.original, c]));
+  });
+  const clash = (id: number) => clashes()?.get(id);
+  const settle = (c: Conflict) => {
+    const go = p.onSettle;
+    p.onClose();
+    go?.(c);
   };
 
   /** A note named in an answer, `[[Title]]`: click it to open it. */
@@ -418,8 +430,10 @@ export default function CommandBar(p: {
                     ) : r.kind === "note" ? (
                       <>
                         <span class="row-icon">¶</span>
-                        <span class="row-label">{r.n.folder === "inbox" ? r.n.preview.split("\n")[0] || r.n.title : r.n.title}</span>
-                        <span class="row-sub">{folderName(r.n.folder)}</span>
+                        <span class="row-label">{r.n.folder === "inbox" ? r.n.preview.split("\n")[0] || r.n.title : listName(r.n)}</span>
+                        <Show when={clash(r.n.id)} fallback={<span class="row-sub">{folderName(r.n.folder)}</span>}>
+                          <span class="row-sub row-settle">to settle</span>
+                        </Show>
                       </>
                     ) : (
                       <>
@@ -443,13 +457,29 @@ export default function CommandBar(p: {
                   <p class="peek-meta">
                     {folderName(n().folder)} · edited {ago(n().at)}
                   </p>
-                  <h2 class="peek-title">{n().folder === "inbox" ? "A capture" : n().title}</h2>
-                  <For each={paragraphs()}>
-                    {(para) => (
-                      <p class="peek-text">
-                        <For each={pieces(para)}>{(x) => (x.on ? <mark>{x.t}</mark> : x.t)}</For>
+                  <Show when={clash(n().id)}>
+                    {(c) => (
+                      <p class="peek-clash">
+                        <span>Changed in two places, {ago(c().copiedAt)}</span>
+                        <Show when={p.onSettle}>
+                          <button type="button" class="link" onMouseDown={(e) => (e.preventDefault(), settle(c()))}>
+                            Settle it
+                          </button>
+                        </Show>
                       </p>
                     )}
+                  </Show>
+                  <h2 class="peek-title">{n().folder === "inbox" ? "A capture" : listName(n())}</h2>
+                  <For each={lines()}>
+                    {(l) =>
+                      l === "…" ? (
+                        <p class="peek-text muted">…</p>
+                      ) : (
+                        <p class={`peek-text peek-${l.kind}`} style={l.depth ? { "padding-left": `${l.depth * 18}px` } : undefined}>
+                          <For each={pieces(l.text)}>{(x) => (x.on ? <mark>{x.t}</mark> : x.t)}</For>
+                        </p>
+                      )
+                    }
                   </For>
                 </article>
               )}

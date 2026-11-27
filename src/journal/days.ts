@@ -40,6 +40,26 @@ export function dayTitle(day: string, now = new Date()): string {
   });
 }
 
+/** A day as a list names it: `Today · Fri 27 Nov`, `Yesterday · Thu 26 Nov`, `Tomorrow · …`, else `Mon 23 Nov`
+ * (the year too when it is not this one). The file stays `journal/2026-11-27.md`; only the words change. */
+export function dayName(day: string, now = new Date()): string {
+  const d = parseDay(day);
+  if (!d) return day;
+  const short = d.toLocaleDateString("en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: d.getFullYear() === now.getFullYear() ? undefined : "numeric",
+  }).replace(",", "");
+  const off = Math.round((d.getTime() - parseDay(dayOf(now))!.getTime()) / 86_400_000);
+  const near = off === 0 ? "Today" : off === -1 ? "Yesterday" : off === 1 ? "Tomorrow" : "";
+  return near ? `${near} · ${short}` : short;
+}
+
+/** A note's name in a list: a day's page by its day, any other note by its title. */
+export const listName = (n: { folder: string; title: string }, now = new Date()) =>
+  isDayNote(n.folder, n.title) ? dayName(n.title, now) : n.title;
+
 /** `21:14` now. */
 export function clock(d = new Date()): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;

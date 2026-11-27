@@ -6,7 +6,7 @@
 import { createSignal, For, Show } from "solid-js";
 import { parts } from "../blanks";
 import { kindOf } from "../library/Card";
-import Mark, { hueClass } from "../library/Mark";
+import { hueClass } from "../library/Mark";
 import { folderName } from "../ui";
 import BlankFields, { createBlanks, type BlankKind } from "./BlankFields";
 
@@ -82,80 +82,74 @@ export default function FillBlanks(p: {
         }
       }}
     >
-      <div class="fill-main">
-        <div class="fill-head">
-          <button type="button" class="btn small fill-back" onClick={p.onClose}>
-            ← Back <kbd>Esc</kbd>
-          </button>
-          <Show when={p.folder}>
-            <span class="lcard-where">
-              <Mark folder={p.folder!} size={12} />
-              {folderName(p.folder!)}
-            </span>
-          </Show>
-          <span class="fill-title">{p.title}</span>
-          <Show when={p.versionName}>
-            <span class="scard-badge">{p.versionName}</span>
-          </Show>
+      {/* The 0.4 layout, quieter: the text on the left with its blanks marked in it, plain fields on the right, and
+          the keys in one line at the foot instead of a legend and two big buttons. */}
+      <div class="fill-split-body">
+        <div class="fill-main">
+          <div class="fill-head">
+            <Show when={p.folder}>
+              <span class="fill-where">{folderName(p.folder!)} ·</span>
+            </Show>
+            <span class="fill-title">{p.title}</span>
+            <Show when={p.versionName}>
+              <span class="fill-where">· {p.versionName}</span>
+            </Show>
+          </div>
+          <div class="fill-text" classList={{ code: isCode() }}>
+            <For each={parts(p.text)}>
+              {(x) => {
+                if (!x.blank) return x.text;
+                const k = () => kind(x.text);
+                const v = () => value(x.text);
+                const shown = () => {
+                  const t = v() || x.text;
+                  return t.length > 160 ? `${t.slice(0, 160)}…` : t;
+                };
+                return (
+                  <button
+                    type="button"
+                    class={`fill-blank state-${k()}`}
+                    classList={{ active: activeBlank() === x.text }}
+                    title={`Fill in ${x.text}`}
+                    onClick={() => focusBlank(x.text)}
+                    onMouseEnter={() => setActiveBlank(x.text)}
+                  >
+                    {shown()}
+                  </button>
+                );
+              }}
+            </For>
+          </div>
         </div>
-        <div class="fill-text" classList={{ code: isCode() }}>
-          <For each={parts(p.text)}>
-            {(x) => {
-              if (!x.blank) return x.text;
-              const k = () => kind(x.text);
-              const v = () => value(x.text);
-              const shown = () => {
-                const t = v() || x.text;
-                return t.length > 160 ? `${t.slice(0, 160)}…` : t;
-              };
-              return (
-                <button
-                  type="button"
-                  class={`blank-chip state-${k()}`}
-                  classList={{ filled: k() !== "unfilled", active: activeBlank() === x.text }}
-                  title={`Jump to ${x.text}`}
-                  onClick={() => focusBlank(x.text)}
-                  onMouseEnter={() => setActiveBlank(x.text)}
-                >
-                  {shown()}
-                </button>
-              );
-            }}
-          </For>
-        </div>
-        <div class="fill-legend">
-          <span>Click any chip to jump to its field.</span>
-          <span class="blank-legend-dots">
-            <span><i class="bdot is-empty" /> empty</span>
-            <span><i class="bdot is-auto" /> auto / default</span>
-            <span><i class="bdot is-typed" /> typed</span>
-          </span>
-        </div>
+        <aside class="fill-side" ref={sideEl} aria-label="Blanks">
+          <BlankFields
+            state={state}
+            side
+            initialBlank={p.initialBlank}
+            activeBlank={activeBlank()}
+            onActiveBlank={setActiveBlank}
+            selectionApp={p.targetApp}
+            onClearSelection={p.onClearSelection}
+          />
+        </aside>
       </div>
-      <aside class="fill-side" ref={sideEl}>
-        <div class="side-head">Fill in ({state.list().length})</div>
-        <BlankFields
-          state={state}
-          side
-          initialBlank={p.initialBlank}
-          activeBlank={activeBlank()}
-          onActiveBlank={setActiveBlank}
-          selectionApp={p.targetApp}
-          onClearSelection={p.onClearSelection}
-        />
-        <span class="grow" />
+      <footer class="fill-foot">
+        <span class="fill-key">
+          <kbd>Tab</kbd> next
+        </span>
+        <button type="submit" class="fill-key" classList={{ main: !(p.targetApp && p.onPaste) }}>
+          <kbd>Enter</kbd> {(p.action ?? "Copy").toLowerCase()}
+        </button>
         <Show when={p.targetApp && p.onPaste}>
-          <button type="button" class="btn primary wide big" onClick={() => done(true, false)}>
-            Paste into {p.targetApp} <kbd>Ctrl ↵</kbd>
+          <button type="button" class="fill-key main" onClick={() => done(true, false)}>
+            <kbd>Ctrl Enter</kbd> paste into {p.targetApp}
           </button>
         </Show>
-        <button type="submit" class={p.targetApp && p.onPaste ? "btn wide" : "btn primary wide big"}>
-          {p.action ?? "Copy"} <kbd>Enter</kbd>
+        <span class="grow" />
+        <button type="button" class="fill-key" onClick={p.onClose}>
+          <kbd>Esc</kbd> back
         </button>
-        <span class="muted small center">
-          <kbd>Tab</kbd> next · <kbd>↑</kbd> earlier · <kbd>Esc</kbd> back
-        </span>
-      </aside>
+      </footer>
     </form>
   );
 

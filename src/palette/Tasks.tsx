@@ -1,19 +1,25 @@
-// Open tasks: every unticked `- [ ]` in every note (the engine reads them all, not only recent ones). Tasks with a
-// day (`@fri`, `@nov20`) come first, under Overdue, Today, This week and Later; the rest are grouped by note, the
-// most recently changed first. x ticks one in its file (z or the toast puts it back), Enter opens the
-// note, typing narrows the list.
+// Open tasks: every unticked `- [ ]` in every note, rendered right inside the workspace list pane beside the
+// selected task's live note (no modal trap!). Tasks with a day (`@fri`, `@nov20`) come first under Overdue, Today,
+// This week and Later; the rest are grouped by note. x ticks one in its file with undo; clicking or Enter selects
+// its note right beside the list so you never lose your place.
 
-import { createMemo, createSignal, For, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 import { api, errText, type OpenTask } from "../api";
-import { folderName, KeyHints, say } from "../ui";
-import { dayTitle, dueGroup, dueOf, JOURNAL, today, type DueGroup } from "../journal/days";
+import { dayTitle, dueGroup, dueOf, JOURNAL, listName, today, type DueGroup } from "../journal/days";
+import { folderName, say, typing } from "../ui";
 
 const GROUPS: Record<DueGroup, string> = { overdue: "Overdue", today: "Today", week: "This week", later: "Later" };
-
-/** When a task was written, for its weekday words: the day of its page, or when its note last changed. */
 const writtenOn = (t: OpenTask) => (t.folder === JOURNAL && /^\d{4}-\d{2}-\d{2}$/.test(t.title) ? new Date(`${t.title}T12:00`) : new Date(t.modifiedAt));
 
-export default function Tasks(p: { onClose(): void; onOpen(id: number): void; onTicked(noteId: number): void }) {
+export default function Tasks(p: {
+  /** Bumped when notes change so open tasks refresh. */
+  rev?: number;
+  /** Currently open note id, highlighted in the task list. */
+  activeNoteId?: number | null;
+  onSelect(noteId: number): void;
+  onTicked(noteId: number): void;
+  onClose?: () => void;
+}) {
   let input!: HTMLInputElement;
   const [tasks, setTasks] = createSignal<OpenTask[] | null>(null);
   const [q, setQ] = createSignal("");
@@ -21,26 +27,25 @@ export default function Tasks(p: { onClose(): void; onOpen(id: number): void; on
 
   const load = async () => {
     try {
-      setTasks(await (await api()).openTasks());
+      const list = await (await api()).openTasks();
+      setTasks(list);
+      // Select the first task's note automatically if no note is open yet
+      if (!p.activeNoteId && list.length) p.onSelect(list[0].noteId);
     } catch (e) {
       setTasks([]);
       say(errText(e), { error: true });
     }
   };
-  onMount(() => {
-    input.focus();
-    void load();
-  });
+  onMount(() => void load());
+  createEffect(on(() => p.rev, () => void load(), { defer: true }));
 
   const due = (t: OpenTask) => dueOf(t.text, writtenOn(t));
-  /** Dated tasks first, soonest first; then the rest in the engine's order (newest note first). */
   const shown = createMemo(() => {
     const words = q().toLowerCase().split(/\s+/).filter(Boolean);
     const all = (tasks() ?? []).filter((t) => words.every((w) => `${t.text} ${t.title} ${t.folder}`.toLowerCase().includes(w)));
     const dated = all.filter((t) => due(t)).sort((a, b) => due(a)!.localeCompare(due(b)!));
     return [...dated, ...all.filter((t) => !due(t))];
   });
-  /** Rows under a day group (Overdue, Today…) or, without a day, under their note. */
   const groups = createMemo(() => {
     const now = today();
     const out: { key: string; noteId: number | null; title: string; folder: string; rows: { t: OpenTask; k: number }[] }[] = [];
@@ -75,74 +80,108 @@ export default function Tasks(p: { onClose(): void; onOpen(id: number): void; on
     }
   }
 
-  const key = (e: KeyboardEvent) => {
+  const onKey = (e: KeyboardEvent) => {
+    if (document.querySelector(".scrim") || e.altKey) return;
+    if (typing(e)) {
+      if (e.target === input && (e.key === "ArrowDown" || e.key === "Enter")) {
+        e.preventDefault();
+        input.blur();
+        const t = shown()[0];
+        if (t) (setI(0), p.onSelect(t.noteId));
+      } else if (e.target === input && e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        setQ("");
+        input.blur();
+      }
+      return;
+    }
+    if (e.ctrlKey || e.metaKey) return;
     const n = shown().length;
-    if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) setI((i() + 1) % Math.max(1, n));
-    else if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p")) setI((i() + n - 1) % Math.max(1, n));
-    else if (e.key === "Enter") {
-      const t = shown()[i()];
-      if (t) (p.onClose(), p.onOpen(t.noteId));
-    } else if (e.key === "Escape") p.onClose();
-    // x ticks; with words typed, Ctrl X does (x is a letter you may be typing).
-    else if ((e.key === "x" && !q()) || (e.ctrlKey && e.key.toLowerCase() === "x")) void tick(shown()[i()]);
-    else return;
+    if (e.key === "ArrowDown" || e.key === "j") {
+      if (!n) return;
+      const next = (i() + 1) % n;
+      setI(next);
+      p.onSelect(shown()[next].noteId);
+    } else if (e.key === "ArrowUp" || e.key === "k") {
+      if (!n) return;
+      const next = (i() + n - 1) % n;
+      setI(next);
+      p.onSelect(shown()[next].noteId);
+    } else if (e.key === "x") {
+      void tick(shown()[i()]);
+    } else if (e.key === "/") {
+      input.focus();
+    } else return;
     e.preventDefault();
     e.stopPropagation();
   };
+  onMount(() => document.addEventListener("keydown", onKey));
+  onCleanup(() => document.removeEventListener("keydown", onKey));
 
   return (
-    <div class="scrim top" onMouseDown={(e) => e.target === e.currentTarget && p.onClose()}>
-      <div class="palette tasks" role="dialog" aria-label="Open tasks">
-        <div class="palette-field">
-          <span class="spark">☐</span>
-          <input class="palette-input" ref={input} placeholder="Open tasks in every note. Type to narrow…" value={q()} onInput={(e) => (setQ(e.currentTarget.value), setI(0))} onKeyDown={key} />
-          <span class="muted small nowrap">{tasks() ? `${shown().length} open` : ""}</span>
-        </div>
-        <div class="palette-list">
-          <For each={groups()}>
-            {(g) => (
-              <section class="task-group">
-                <Show
-                  when={g.noteId !== null}
-                  fallback={
-                    <h4 class="task-due" classList={{ overdue: g.key === "overdue" }}>
-                      {g.title}
-                    </h4>
-                  }
-                >
-                  <button class="task-note" onClick={() => (p.onClose(), p.onOpen(g.noteId!))}>
-                    <span>{g.folder === "inbox" ? "A capture" : g.title}</span>
-                    <span class="row-sub">{folderName(g.folder)}</span>
-                  </button>
-                </Show>
-                <For each={g.rows}>
-                  {(r) => (
-                    <div class="palette-row task-row" classList={{ on: r.k === i() }} onMouseMove={() => setI(r.k)}>
-                      <button class="task-box" title="Tick it (x)" aria-label={`Tick ${r.t.text}`} onClick={() => void tick(r.t)} />
-                      <span class="row-label" onClick={() => (p.onClose(), p.onOpen(r.t.noteId))}>
-                        {r.t.text}
-                      </span>
+    <section class="ws-list tasks-pane" aria-label="Open tasks">
+      <div class="ws-list-head">
+        <h2>Open tasks</h2>
+        <span class="muted small">{tasks() ? shown().length : ""}</span>
+      </div>
+      <label class="lib-filter ws-filter">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+          <circle cx="11" cy="11" r="7" />
+          <path d="m20 20-3.5-3.5" />
+        </svg>
+        <input ref={input} placeholder="Filter tasks…" aria-label="Filter open tasks" value={q()} onInput={(e) => (setQ(e.currentTarget.value), setI(0))} />
+        <kbd>/</kbd>
+      </label>
+      <div class="ws-list-rows">
+        <For each={groups()}>
+          {(g) => (
+            <section class="task-group">
+              <Show
+                when={g.noteId !== null}
+                fallback={
+                  <h4 class="task-due" classList={{ overdue: g.key === "overdue" }}>
+                    {g.title}
+                  </h4>
+                }
+              >
+                <button type="button" class="task-note" onClick={() => p.onSelect(g.noteId!)}>
+                  <span>{g.folder === "inbox" ? "A capture" : listName(g)}</span>
+                  <span class="row-sub">{folderName(g.folder)}</span>
+                </button>
+              </Show>
+              <For each={g.rows}>
+                {(r) => (
+                  <div
+                    class="ws-task-row"
+                    classList={{ on: r.k === i() || p.activeNoteId === r.t.noteId }}
+                    onClick={() => (setI(r.k), p.onSelect(r.t.noteId))}
+                  >
+                    <button
+                      type="button"
+                      class="task-box"
+                      title="Tick task (x)"
+                      aria-label={`Tick ${r.t.text}`}
+                      onClick={(e) => (e.stopPropagation(), void tick(r.t))}
+                    />
+                    <div class="ws-task-body">
+                      <span class="ws-task-text">{r.t.text}</span>
                       <Show when={g.noteId === null}>
-                        <span class="row-sub">
-                          {dayTitle(due(r.t)!)} · {r.t.folder === "inbox" ? "a capture" : r.t.title}
+                        <span class="ws-task-sub">
+                          {dayTitle(due(r.t)!)} · {r.t.folder === "inbox" ? "capture" : listName(r.t)}
                         </span>
                       </Show>
                     </div>
-                  )}
-                </For>
-              </section>
-            )}
-          </For>
-          <Show when={tasks() && !shown().length}>
-            <p class="muted pad">{q() ? "No open task has those words." : "No open tasks. Every box is ticked."}</p>
-          </Show>
-        </div>
-        <footer class="picker-foot">
-          <KeyHints hints={[["↑ ↓", "move"], ["x", "tick"], ["Enter", "open the note"]]} />
-          <span class="grow" />
-          <KeyHints hints={[["Esc", "back"]]} />
-        </footer>
+                  </div>
+                )}
+              </For>
+            </section>
+          )}
+        </For>
+        <Show when={tasks() && !shown().length}>
+          <p class="muted pad">{q() ? "No open task matches." : "No open tasks. Every box is ticked."}</p>
+        </Show>
       </div>
-    </div>
+    </section>
   );
 }

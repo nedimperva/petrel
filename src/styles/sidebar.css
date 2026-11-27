@@ -89,10 +89,8 @@
 .side-head {
   margin: var(--s-4) 0 4px;
   padding: 0 10px;
-  font-size: var(--t-xs);
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-size: var(--t-sm);
+  font-weight: 400;
   color: var(--muted);
 }
 .side-row {
