@@ -63,6 +63,8 @@ export default function Destination(p: {
   what?: string;
   /** The folder it is in now: shown, and not offered. */
   from?: string;
+  /** When set, renders as a lightweight anchored popover instead of a full-screen dimmed modal. */
+  anchored?: { x: number; y: number };
   onPick(t: Target): void;
   onClose(): void;
 }) {
@@ -109,8 +111,17 @@ export default function Destination(p: {
   const show = () => queueMicrotask(() => document.querySelector(".dest .palette-row.on")?.scrollIntoView({ block: "nearest" }));
 
   return (
-    <div class="scrim top" onMouseDown={(e) => e.target === e.currentTarget && p.onClose()}>
-      <div class="palette dest" role="dialog" aria-label={p.what ? `Move ${p.what}` : "Where it goes"}>
+    <div
+      class={p.anchored ? "scrim-clear" : "scrim top"}
+      onMouseDown={(e) => e.target === e.currentTarget && p.onClose()}
+    >
+      <div
+        class="palette dest"
+        classList={{ "dest-popover": !!p.anchored }}
+        style={p.anchored ? { left: `${Math.max(12, Math.min(p.anchored.x, innerWidth - 420))}px`, top: `${Math.min(p.anchored.y, innerHeight - 360)}px` } : undefined}
+        role="dialog"
+        aria-label={p.what ? `Move ${p.what}` : "Where it goes"}
+      >
         <div class="dest-field">
           <span class="dest-icon" aria-hidden="true">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">

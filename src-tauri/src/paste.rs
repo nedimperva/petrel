@@ -4,10 +4,10 @@
 
 use std::time::Duration;
 
-/// Hides the picker, waits for the app it came from to have the keyboard again, and pastes there.
+/// Hides the Quick Bar, waits for the app it came from to have the keyboard again, and pastes there.
 #[tauri::command]
 pub async fn paste_into_front(app: tauri::AppHandle, shift: bool) -> Result<(), String> {
-    crate::warm::hide(&app, "picker");
+    crate::warm::hide(&app, "quickbar");
     tauri::async_runtime::spawn_blocking(move || {
         // The window manager gives focus back on its own; this is the time it takes, with room to spare.
         std::thread::sleep(Duration::from_millis(180));

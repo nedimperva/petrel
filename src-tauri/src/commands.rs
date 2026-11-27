@@ -75,12 +75,12 @@ pub fn show_window(state: State<AppState>, window: tauri::WebviewWindow) {
     crate::arrange(&window);
 }
 
-/// The capture window saved its draft and is done. With a tray Petrel keeps running there. Without one, if the
+/// The Quick Bar saved its capture and is done. With a tray Petrel keeps running there. Without one, if the
 /// main window was never shown, nothing would be left on screen, so Petrel quits rather than lingering unseen.
 #[tauri::command]
 pub fn close_capture(state: State<AppState>, app: tauri::AppHandle) {
     use tauri::Emitter;
-    crate::warm::hide(&app, "capture");
+    crate::warm::hide(&app, "quickbar");
     let _ = app.emit_to("main", "petrel-changed", ());
     if state.tray.load(Ordering::SeqCst) {
         return;
@@ -213,10 +213,10 @@ pub fn open_picker_window(app: tauri::AppHandle) {
     crate::open_picker(&app);
 }
 
-/// The picker copied (or was dismissed) and is done.
+/// The Quick Bar copied (or was dismissed) and is done.
 #[tauri::command]
 pub fn close_picker(app: tauri::AppHandle) {
-    crate::warm::hide(&app, "picker");
+    crate::warm::hide(&app, "quickbar");
 }
 
 /// "Open in Petrel" from the picker: the main window shows the note.

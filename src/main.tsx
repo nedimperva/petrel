@@ -7,7 +7,7 @@ import "@fontsource/jetbrains-mono/400.css";
 import "@fontsource/ia-writer-quattro/400.css";
 import "@fontsource/ia-writer-quattro/400-italic.css";
 import "@fontsource/ia-writer-quattro/700.css";
-// Every window's styles; the main window's own come with App.tsx, so the capture window and the picker load less.
+// Every window's styles; the main window's own come with App.tsx, so the Quick Bar loads less.
 import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/page.css";
@@ -15,15 +15,18 @@ import "./styles/overlays.css";
 import "./styles/windows.css";
 import "./styles/looks.css";
 
-// The capture and picker windows are the same page with a flag set by their window builders; `?capture` and
-// `?picker` stand in for them in `npm run dev`.
+// The unified Quick Bar serves both Capture and Copy (`petrel --capture`, `petrel --picker`, or `?capture` / `?picker` in dev).
 const search = new URLSearchParams(location.search);
-const capture = "__PETREL_CAPTURE__" in window || search.has("capture");
-const picker = "__PETREL_PICKER__" in window || search.has("picker");
-document.documentElement.dataset.window = capture ? "capture" : picker ? "picker" : "main";
-// The window title is what Hyprland matches the capture window and the picker by (src-tauri/src/hypr.rs).
-document.title = capture ? "Petrel capture" : picker ? "Petrel picker" : "Petrel";
+const quickbar =
+  "__PETREL_QUICKBAR__" in window ||
+  "__PETREL_CAPTURE__" in window ||
+  "__PETREL_PICKER__" in window ||
+  search.has("quickbar") ||
+  search.has("capture") ||
+  search.has("picker");
+document.documentElement.dataset.window = quickbar ? "quickbar" : "main";
+// The window title is what Hyprland matches the Quick Bar by (src-tauri/src/hypr.rs).
+document.title = quickbar ? "Petrel quick bar" : "Petrel";
 
-// Each window loads only its own screens: the capture window and the picker never load the library or Settings.
-const root = capture ? import("./Capture") : picker ? import("./Picker") : import("./App");
+const root = quickbar ? import("./QuickBar") : import("./App");
 void root.then(({ default: Screen }) => render(() => <Screen />, document.getElementById("root")!));

@@ -231,8 +231,9 @@ export function fakeApi(): Api {
           : [],
       ),
     // In the browser a page is opened when it is asked for, so it starts at once.
-    windowReady: () => wait(true),
+    windowReady: () => wait(location.search.includes("capture") ? "capture" : "copy"),
     onOpenWindow: () => wait(undefined),
+    onQuickBarMode: () => wait(undefined),
     showNoteInMain: () => wait(undefined),
     copyText: async (text, html) => {
       try {

@@ -1481,3 +1481,268 @@
   padding: 26px 34px 34px;
 }
 
+/* ---- unified workspace list, inline Copy card, 1-click Inbox triage, and in-workspace Tasks --------------- */
+
+.ws-list {
+  width: clamp(248px, 24vw, 310px);
+  flex: none;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--line);
+  background: var(--paper);
+}
+.ws-list-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: var(--s-3) var(--s-3) var(--s-2);
+}
+.ws-list-head h2 {
+  margin: 0;
+  font: 600 var(--t-rd) / 1.3 var(--font-ui);
+}
+.ws-list-head .mark.tile {
+  width: 22px;
+  height: 22px;
+  color: var(--hue);
+}
+.ws-filter {
+  flex: none;
+  height: 32px;
+  margin: 0 var(--s-2) var(--s-2);
+  padding: 0 9px;
+  border-radius: var(--r-md);
+}
+.ws-list-chips {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 0 var(--s-2) var(--s-2);
+}
+.ws-list-rows {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px var(--s-2) var(--s-3);
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ws-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 9px;
+  border-radius: var(--r-md);
+  text-align: left;
+  cursor: pointer;
+}
+.ws-row:hover {
+  background: var(--hover);
+}
+.ws-row.on {
+  background: var(--accent-soft);
+}
+.ws-row.picked {
+  background: var(--accent-wash);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.ws-row.conflict {
+  flex-direction: column;
+  gap: 2px;
+  border: 1px dashed var(--line-strong);
+  margin-bottom: 4px;
+}
+.ws-row .sel-check {
+  margin-top: 2px;
+}
+.ws-row:hover .sel-check,
+.ws-row.picked .sel-check {
+  opacity: 1;
+}
+.ws-row-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ws-row-top {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.ws-row-title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-md);
+  font-weight: 500;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ws-row-meta {
+  flex: none;
+  font-size: var(--t-xs);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.ws-row-sub {
+  font-size: var(--t-xs);
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ws-batch-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px var(--s-2);
+  border-top: 1px solid var(--line);
+  background: var(--accent-wash);
+}
+
+/* In-workspace Open Tasks rows */
+.ws-task-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: var(--r-md);
+  cursor: pointer;
+}
+.ws-task-row:hover {
+  background: var(--hover);
+}
+.ws-task-row.on {
+  background: var(--accent-soft);
+}
+.ws-task-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ws-task-text {
+  font-size: var(--t-md);
+  line-height: 1.35;
+  color: var(--ink);
+}
+.ws-task-sub {
+  font-size: var(--t-xs);
+  color: var(--muted);
+}
+
+/* Direct Inline Copy Card & 1-Click Inbox Triage Stage */
+.lsheet.direct-sheet {
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--paper);
+  animation: none;
+}
+.direct-sheet-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: var(--s-6) var(--s-5) var(--s-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+.direct-sheet-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s-3);
+}
+.direct-sheet-title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.direct-sheet-head-acts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+.direct-sheet-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.direct-copy-card {
+  padding: var(--s-5);
+  border-radius: var(--r-lg);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-sm);
+  transition: border-color var(--d-fast) var(--ease), box-shadow var(--d-fast) var(--ease);
+}
+.direct-copy-card.flash {
+  animation: card-copy-flash 750ms var(--ease);
+}
+.inbox-capture-text {
+  font: 400 19px / 1.7 var(--font-write);
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.direct-sheet-bar {
+  flex: none;
+  border-top: 1px solid var(--line);
+  background: var(--sunk);
+  padding: var(--s-3) var(--s-5);
+}
+.direct-copy-actions,
+.inbox-triage-bar {
+  max-width: 760px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.direct-copy-actions {
+  flex-direction: row;
+  align-items: center;
+}
+.triage-sugg,
+.triage-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.inbox-clear-stage {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-3);
+  padding: var(--s-6);
+  text-align: center;
+}
+.review-clear-title {
+  margin: 0;
+  font: 500 24px / 1.25 var(--font-write);
+  color: var(--ink);
+}
+

@@ -600,3 +600,89 @@ button.fill-key:hover {
   color: var(--muted);
   font-size: var(--t-sm);
 }
+
+/* ---- unified Global Quick Bar (Copy + Capture in one frameless window) ------------------------------------ */
+
+.quickbar {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  box-sizing: border-box;
+  overflow: hidden;
+}
+.quickbar.leaving > * {
+  visibility: hidden;
+}
+.qb-top {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 8px var(--s-3);
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+}
+.qb-mode-seg {
+  flex: none;
+}
+.qb-search-wrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+.qb-search {
+  flex: 1;
+  min-width: 0;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 2px 4px !important;
+  font-size: var(--t-md) !important;
+}
+.qb-cap-bar {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+.qb-peek-inner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  height: 100%;
+}
+.qb-run {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  height: 100%;
+}
+.qb-capture {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+}
+.qb-capture.away {
+  display: none;
+}
+.qb-dest-strip {
+  flex: none;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px var(--s-3);
+  border-top: 1px solid var(--line);
+  background: var(--sunk);
+}
+:root[data-window="quickbar"] body {
+  background: transparent;
+}
