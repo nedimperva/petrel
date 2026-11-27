@@ -781,17 +781,31 @@ export default function QuickBar() {
     applyPrefs(parsePrefs(settings));
     void refetch();
     void loadUsed().then(setUsed, () => {});
-    const [pCtx, cCtx] = await Promise.all([s.pickerContext().catch(() => null), s.captureContext().catch(() => null)]);
-    const merged = pCtx?.text || pCtx?.app ? pCtx : cCtx;
-    setCtx(merged);
-    if (merged?.app) setHere(await s.copyCountsIn(merged.app).catch(() => ({})));
+    const ctxPromise = Promise.all([s.pickerContext().catch(() => null), s.captureContext().catch(() => null)]);
     await s.showWindow();
     if (m === "capture") {
-      await bootCapture(settings, merged);
+      await bootCapture(settings, null);
       editor?.view.focus();
     } else {
       searchInput?.focus();
     }
+    void ctxPromise.then(async ([pCtx, cCtx]) => {
+      const merged = pCtx?.text || pCtx?.app ? pCtx : cCtx;
+      setCtx(merged);
+      if (merged?.app) setHere(await s.copyCountsIn(merged.app).catch(() => ({})));
+      if (merged && editor) {
+        const quote = quoteBlock(merged);
+        if (quote && (earlier() !== null || !editor.text())) {
+          if (earlier() !== null) editor.insert(quote, false);
+          else {
+            editor.insert(quote, true);
+            editor.select(quote.length, quote.length);
+            quoteText = quote;
+          }
+          setQuoted(true);
+        }
+      }
+    });
     await s.listen({ quit: () => void closeActive(), openNote: () => {}, focus: () => {}, changed: () => {} });
     await s.onQuickBarMode?.((next) => void switchMode(next === "capture" ? "capture" : "copy"));
     if ("__TAURI_INTERNALS__" in window) {

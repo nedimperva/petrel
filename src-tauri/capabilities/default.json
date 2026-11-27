@@ -1,11 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "What the main, capture and picker windows may do.",
+  "description": "What the main window and unified Quick Bar may do.",
   "windows": [
     "main",
-    "capture",
-    "picker"
+    "quickbar"
   ],
   "permissions": [
     "core:default",

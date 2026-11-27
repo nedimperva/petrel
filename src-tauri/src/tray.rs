@@ -11,8 +11,8 @@ use tauri::{Emitter, Manager};
 use crate::AppState;
 
 pub fn build(app: &tauri::App) -> Result<()> {
-    let new = MenuItem::with_id(app, "picker", "Quick picker…", true, None::<&str>)?;
-    let capture = MenuItem::with_id(app, "capture", "Capture…", true, None::<&str>)?;
+    let capture = MenuItem::with_id(app, "capture", "Quick Bar · Capture…", true, None::<&str>)?;
+    let new = MenuItem::with_id(app, "picker", "Quick Bar · Copy…", true, None::<&str>)?;
     let show = MenuItem::with_id(app, "show", "Show Petrel", true, None::<&str>)?;
     let pause = CheckMenuItem::with_id(app, "pause", "Pause hotkeys", true, false, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Petrel", true, None::<&str>)?;
